@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import path from 'path';
 import http from 'http';
+import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
@@ -8,10 +9,13 @@ import cookieParser from 'cookie-parser';
 import { RequestHandler } from 'express';
 import { initDb } from '@mspi/shared-db';
 import { authenticateToken } from '@mspi/shared-auth';
-import { setDbAvailable } from './store';
-import { initWs } from './ws';
-import sessionRoutes from './routes/sessions';
-import productRoutes from './routes/products';
+import { setDbAvailable } from './store.js';
+import { initWs } from './ws.js';
+import sessionRoutes from './routes/sessions.js';
+import productRoutes from './routes/products.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3002;

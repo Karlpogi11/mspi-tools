@@ -1,11 +1,17 @@
 import 'dotenv/config';
+import { existsSync } from 'fs';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { initDb } from '@mspi/shared-db';
-import authRoutes from './routes/auth';
-import toolsRoutes from './routes/tools';
-import adminRoutes from './routes/admin';
+import authRoutes from './routes/auth.js';
+import toolsRoutes from './routes/tools.js';
+import adminRoutes from './routes/admin.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +32,16 @@ app.use('/api/admin', adminRoutes);
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
+
+const frontendDist = path.resolve(__dirname, 'public');
+const frontendIndex = path.join(frontendDist, 'index.html');
+
+if (existsSync(frontendIndex)) {
+  app.use(express.static(frontendDist));
+  app.get('*', (_req, res) => {
+    res.sendFile(frontendIndex);
+  });
+}
 
 async function start() {
   try {

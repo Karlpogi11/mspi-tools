@@ -10,7 +10,11 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
-    "build": "npm exec --workspace=@mspi/pcount-frontend -- tsc -b && npm exec --workspace=@mspi/pcount-frontend -- vite build && npm exec --workspace=@mspi/pcount-backend -- tsc && mkdir -p apps/pcount/backend/dist && rm -rf apps/pcount/backend/dist/public && mkdir -p apps/pcount/backend/dist/public && cp -r apps/pcount/frontend/dist/. apps/pcount/backend/dist/public/ && echo 'BUILD_COMPLETE: backend dist contents:' && ls -la apps/pcount/backend/dist && echo 'BUILD_COMPLETE: public contents:' && ls -la apps/pcount/backend/dist/public",
+    "build:shared": "npm exec --workspace=@mspi/shared-db -- tsc && npm exec --workspace=@mspi/shared-auth -- tsc && echo 'SHARED_BUILD_COMPLETE'",
+    "build:pcount": "npm run build:shared && npm exec --workspace=@mspi/pcount-frontend -- tsc -b && npm exec --workspace=@mspi/pcount-frontend -- vite build && npm exec --workspace=@mspi/pcount-backend -- tsc && mkdir -p apps/pcount/backend/dist && rm -rf apps/pcount/backend/dist/public && mkdir -p apps/pcount/backend/dist/public && cp -r apps/pcount/frontend/dist/. apps/pcount/backend/dist/public/ && echo 'PCOUNT_BUILD_COMPLETE' && ls -la apps/pcount/backend/dist && ls -la apps/pcount/backend/dist/public",
+    "build:rfpu": "npm run build:shared && npm exec --workspace=@mspi/rfpu-frontend -- tsc -b && npm exec --workspace=@mspi/rfpu-frontend -- vite build && npm exec --workspace=@mspi/rfpu-backend -- tsc && echo 'RFPU_BUILD_COMPLETE' && ls -la apps/rfpu/backend/dist && ls -la apps/rfpu/frontend/dist",
+    "build:launcher": "npm run build:shared && npm run build -w @mspi/launcher-backend && echo 'LAUNCHER_BUILD_COMPLETE' && ls -la apps/launcher/backend/dist && ls -la apps/launcher/backend/dist/public",
+    "build": "npm run build:shared && npm run build:pcount && npm run build:rfpu && npm run build:launcher",
     "seed": "npm run seed -w @mspi/launcher-backend",
     "db:push": "npm run db:push -w @mspi/launcher-backend",
     "db:generate": "npm run db:generate -w @mspi/launcher-backend",

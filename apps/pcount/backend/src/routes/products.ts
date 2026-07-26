@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import * as store from '../store';
-import { broadcast, getScannerCountWs } from '../ws';
+import * as store from '../store.js';
+import { broadcast, getScannerCountWs } from '../ws.js';
 
 const router = Router();
 
