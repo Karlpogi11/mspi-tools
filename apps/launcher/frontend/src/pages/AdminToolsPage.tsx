@@ -120,7 +120,7 @@ export default function AdminToolsPage() {
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
                 className="w-full h-9 px-3 text-[14px] border border-[#d2d2d7] rounded-lg bg-white text-[#1d1d1f] outline-none focus:border-[#2563eb]"
-                placeholder="https://rfpu.mspi.io"
+                placeholder="https://pcount.mspi.io"
               />
             </div>
             <div>

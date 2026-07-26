@@ -65,7 +65,7 @@ const demoUser: User = {
 
 const demoTools: Tool[] = [
   { id: 1, name: 'Site Monitor', url: 'https://rfpu.mspi.io', icon: 'monitor', description: 'Real-time site monitoring and performance tracking for RFPU deployments.', roleIds: [2, 3, 4] },
-  { id: 2, name: 'PCount', url: 'http://localhost:5181', icon: 'database', description: 'Weekly merchandise inventory — import system export, scan products, and reconcile counts.', roleIds: [2, 3] },
+  { id: 2, name: 'PCount', url: 'https://pcount.mspi.io', icon: 'database', description: 'Weekly merchandise inventory — import system export, scan products, and reconcile counts.', roleIds: [2, 3] },
   { id: 3, name: 'Reports', url: 'https://reports.mspi.io', icon: 'chart', description: 'GSX-Fixably data reporting and analytics dashboard.', roleIds: [2, 4] },
 ];
 
