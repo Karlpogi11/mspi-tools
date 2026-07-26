@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
-    "build": "cd apps/pcount/frontend && ../../../node_modules/.bin/tsc -b && ../../../node_modules/.bin/vite build && cd ../backend && ../../../node_modules/.bin/tsc && cp -r ../frontend/dist dist/public && cd ../..",
+    "build": "npm exec --workspace=@mspi/pcount-frontend -- tsc -b && npm exec --workspace=@mspi/pcount-frontend -- vite build && npm exec --workspace=@mspi/pcount-backend -- tsc && cp -r apps/pcount/frontend/dist apps/pcount/backend/dist/public",
     "seed": "npm run seed -w @mspi/launcher-backend",
     "db:push": "npm run db:push -w @mspi/launcher-backend",
     "db:generate": "npm run db:generate -w @mspi/launcher-backend",
@@ -19,7 +19,9 @@
   },
   "devDependencies": {
     "turbo": "^2.1.0",
-    "concurrently": "^8.2.2",
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
     "typescript": "^5.5.0",
     "vite": "^5.4.21"
   },
