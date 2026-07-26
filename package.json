@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
-    "build": "npm exec --workspace=@mspi/pcount-frontend -- tsc -b && npm exec --workspace=@mspi/pcount-frontend -- vite build && npm exec --workspace=@mspi/pcount-backend -- tsc && cp -r apps/pcount/frontend/dist apps/pcount/backend/dist/public",
+    "build": "npm exec --workspace=@mspi/pcount-frontend -- tsc -b && npm exec --workspace=@mspi/pcount-frontend -- vite build && npm exec --workspace=@mspi/pcount-backend -- tsc && mkdir -p apps/pcount/backend/dist/public && cp -r apps/pcount/frontend/dist/* apps/pcount/backend/dist/public",
     "seed": "npm run seed -w @mspi/launcher-backend",
     "db:push": "npm run db:push -w @mspi/launcher-backend",
     "db:generate": "npm run db:generate -w @mspi/launcher-backend",
