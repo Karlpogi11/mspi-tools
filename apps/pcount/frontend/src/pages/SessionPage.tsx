@@ -294,25 +294,27 @@ export default function SessionPage() {
             </p>
           </div>
           <div className="flex items-center gap-4">
-            <button
-              onClick={handleExport}
-              disabled={products.length === 0 || exporting}
-              title="Export Excel"
-              aria-label="Export Excel"
-              className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-[#d2d2d7] text-[#15803d] transition-colors hover:bg-[#f0fdf4] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {exporting ? (
-                <span className="text-[11px] text-[#6e6e73]">…</span>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 3h10l4 4v7H4z" fill="currentColor" opacity=".16" />
-                  <path d="M4 3h10l4 4v7H4zM14 3v4h4" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                  <path d="m7 7 3 4m0-4-3 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  <path d="M14 15v5m0 0-2-2m2 2 2-2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-              <span className="sr-only">Export Excel</span>
-            </button>
+            {stage === 'verify' && (
+              <button
+                onClick={handleExport}
+                disabled={products.length === 0 || exporting}
+                title="Export Excel"
+                aria-label="Export Excel"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-[#d2d2d7] text-[#15803d] transition-colors hover:bg-[#f0fdf4] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {exporting ? (
+                  <span className="text-[11px] text-[#6e6e73]">…</span>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 3h10l4 4v7H4z" fill="currentColor" opacity=".16" />
+                    <path d="M4 3h10l4 4v7H4zM14 3v4h4" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                    <path d="m7 7 3 4m0-4-3 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                    <path d="M14 15v5m0 0-2-2m2 2 2-2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+                <span className="sr-only">Export Excel</span>
+              </button>
+            )}
             <div className="text-right text-[13px] text-[#6e6e73]">
               <span className="font-medium text-[#1d1d1f]">{statusCounts.matched}</span> matched
               <br />
