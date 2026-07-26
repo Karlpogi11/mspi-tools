@@ -18,9 +18,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
-    "ws": "^8.21.1"
-  },
-  "devDependencies": {
+    "ws": "^8.21.1",
     "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
@@ -29,5 +27,6 @@
     "@types/ws": "^8.18.1",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0"
-  }
+  },
+  "devDependencies": {}
 }
