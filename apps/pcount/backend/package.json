@@ -7,8 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "npx tsc && cp -r ../frontend/dist dist/public",
     "start": "node dist/index.js",
-    "db:generate": "drizzle-kit generate --config=./drizzle.config.ts",
-    "db:push": "drizzle-kit push --config=./drizzle.config.ts"
+    "db:generate": "npm exec --yes drizzle-kit@0.31.10 -- generate --config=./drizzle.config.ts",
+    "db:push": "npm exec --yes drizzle-kit@0.31.10 -- push --config=./drizzle.config.ts"
   },
   "dependencies": {
     "@mspi/shared-auth": "*",
