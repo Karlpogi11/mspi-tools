@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from 'path';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -32,6 +33,12 @@ app.use('/api/pcount', pcountAuth, productRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', app: 'pcount' });
+});
+
+const frontendDist = path.resolve(__dirname, '../../frontend/dist');
+app.use(express.static(frontendDist));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(frontendDist, 'index.html'));
 });
 
 initWs(server, { allowUnauthenticated: process.env.NODE_ENV === 'development' });
