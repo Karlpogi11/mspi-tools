@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
-    "build": "npm run build -w @mspi/pcount-frontend && npm run build -w @mspi/pcount-backend",
+    "build": "cd apps/pcount/frontend && npx --yes tsc -b && npx --yes vite build && cd ../backend && npx --yes tsc && cp -r ../frontend/dist dist/public && cd ../..",
     "seed": "npm run seed -w @mspi/launcher-backend",
     "db:push": "npm run db:push -w @mspi/launcher-backend",
     "db:generate": "npm run db:generate -w @mspi/launcher-backend",
