@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { eq, isNull } from 'drizzle-orm';
+import rateLimit from 'express-rate-limit';
+import { eq } from 'drizzle-orm';
 import { getDb } from '@mspi/shared-db';
 import { users, roles } from '@mspi/shared-db/schema';
 import { authenticateToken } from '@mspi/shared-auth';
@@ -13,7 +14,38 @@ function getEmailDomain(email: string): string | null {
   return parts.length === 2 ? parts[1].toLowerCase() : null;
 }
 
-router.post('/signup', async (req: Request, res: Response) => {
+function getAllowedDomains(): string[] {
+  const raw = process.env.ALLOWED_EMAIL_DOMAINS || '';
+  return raw.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+}
+
+function formatDomainList(domains: string[]): string {
+  if (domains.length === 0) return '(none configured)';
+  return domains.map((d) => `@${d}`).join(', ');
+}
+
+function isDomainAllowed(domain: string | null, allowed: string[]): boolean {
+  if (!domain || allowed.length === 0) return false;
+  return allowed.includes(domain);
+}
+
+const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many signup attempts. Please try again later.' },
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again later.' },
+});
+
+router.post('/signup', signupLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password, fullName } = req.body;
 
@@ -23,10 +55,12 @@ router.post('/signup', async (req: Request, res: Response) => {
     }
 
     const domain = getEmailDomain(email);
-    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN?.toLowerCase();
+    const allowedDomains = getAllowedDomains();
 
-    if (!domain || !allowedDomain || domain !== allowedDomain) {
-      res.status(403).json({ error: `Only @${allowedDomain} email addresses are allowed` });
+    if (!isDomainAllowed(domain, allowedDomains)) {
+      res.status(403).json({
+        error: `Signup is restricted to ${formatDomainList(allowedDomains)} email addresses`,
+      });
       return;
     }
 
@@ -45,12 +79,7 @@ router.post('/signup', async (req: Request, res: Response) => {
       .$returningId();
 
     const token = jwt.sign(
-      {
-        userId: newUser.id,
-        email,
-        roleId: null,
-        roleName: null,
-      },
+      { userId: newUser.id, email, roleId: null, roleName: null },
       process.env.JWT_SECRET!,
       { expiresIn: '8h' }
     );
@@ -74,7 +103,7 @@ router.post('/signup', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -84,10 +113,12 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const domain = getEmailDomain(email);
-    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN?.toLowerCase();
+    const allowedDomains = getAllowedDomains();
 
-    if (!domain || !allowedDomain || domain !== allowedDomain) {
-      res.status(403).json({ error: `Only @${allowedDomain} email addresses are allowed` });
+    if (!isDomainAllowed(domain, allowedDomains)) {
+      res.status(403).json({
+        error: `Login is restricted to ${formatDomainList(allowedDomains)} email addresses`,
+      });
       return;
     }
 

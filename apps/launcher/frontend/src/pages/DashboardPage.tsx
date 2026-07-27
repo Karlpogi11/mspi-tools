@@ -19,7 +19,10 @@ function ToolIcon({ icon }: { icon: string }) {
   );
 }
 
+import { useAuth } from '../lib/auth';
+
 export default function DashboardPage() {
+  const { user } = useAuth();
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,7 +45,7 @@ export default function DashboardPage() {
       <div className="mb-8">
         <h1 className="text-[24px] font-semibold text-[#1d1d1f]">Internal Tools</h1>
         <p className="text-[14px] text-[#6e6e73] mt-1">
-          Welcome, Admin
+          Welcome, {user?.fullName || user?.email}
         </p>
       </div>
 

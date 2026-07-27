@@ -1,24 +1,16 @@
-import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './lib/auth';
 import Layout from './components/Layout';
+import LoginPage from './pages/LoginPage';
+import PendingApprovalPage from './pages/PendingApprovalPage';
 import DashboardPage from './pages/DashboardPage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import AdminToolsPage from './pages/AdminToolsPage';
-import { enableDemoMode } from './lib/api';
 
-function Startup({ children }: { children: React.ReactNode }) {
-  const [ready, setReady] = useState(false);
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    fetch('/api/auth/me', { credentials: 'include' })
-      .then((res) => {
-        if (res.status === 401) enableDemoMode();
-      })
-      .catch(() => enableDemoMode())
-      .finally(() => setReady(true));
-  }, []);
-
-  if (!ready) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#f5f5f7] flex items-center justify-center">
         <p className="text-[14px] text-[#6e6e73]">Loading...</p>
@@ -26,21 +18,47 @@ function Startup({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (!user) return <Navigate to="/login" replace />;
+
+  if (!user.roleId) return <PendingApprovalPage />;
+
   return <>{children}</>;
 }
 
 export default function App() {
   return (
     <BrowserRouter>
-      <Startup>
+      <AuthProvider>
         <Routes>
+          <Route path="/login" element={<LoginPage />} />
           <Route element={<Layout />}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/admin/users" element={<AdminUsersPage />} />
-            <Route path="/admin/tools" element={<AdminToolsPage />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <DashboardPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <ProtectedRoute>
+                  <AdminUsersPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/tools"
+              element={
+                <ProtectedRoute>
+                  <AdminToolsPage />
+                </ProtectedRoute>
+              }
+            />
           </Route>
         </Routes>
-      </Startup>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

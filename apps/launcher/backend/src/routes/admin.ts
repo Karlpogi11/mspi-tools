@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { eq, isNull } from 'drizzle-orm';
+import { eq, isNull, asc } from 'drizzle-orm';
 import { getDb } from '@mspi/shared-db';
 import { users, roles, tools, roleToolAccess } from '@mspi/shared-db/schema';
 import { authenticateToken, requireAdmin } from '@mspi/shared-auth';
@@ -22,7 +22,7 @@ router.get('/users', async (_req: Request, res: Response) => {
       })
       .from(users)
       .leftJoin(roles, eq(users.role_id, roles.id))
-      .orderBy(users.created_at);
+      .orderBy(asc(isNull(users.role_id)), users.created_at);
 
     res.json(result);
   } catch (error) {
@@ -47,6 +47,17 @@ router.patch('/users/:id/role', async (req: Request, res: Response) => {
     res.json({ message: 'Role updated' });
   } catch (error) {
     console.error('admin update role error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.delete('/users/:id', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    await db.delete(users).where(eq(users.id, Number(req.params.id)));
+    res.json({ message: 'User deleted' });
+  } catch (error) {
+    console.error('admin delete user error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

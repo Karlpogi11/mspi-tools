@@ -123,6 +123,11 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ roleId }),
       }),
+    deleteUser: (userId: number) =>
+      isDemoMode() ? delay({ message: 'User deleted' }) :
+      request<{ message: string }>(`/admin/users/${userId}`, {
+        method: 'DELETE',
+      }),
     getRoles: () =>
       isDemoMode() ? delay(demoRoles) :
       request<Role[]>('/admin/roles'),
