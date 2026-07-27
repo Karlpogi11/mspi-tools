@@ -8,6 +8,10 @@
     "build": "tsc",
     "start": "node dist/index.js"
   },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./routes": { "types": "./dist/routes.d.ts", "default": "./dist/routes.js" }
+  },
   "dependencies": {
     "@mspi/shared-auth": "*",
     "cookie-parser": "^1.4.6",

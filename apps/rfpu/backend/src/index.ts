@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import { authenticateToken } from '@mspi/shared-auth';
+import routes from './routes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -16,13 +16,7 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-app.get('/api/me', authenticateToken, (req, res) => {
-  res.json({ user: req.user });
-});
-
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', app: 'rfpu' });
-});
+app.use('/api', routes);
 
 app.listen(PORT, () => {
   console.log(`RFPU backend running on port ${PORT}`);

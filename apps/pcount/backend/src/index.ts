@@ -6,13 +6,7 @@ import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { RequestHandler } from 'express';
-import { initDb } from '@mspi/shared-db';
-import { authenticateToken } from '@mspi/shared-auth';
-import { setDbAvailable } from './store.js';
-import { initWs } from './ws.js';
-import sessionRoutes from './routes/sessions.js';
-import productRoutes from './routes/products.js';
+import { pcountRouter, initPcount } from './gateway.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,9 +14,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3002;
 const server = http.createServer(app);
-const pcountAuth: RequestHandler = process.env.NODE_ENV === 'development'
-  ? (_req, _res, next) => next()
-  : authenticateToken;
 
 app.use(compression());
 app.use(cors({
@@ -32,8 +23,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 
-app.use('/api/pcount', pcountAuth, sessionRoutes);
-app.use('/api/pcount', pcountAuth, productRoutes);
+app.use('/api/pcount', pcountRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', app: 'pcount' });
@@ -45,18 +35,8 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'));
 });
 
-initWs(server, { allowUnauthenticated: process.env.NODE_ENV === 'development' });
-
 async function start() {
-  try {
-    await initDb();
-    setDbAvailable(true);
-    console.log('Database connected');
-  } catch (error) {
-    console.warn('Database unavailable — using in-memory store (data will be lost on restart)');
-    console.warn('Set DATABASE_URL in backend/.env and restart to use MySQL');
-  }
-
+  await initPcount(server);
   server.listen(PORT, () => {
     console.log(`PCount backend running on port ${PORT}`);
   });

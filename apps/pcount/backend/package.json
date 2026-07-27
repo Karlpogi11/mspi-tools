@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "npx tsc && cp -r ../frontend/dist dist/public",
+    "build": "npx tsc",
     "start": "node dist/index.js",
     "db:generate": "npm exec --yes drizzle-kit@0.31.10 -- generate --config=./drizzle.config.ts",
     "db:push": "npm exec --yes drizzle-kit@0.31.10 -- push --config=./drizzle.config.ts"
+  },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./gateway": { "types": "./dist/gateway.d.ts", "default": "./dist/gateway.js" }
   },
   "dependencies": {
     "@mspi/shared-auth": "*",

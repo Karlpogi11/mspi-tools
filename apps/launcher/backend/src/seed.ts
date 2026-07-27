@@ -28,12 +28,12 @@ async function seed() {
 
   const [rfpuTool] = await db.insert(tools).values({
     name: 'Site Monitor',
-    url: 'https://rfpu.mspi.io',
+    url: '/tools/rfpu',
     icon: 'monitor',
     description: 'Real-time site monitoring and performance tracking for RFPU deployments.',
   }).$returningId();
 
-  console.log('Tool created: Site Monitor (rfpu.mspi.io)');
+  console.log('Tool created: Site Monitor (/tools/rfpu)');
 
   await db.insert(roleToolAccess).values([
     { role_id: pmsRole.id, tool_id: rfpuTool.id },
@@ -42,6 +42,22 @@ async function seed() {
   ]);
 
   console.log('Site Monitor assigned to PMS, CSO, and ENGR roles');
+
+  const [pcountTool] = await db.insert(tools).values({
+    name: 'PCount',
+    url: '/tools/pcount',
+    icon: 'clipboard',
+    description: 'Product counting and inventory management tool.',
+  }).$returningId();
+
+  console.log('Tool created: PCount (/tools/pcount)');
+
+  await db.insert(roleToolAccess).values([
+    { role_id: pmsRole.id, tool_id: pcountTool.id },
+    { role_id: csoRole.id, tool_id: pcountTool.id },
+  ]);
+
+  console.log('PCount assigned to PMS and CSO roles');
   console.log('\nSeed complete!');
   process.exit(0);
 }
