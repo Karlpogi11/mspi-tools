@@ -28,12 +28,12 @@ async function seed() {
 
   const [rfpuTool] = await db.insert(tools).values({
     name: 'Site Monitor',
-    url: '/tools/rfpu',
+    url: '/rfpu',
     icon: 'monitor',
     description: 'Real-time site monitoring and performance tracking for RFPU deployments.',
   }).$returningId();
 
-  console.log('Tool created: Site Monitor (/tools/rfpu)');
+  console.log('Tool created: Site Monitor (/rfpu)');
 
   await db.insert(roleToolAccess).values([
     { role_id: pmsRole.id, tool_id: rfpuTool.id },
@@ -45,12 +45,12 @@ async function seed() {
 
   const [pcountTool] = await db.insert(tools).values({
     name: 'PCount',
-    url: '/tools/pcount',
+    url: '/pcount',
     icon: 'clipboard',
     description: 'Product counting and inventory management tool.',
   }).$returningId();
 
-  console.log('Tool created: PCount (/tools/pcount)');
+  console.log('Tool created: PCount (/pcount)');
 
   await db.insert(roleToolAccess).values([
     { role_id: pmsRole.id, tool_id: pcountTool.id },

@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: '/tools/pcount/',
+  base: '/pcount/',
   server: {
     port: 5181,
     proxy: {

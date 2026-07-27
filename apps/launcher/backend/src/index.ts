@@ -49,11 +49,11 @@ app.get('/api/health', (_req, res) => {
 const publicDir = path.resolve(__dirname, 'public');
 
 for (const tool of tools) {
-  const toolDist = path.resolve(publicDir, 'tools', tool.name);
+  const toolDist = path.resolve(publicDir, tool.name);
   const toolIndex = path.join(toolDist, 'index.html');
   if (existsSync(toolIndex)) {
-    app.use(`/tools/${tool.name}`, express.static(toolDist));
-    app.get(`/tools/${tool.name}/*`, (_req, res) => {
+    app.use(`/${tool.name}`, express.static(toolDist));
+    app.get(`/${tool.name}/*`, (_req, res) => {
       res.sendFile(toolIndex);
     });
   }

@@ -33,7 +33,7 @@ function Layout() {
 
 export default function App() {
   return (
-    <BrowserRouter basename="/tools/pcount">
+    <BrowserRouter basename="/pcount">
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<IndexPage />} />
