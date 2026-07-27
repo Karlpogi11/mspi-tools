@@ -11,7 +11,7 @@ export async function initDb(databaseUrl?: string) {
   if (!url) {
     throw new Error('DATABASE_URL not provided');
   }
-  pool = mysql.createPool(url);
+  pool = mysql.createPool({ uri: url, connectTimeout: 5000 });
   await pool.query('SELECT 1');
   db = drizzle(pool, { schema, mode: 'default' });
   dbReady = true;

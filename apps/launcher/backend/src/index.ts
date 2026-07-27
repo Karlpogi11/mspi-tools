@@ -14,8 +14,8 @@ import adminRoutes from './routes/admin.js';
 import { pcountRouter, initPcount } from '@mspi/pcount-backend/gateway';
 import rfpuRoutes from '@mspi/rfpu-backend/routes';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
+const _dirname = path.dirname(_filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,7 +46,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', app: 'gateway' });
 });
 
-const publicDir = path.resolve(__dirname, 'public');
+const publicDir = path.resolve(_dirname, 'public');
 
 for (const tool of tools) {
   const toolDist = path.resolve(publicDir, tool.name);
