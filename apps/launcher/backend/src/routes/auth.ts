@@ -15,7 +15,10 @@ function getEmailDomain(email: string): string | null {
 }
 
 function getAllowedDomains(): string[] {
-  const raw = process.env.ALLOWED_EMAIL_DOMAINS || '';
+  const raw = (process.env.ALLOWED_EMAIL_DOMAINS || '').trim();
+  if (!raw || raw === 'undefined' || raw === 'null') {
+    return ['mspi.io', 'mobilecare.com', 'powermaccenter.com'];
+  }
   return raw.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
 }
 
