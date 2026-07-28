@@ -43,9 +43,18 @@ export default function LoginPage() {
         <div className="absolute bottom-1/3 -right-24 w-80 h-80 bg-[#7c3aed] rounded-full blur-[120px] opacity-15" />
       </div>
       <div className="relative z-10">
-        <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-          <rect width="44" height="44" rx="11" fill="white"/>
-          <path d="M14 22L20 28L30 16" stroke="#0a0a1a" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+          <circle cx="32" cy="32" r="30" stroke="white" strokeWidth="1" opacity="0.15"/>
+          <circle cx="32" cy="32" r="20" stroke="white" strokeWidth="1" opacity="0.1"/>
+          <circle cx="32" cy="32" r="4" fill="white" opacity="0.4"/>
+          <line x1="32" y1="2" x2="32" y2="12" stroke="white" strokeWidth="1" opacity="0.2"/>
+          <line x1="32" y1="52" x2="32" y2="62" stroke="white" strokeWidth="1" opacity="0.2"/>
+          <line x1="2" y1="32" x2="12" y2="32" stroke="white" strokeWidth="1" opacity="0.2"/>
+          <line x1="52" y1="32" x2="62" y2="32" stroke="white" strokeWidth="1" opacity="0.2"/>
+          <circle cx="16" cy="16" r="2" fill="white" opacity="0.25"/>
+          <circle cx="48" cy="16" r="2" fill="white" opacity="0.25"/>
+          <circle cx="16" cy="48" r="2" fill="white" opacity="0.25"/>
+          <circle cx="48" cy="48" r="2" fill="white" opacity="0.25"/>
         </svg>
       </div>
     </div>
@@ -57,8 +66,9 @@ export default function LoginPage() {
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="text-center max-w-sm">
           <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-[#0a0a1a] flex items-center justify-center lg:hidden">
-            <svg width="20" height="20" viewBox="0 0 40 40" fill="none">
-              <path d="M12 20L18 26L28 14" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <svg width="20" height="20" viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="28" stroke="white" strokeWidth="2" opacity="0.3"/>
+              <circle cx="32" cy="32" r="3" fill="white" opacity="0.5"/>
             </svg>
           </div>
           <h2 className="text-xl font-semibold text-[#1a1a2e] mb-2">Account created</h2>
@@ -85,8 +95,9 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="lg:hidden flex items-center gap-3 mb-10">
             <div className="w-9 h-9 rounded-lg bg-[#0a0a1a] flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 40 40" fill="none">
-                <path d="M12 20L18 26L28 14" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <svg width="18" height="18" viewBox="0 0 64 64" fill="none">
+                <circle cx="32" cy="32" r="28" stroke="white" strokeWidth="2" opacity="0.3"/>
+                <circle cx="32" cy="32" r="3" fill="white" opacity="0.5"/>
               </svg>
             </div>
             <span className="text-[#1a1a2e] text-lg font-semibold">MSPI Tools</span>
