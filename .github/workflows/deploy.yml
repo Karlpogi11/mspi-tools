@@ -19,6 +19,16 @@ jobs:
 
       - run: npm run build
 
+      - name: Generate .env
+        run: |
+          cat > apps/launcher/backend/dist/.env << EOF
+          ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
+          COOKIE_DOMAIN=.mspi.io
+          NODE_ENV=production
+          FRONTEND_URL=https://tools.mspi.io
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          EOF
+
       - name: Create archive
         run: |
           cd apps/launcher/backend/dist
@@ -26,7 +36,10 @@ jobs:
 
       - name: Deploy to Hostinger
         run: |
+          echo "=== Uploading archive to Hostinger ==="
           curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.HOSTINGER_API_TOKEN }}" \
             -F "archive=@/tmp/deploy.zip" \
             "https://developers.hostinger.com/api/hosting/v1/accounts/${{ secrets.HOSTINGER_ACCOUNT_ID }}/websites/${{ secrets.HOSTINGER_DOMAIN }}/nodejs/builds/from-archive"
+          echo ""
+          echo "=== Done ==="
