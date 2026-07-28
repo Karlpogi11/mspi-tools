@@ -1,0 +1,32 @@
+name: Deploy to tools.mspi.io
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Create archive
+        run: |
+          cd apps/launcher/backend/dist
+          zip -r /tmp/deploy.zip .
+
+      - name: Deploy to Hostinger
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.HOSTINGER_API_TOKEN }}" \
+            -F "archive=@/tmp/deploy.zip" \
+            "https://developers.hostinger.com/api/hosting/v1/accounts/${{ secrets.HOSTINGER_ACCOUNT_ID }}/websites/${{ secrets.HOSTINGER_DOMAIN }}/nodejs/builds/from-archive"
