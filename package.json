@@ -4,7 +4,7 @@
   "main": "backend/dist/index.js",
   "scripts": {
     "dev": "concurrently \"cd frontend && npm run dev\" \"cd backend && npm run dev\"",
-    "build": "npm install && cd backend && npm install --include=dev && npm run build && cd ../frontend && npm install --include=dev && npm run build && cp -r dist ../backend/dist/public && cp ../.env ../backend/dist/",
+    "build": "npm install && cd backend && npm install --include=dev && npm run build && cd ../frontend && npm install --include=dev && npm run build && cp -r dist ../backend/dist/public",
     "start": "node backend/dist/index.js",
     "seed": "cd backend && npm run seed",
     "db:push": "cd backend && npm run db:push",

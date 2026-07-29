@@ -16,7 +16,8 @@ jobs:
 
       - name: Generate .env
         run: |
-          cat > .env << EOF
+          mkdir -p backend/dist
+          cat > backend/dist/.env << EOF
           ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
           COOKIE_DOMAIN=.mspi.io
           NODE_ENV=production

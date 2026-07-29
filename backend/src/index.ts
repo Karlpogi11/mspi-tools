@@ -1,5 +1,4 @@
 import dotenv from 'dotenv';
-dotenv.config({ override: true });
 import { existsSync } from 'fs';
 import express from 'express';
 import cors from 'cors';
@@ -17,6 +16,8 @@ import rfpuRoutes from './rfpu/routes.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
+
+dotenv.config({ path: path.resolve(_dirname, '.env'), override: true });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
