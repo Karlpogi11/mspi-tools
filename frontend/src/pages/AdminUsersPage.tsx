@@ -52,93 +52,93 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div>
-        <h1 className="text-[24px] font-semibold text-[#1d1d1f]">User Management</h1>
-        <p className="text-[14px] text-[#6e6e73] mt-1">Assign roles to users</p>
+        <h1 className="text-[26px] font-semibold text-[#1d1d1f] tracking-tight">Users</h1>
+        <p className="text-[14px] text-[#6e6e73] mt-1">Manage users and roles</p>
       </div>
 
-        <section>
-          <h2 className="text-[15px] font-semibold text-[#1d1d1f] mb-3">
-            All users ({users.length})
-          </h2>
-          {users.length === 0 ? (
-            <div className="bg-white rounded-xl border border-[#d2d2d7] p-6 text-center shadow-sm">
-              <p className="text-[13px] text-[#6e6e73]">No users yet</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden shadow-sm">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-[#d2d2d7] bg-[#f5f5f7]">
-                    <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73]">Name</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73]">Email</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73]">Role</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-[#6e6e73]">Actions</th>
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[14px] font-semibold text-[#1d1d1f]">All users &middot; {users.length}</h2>
+        </div>
+        {users.length === 0 ? (
+          <div className="bg-white border border-[#d2d2d7] p-8 text-center">
+            <p className="text-[13px] text-[#6e6e73]">No users yet</p>
+          </div>
+        ) : (
+          <div className="bg-white border border-[#d2d2d7]">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-[#d2d2d7]">
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Name</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Email</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Role</th>
+                  <th className="text-right px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id} className={`border-b border-[#d2d2d7] last:border-0 hover:bg-[#fafafa] transition-colors ${!u.roleId ? 'bg-[#fffbeb]' : ''}`}>
+                    <td className="px-4 py-3 text-[#1d1d1f]">{u.fullName}</td>
+                    <td className="px-4 py-3 text-[#6e6e73]">
+                      {u.email}
+                      {!u.roleId && <span className="ml-2 text-[11px] text-[#d97706] font-medium">(pending)</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      {u.roleName ? (
+                        <span className="inline-flex items-center text-[12px] font-medium text-[#1d1d1f]">
+                          {u.roleName}
+                        </span>
+                      ) : (
+                        <span className="text-[#6e6e73]">&mdash;</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) assignRole(u.id, Number(e.target.value));
+                          }}
+                          className="h-8 px-2 text-[12px] border border-[#d2d2d7] bg-white text-[#1d1d1f] outline-none focus:border-[#2563eb] cursor-pointer"
+                        >
+                          <option value="">{u.roleId ? 'Change role' : 'Assign role'}</option>
+                          {roles.map((r) => (
+                            <option key={r.id} value={r.id} selected={r.id === u.roleId}>{r.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => deleteUser(u.id, u.email)}
+                          className="h-8 px-2 text-[12px] text-[#6e6e73] hover:text-[#dc2626] transition-colors cursor-pointer"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id} className={`border-b border-[#d2d2d7] last:border-0 hover:bg-[#f5f5f7] transition-colors ${!u.roleId ? 'bg-[#fffbeb]' : ''}`}>
-                      <td className="px-4 py-2.5 text-[#1d1d1f]">{u.fullName}</td>
-                      <td className="px-4 py-2.5 text-[#6e6e73]">
-                        {u.email}
-                        {!u.roleId && <span className="ml-2 text-[11px] text-[#d97706] font-medium">(pending)</span>}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {u.roleName ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[12px] font-medium bg-[#f5f5f7] text-[#1d1d1f] border border-[#d2d2d7]">
-                            {u.roleName}
-                          </span>
-                        ) : (
-                          <span className="text-[#6e6e73]">&mdash;</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <select
-                            value=""
-                            onChange={(e) => {
-                              if (e.target.value) assignRole(u.id, Number(e.target.value));
-                            }}
-                            className="h-8 px-2 text-[13px] border border-[#d2d2d7] rounded-lg bg-white text-[#1d1d1f] outline-none focus:border-[#2563eb] cursor-pointer"
-                          >
-                            <option value="">{u.roleId ? 'Change role' : 'Assign role'}</option>
-                            {roles.map((r) => (
-                              <option key={r.id} value={r.id} selected={r.id === u.roleId}>{r.name}</option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={() => deleteUser(u.id, u.email)}
-                            className="h-8 px-2 text-[13px] text-[#dc2626] hover:bg-[#fef2f2] rounded-lg transition-colors cursor-pointer"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section>
-        <h2 className="text-[15px] font-semibold text-[#1d1d1f] mb-3">Manage roles</h2>
-        <div className="bg-white rounded-xl border border-[#d2d2d7] p-5 shadow-sm">
+        <h2 className="text-[14px] font-semibold text-[#1d1d1f] mb-4">Roles</h2>
+        <div className="bg-white border border-[#d2d2d7] p-5">
           <div className="flex gap-2 mb-4">
             <input
               type="text"
               value={newRoleName}
               onChange={(e) => setNewRoleName(e.target.value)}
               placeholder="New role name"
-              className="h-9 px-3 text-[14px] border border-[#d2d2d7] rounded-lg bg-white text-[#1d1d1f] placeholder-[#6e6e73] outline-none focus:border-[#2563eb] flex-1"
+              className="h-9 px-3 text-[13px] border border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder-[#6e6e73] outline-none focus:border-[#2563eb] flex-1"
               onKeyDown={(e) => e.key === 'Enter' && createRole()}
             />
             <button
               onClick={createRole}
-              className="h-9 px-4 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
+              className="h-9 px-4 bg-[#2563eb] text-white text-[13px] font-medium hover:bg-[#1d4ed8] transition-colors cursor-pointer"
             >
               Add role
             </button>
@@ -151,7 +151,7 @@ export default function AdminUsersPage() {
               {roles.map((r) => (
                 <div
                   key={r.id}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#f5f5f7] border border-[#d2d2d7] rounded-lg text-[13px] text-[#1d1d1f]"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 border border-[#d2d2d7] text-[13px] text-[#1d1d1f]"
                 >
                   <span>{r.name}</span>
                   <button

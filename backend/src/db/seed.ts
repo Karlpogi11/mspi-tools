@@ -58,6 +58,13 @@ async function seed() {
   ]);
 
   console.log('PCount assigned to PMS and CSO roles');
+
+  await db.insert(roleToolAccess).values([
+    { role_id: adminRole.id, tool_id: rfpuTool.id },
+    { role_id: adminRole.id, tool_id: pcountTool.id },
+  ]);
+
+  console.log('Site Monitor and PCount assigned to Admin role');
   console.log('\nSeed complete!');
   process.exit(0);
 }
