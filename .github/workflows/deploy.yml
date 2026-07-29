@@ -25,9 +25,15 @@ jobs:
       - name: Install zip
         run: sudo apt-get update && sudo apt-get install -y zip 2>/dev/null
 
-      - name: Generate .env
+      - name: Prepare deploy archive
         run: |
-          cat > backend/dist/.env << EOF
+          mkdir -p deploy/dist
+          cp -r backend/dist/* deploy/dist/
+          cp backend/package.json deploy/
+          # Remove build script so Hostinger doesn't try to rebuild
+          node -e "const p=require('./deploy/package.json'); delete p.scripts.build; require('fs').writeFileSync('./deploy/package.json', JSON.stringify(p, null, 2))"
+          # Generate .env at deploy root (dotenv checks CWD)
+          cat > deploy/.env << EOF
           ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
           COOKIE_DOMAIN=.mspi.io
           NODE_ENV=production
@@ -36,11 +42,10 @@ jobs:
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           EOF
-
-      - name: Create archive
-        run: |
-          cd backend/dist
-          zip -r /tmp/deploy.zip .
+          # Production-only node_modules
+          cd backend && npm install --omit=dev && cd ..
+          cp -r backend/node_modules deploy/
+          cd deploy && zip -r /tmp/deploy.zip .
 
       - name: Deploy to Hostinger
         run: |
@@ -48,6 +53,8 @@ jobs:
           curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.HOSTINGER_API_TOKEN }}" \
             -F "archive=@/tmp/deploy.zip" \
+            -F "app_type=other" \
+            -F "node_version=22" \
             "https://developers.hostinger.com/api/hosting/v1/accounts/${{ secrets.HOSTINGER_ACCOUNT_ID }}/websites/${{ secrets.HOSTINGER_DOMAIN }}/nodejs/builds/from-archive"
           echo ""
           echo "=== Done ==="
