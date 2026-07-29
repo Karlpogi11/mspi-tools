@@ -61,10 +61,10 @@ export default function ProductTable({ products, displayColumns, sortDesc, onTog
           30%, 70% { transform: translateX(4px); }
         }
       `}</style>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto max-h-[65vh]">
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7]">
+            <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7] sticky top-0 z-10">
               <th className="text-left px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider cursor-pointer select-none hover:text-[#1d1d1f]" onClick={onToggleSort}>
                 Product Code {sortDesc ? '\u2193' : '\u2191'}
               </th>
