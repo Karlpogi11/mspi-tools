@@ -1,14 +1,16 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
 import { AuthProvider, useAuth } from './lib/auth';
 import Layout from './components/Layout';
-import LoginPage from './pages/LoginPage';
-import PendingApprovalPage from './pages/PendingApprovalPage';
-import DashboardPage from './pages/DashboardPage';
-import AdminUsersPage from './pages/AdminUsersPage';
-import AdminToolsPage from './pages/AdminToolsPage';
-import PcountIndexPage from './pages/pcount/IndexPage';
-import PcountSessionPage from './pages/pcount/SessionPage';
-import RfpuPage from './pages/RfpuPage';
+
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const PendingApprovalPage = lazy(() => import('./pages/PendingApprovalPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
+const AdminToolsPage = lazy(() => import('./pages/AdminToolsPage'));
+const PcountIndexPage = lazy(() => import('./pages/pcount/IndexPage'));
+const PcountSessionPage = lazy(() => import('./pages/pcount/SessionPage'));
+const RfpuPage = lazy(() => import('./pages/RfpuPage'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -32,59 +34,61 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<Layout />}>
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <DashboardPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/users"
-              element={
-                <ProtectedRoute>
-                  <AdminUsersPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/tools"
-              element={
-                <ProtectedRoute>
-                  <AdminToolsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/pcount"
-              element={
-                <ProtectedRoute>
-                  <PcountIndexPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/pcount/session/:id"
-              element={
-                <ProtectedRoute>
-                  <PcountSessionPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/rfpu"
-              element={
-                <ProtectedRoute>
-                  <RfpuPage />
-                </ProtectedRoute>
-              }
-            />
-          </Route>
-        </Routes>
+        <Suspense fallback={<div className="min-h-screen bg-[#f5f5f7]" />}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<Layout />}>
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <DashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/users"
+                element={
+                  <ProtectedRoute>
+                    <AdminUsersPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/tools"
+                element={
+                  <ProtectedRoute>
+                    <AdminToolsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/pcount"
+                element={
+                  <ProtectedRoute>
+                    <PcountIndexPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/pcount/session/:id"
+                element={
+                  <ProtectedRoute>
+                    <PcountSessionPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/rfpu"
+                element={
+                  <ProtectedRoute>
+                    <RfpuPage />
+                  </ProtectedRoute>
+                }
+              />
+            </Route>
+          </Routes>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );

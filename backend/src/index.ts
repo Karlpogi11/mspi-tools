@@ -51,21 +51,39 @@ app.get('/api/health', (_req, res) => {
 
 const publicDir = path.resolve(_dirname, 'public');
 
+const oneYear = 365 * 24 * 60 * 60 * 1000;
+
+const assetsDir = path.join(publicDir, 'assets');
+if (existsSync(assetsDir)) {
+  app.use('/assets', express.static(assetsDir, { maxAge: oneYear, immutable: true }));
+}
+
 for (const tool of tools) {
   const toolDist = path.resolve(publicDir, tool.name);
   const toolIndex = path.join(toolDist, 'index.html');
   if (existsSync(toolIndex)) {
-    app.use(`/${tool.name}`, express.static(toolDist));
+    app.use(`/${tool.name}`, express.static(toolDist, { maxAge: oneYear, immutable: true }));
     app.get(`/${tool.name}/*`, (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(toolIndex);
     });
   }
 }
 
+app.use(express.static(publicDir, {
+  maxAge: oneYear,
+  immutable: true,
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
+
 const frontendIndex = path.join(publicDir, 'index.html');
 if (existsSync(frontendIndex)) {
-  app.use(express.static(publicDir));
   app.get('*', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(frontendIndex);
   });
 }
