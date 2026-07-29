@@ -29,9 +29,12 @@ jobs:
         run: |
           mkdir -p deploy/dist
           cp -r backend/dist/* deploy/dist/
+          cp -r backend/src deploy/src/
           cp backend/package.json deploy/
-          # Remove build script so Hostinger doesn't try to rebuild
-          node -e "const p=require('./deploy/package.json'); delete p.scripts.build; require('fs').writeFileSync('./deploy/package.json', JSON.stringify(p, null, 2))"
+          cp backend/package-lock.json deploy/
+          cp backend/tsconfig.json deploy/
+          # Remove .env generated during local build so the deploy one is used
+          rm -f deploy/dist/.env
           # Generate .env at deploy root (dotenv checks CWD)
           cat > deploy/.env << EOF
           ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
@@ -42,9 +45,6 @@ jobs:
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           EOF
-          # Production-only node_modules
-          cd backend && npm install --omit=dev && cd ..
-          cp -r backend/node_modules deploy/
           cd deploy && zip -r /tmp/deploy.zip .
 
       - name: Deploy to Hostinger
