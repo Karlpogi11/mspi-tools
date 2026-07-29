@@ -136,38 +136,37 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
   }, []);
 
   return (
-    <div className={`bg-white rounded-xl border shadow-sm p-2.5 transition-colors duration-200 ${
+    <div className={`bg-white rounded-xl border shadow-sm p-3 transition-colors duration-200 ${
       overscan ? 'border-[#dc2626] ring-2 ring-[#dc2626]/30' : 'border-[#d2d2d7]'
     }`}>
-      <form onSubmit={handleSubmit} className="flex items-center gap-2">
-        <div className="relative max-w-[300px] flex-1">
+      <form onSubmit={handleSubmit} className="flex items-center gap-3">
+        <label className="text-[13px] font-medium text-[#6e6e73] whitespace-nowrap">Scan</label>
+        <div className="relative flex-1">
           <input
             ref={inputRef}
             type="text"
             value={value}
             onChange={handleChange}
-            placeholder="Scan barcode..."
-            className="w-full px-3 py-1.5 border border-[#d2d2d7] rounded-lg text-[13px] font-mono bg-[#f5f5f7] focus:outline-none focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] focus:bg-white transition-colors"
+            placeholder="Scan or type barcode..."
+            className="w-full px-3 py-2 border border-[#d2d2d7] rounded-lg text-[14px] font-mono bg-[#f5f5f7] focus:outline-none focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] focus:bg-white transition-colors"
             autoComplete="off"
             autoFocus
           />
         </div>
+        <div className="flex items-center gap-2 text-[12px] text-[#6e6e73] whitespace-nowrap">
+          {syncing && pendingCount > 0 && <span className="text-[#a16207]">{pendingCount} queued</span>}
+          {syncing && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-[#2563eb] rounded-full animate-pulse" />saving</span>}
+        </div>
         <button
           type="submit"
           disabled={!value.trim()}
-          className="px-3 py-1.5 bg-[#2563eb] text-white text-[12px] font-medium rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors cursor-pointer"
+          className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors cursor-pointer"
         >
-          {syncing ? 'Syncing\u2026' : 'Scan'}
+          Enter
         </button>
       </form>
-      {syncing && (
-        <div className="mt-2 flex items-center justify-between text-[11px] text-[#6e6e73]">
-          <span>Scan accepted instantly; saving in background.</span>
-          {pendingCount > 0 && <span>{pendingCount} queued</span>}
-        </div>
-      )}
       {error && (
-        <div className="mt-3 px-4 py-2 rounded-lg bg-[#fef2f2] border border-[#fecaca] text-[13px] text-[#dc2626]">
+        <div className="mt-2 px-3 py-2 rounded-lg bg-[#fef2f2] border border-[#fecaca] text-[12px] text-[#dc2626]">
           {error}
         </div>
       )}

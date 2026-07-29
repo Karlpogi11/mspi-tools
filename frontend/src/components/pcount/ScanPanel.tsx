@@ -79,9 +79,6 @@ export default function ScanPanel({ lastScan, onRecount, onStatusChange, stats, 
                 <option value="pending">Pending</option>
                 <option value="matched">Matched</option>
                 <option value="missing">Missing</option>
-                <option value="defect">Defect</option>
-                <option value="stolen">Stolen</option>
-                <option value="ignored">Ignored</option>
               </select>
               <button
                 onClick={() => onRecount(lastScan.product_code)}

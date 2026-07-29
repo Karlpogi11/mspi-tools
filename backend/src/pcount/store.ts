@@ -355,7 +355,7 @@ export async function importCount(sessionId: number, products: { product_code: s
         if (countedQty === ep.system_qty) {
           status = 'matched';
         } else if (countedQty > ep.system_qty) {
-          status = 'over';
+          status = 'matched';
         } else {
           status = 'missing';
         }
@@ -388,7 +388,7 @@ export async function importCount(sessionId: number, products: { product_code: s
         if (countedQty === ep.system_qty) {
           status = 'matched';
         } else if (countedQty > ep.system_qty) {
-          status = 'over';
+          status = 'matched';
         } else {
           status = 'missing';
         }
@@ -408,13 +408,12 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
     await pool.execute(
       `UPDATE pcount_products
        SET counted_qty = CASE
-         WHEN status IN ('pending', 'missing', 'matched', 'over') THEN COALESCE(counted_qty, 0) + 1
+         WHEN status IN ('pending', 'missing', 'matched') THEN COALESCE(counted_qty, 0) + 1
          ELSE COALESCE(counted_qty, 0)
        END,
        status = CASE
-         WHEN status IN ('pending', 'missing', 'matched', 'over') AND counted_qty > system_qty THEN 'over'
-         WHEN status IN ('pending', 'missing', 'matched', 'over') AND counted_qty = system_qty THEN 'matched'
-         WHEN status IN ('pending', 'missing', 'matched', 'over') THEN 'missing'
+         WHEN status IN ('pending', 'missing', 'matched') AND counted_qty >= system_qty THEN 'matched'
+         WHEN status IN ('pending', 'missing', 'matched') THEN 'missing'
          ELSE status
        END
        WHERE session_id = ? AND product_code = ?`,
@@ -432,11 +431,9 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
   let newCounted = product.counted_qty;
   let newStatus = product.status;
 
-  if (['pending', 'missing', 'matched', 'over'].includes(product.status)) {
+  if (['pending', 'missing', 'matched'].includes(product.status)) {
     newCounted = product.counted_qty + 1;
-    newStatus = newCounted > product.system_qty
-      ? 'over'
-      : newCounted === product.system_qty ? 'matched' : 'missing';
+    newStatus = newCounted >= product.system_qty ? 'matched' : 'missing';
   }
 
   const isMatch = newCounted === product.system_qty;

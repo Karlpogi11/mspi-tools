@@ -15,10 +15,6 @@ const statusStyles: Record<string, { bg: string; dot: string; label: string }> =
   pending:  { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#6e6e73]', label: 'Pending' },
   matched:  { bg: 'bg-[#f0fdf4]',        dot: 'bg-[#16a34a]', label: 'Matched' },
   missing:  { bg: 'bg-[#fffbeb]',        dot: 'bg-[#d97706]', label: 'Missing' },
-  over:     { bg: 'bg-[#fef2f2]',        dot: 'bg-[#dc2626]', label: 'Over' },
-  defect:   { bg: 'bg-[#fef2f2]',        dot: 'bg-[#dc2626]', label: 'Defect' },
-  stolen:   { bg: 'bg-[#fef2f2]',        dot: 'bg-[#dc2626]', label: 'Stolen' },
-  ignored:  { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#6e6e73]', label: 'Ignored' },
 };
 
 export default function ProductTable({ products, displayColumns, sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode }: Props) {
@@ -91,7 +87,7 @@ export default function ProductTable({ products, displayColumns, sortDesc, onTog
                   onClick={() => onSelect?.(p)}
                   className={`border-b border-[#d2d2d7]/60 hover:bg-[#fafafa] cursor-pointer ${
                     isSelected ? 'bg-[#eff6ff] ring-2 ring-inset ring-[#2563eb]' : ''
-                  } ${p.status === 'stolen' ? 'bg-red-50/50' : ''} ${
+                  } ${
                     overscanCode === p.product_code ? 'animate-[overscan-shake_0.4s_ease-in-out] bg-[#fef2f2]' : ''
                   }`}
                 >
@@ -138,15 +134,11 @@ export default function ProductTable({ products, displayColumns, sortDesc, onTog
                   <td className="px-4 py-3 text-center">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ${st.bg} ${
                       p.status === 'matched' ? 'text-[#16a34a]' :
-                      p.status === 'over' ? 'text-[#dc2626]' :
                       p.status === 'missing' ? 'text-[#d97706]' :
-                      p.status === 'stolen' ? 'text-[#dc2626]' :
-                      p.status === 'defect' ? 'text-[#dc2626]' :
                       'text-[#6e6e73]'
                     }`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${
                         p.status === 'matched' ? 'bg-[#16a34a]' :
-                        p.status === 'over' ? 'bg-[#dc2626]' :
                         p.status === 'missing' ? 'bg-[#d97706]' :
                         'bg-[#6e6e73]'
                       }`} />

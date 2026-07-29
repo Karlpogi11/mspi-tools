@@ -110,11 +110,9 @@ export default function PcountSessionPage() {
     let countedQty = product.counted_qty;
     let status = product.status;
 
-    if (['pending', 'missing', 'matched', 'over'].includes(product.status)) {
+    if (['pending', 'missing', 'matched'].includes(product.status)) {
       countedQty += 1;
-      status = countedQty > product.system_qty
-        ? 'over'
-        : countedQty === product.system_qty ? 'matched' : 'missing';
+      status = countedQty >= product.system_qty ? 'matched' : 'missing';
     }
 
     return { ...product, counted_qty: countedQty, status, match: countedQty === product.system_qty };
@@ -260,10 +258,6 @@ export default function PcountSessionPage() {
     pending: products.filter(p => p.status === 'pending').length,
     matched: products.filter(p => p.status === 'matched').length,
     missing: products.filter(p => p.status === 'missing').length,
-    over: products.filter(p => p.status === 'over').length,
-    defect: products.filter(p => p.status === 'defect').length,
-    stolen: products.filter(p => p.status === 'stolen').length,
-    ignored: products.filter(p => p.status === 'ignored').length,
   };
 
   if (loading) {
@@ -275,7 +269,7 @@ export default function PcountSessionPage() {
   }
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-12">
       <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
         <div className="flex items-center justify-between">
           <div>
@@ -391,8 +385,8 @@ export default function PcountSessionPage() {
       )}
 
       {stage === 'verify' && products.length > 0 && (
-        <div className="pb-28">
-          <div className="bg-white rounded-xl border border-[#d2d2d7] p-4 mb-4">
+        <>
+          <div className="bg-white rounded-xl border border-[#d2d2d7] p-4">
             <div className="flex items-center gap-2 flex-wrap">
               {Object.entries(statusCounts).map(([key, count]) => (
                 <button
@@ -413,10 +407,17 @@ export default function PcountSessionPage() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Search by code or description..."
-                className="px-3 py-1.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb] max-w-[250px]"
+                className="px-3 py-1.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb] max-w-[220px]"
               />
             </div>
           </div>
+
+          <ScanBar
+            sessionId={sessionId}
+            onScanned={handleScan}
+            onScanQueued={handleScanQueued}
+            onScanFailed={handleScanFailed}
+          />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2">
@@ -477,7 +478,7 @@ export default function PcountSessionPage() {
               />
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {stage === 'verify' && products.length === 0 && (
@@ -489,19 +490,6 @@ export default function PcountSessionPage() {
           >
             Import System Export
           </button>
-        </div>
-      )}
-
-      {stage === 'verify' && products.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 px-6 pb-4 pt-4 bg-gradient-to-t from-[#f5f5f7] from-60% to-transparent">
-          <div className="max-w-7xl mx-auto">
-              <ScanBar
-                sessionId={sessionId}
-                onScanned={handleScan}
-                onScanQueued={handleScanQueued}
-                onScanFailed={handleScanFailed}
-              />
-          </div>
         </div>
       )}
     </div>
