@@ -20,7 +20,6 @@ jobs:
           ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
           COOKIE_DOMAIN=.mspi.io
           NODE_ENV=production
-          PORT=3000
           FRONTEND_URL=https://tools.mspi.io
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           DATABASE_URL=${{ secrets.DATABASE_URL }}
