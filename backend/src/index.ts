@@ -18,6 +18,7 @@ const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath
 const _dirname = path.dirname(_filename);
 
 dotenv.config({ path: path.resolve(_dirname, '.env'), override: true });
+dotenv.config({ override: true });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
