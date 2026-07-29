@@ -14,29 +14,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
+      - name: Generate .env
         run: |
-          npm ci
-          cd backend && npm install
-          cd ../frontend && npm install
-
-      - run: npm run build
-
-      - name: Install zip
-        run: sudo apt-get update && sudo apt-get install -y zip 2>/dev/null
-
-      - name: Prepare deploy archive
-        run: |
-          mkdir -p deploy/dist
-          cp -r backend/dist/* deploy/dist/
-          cp -r backend/src deploy/src/
-          cp backend/package.json deploy/
-          cp backend/package-lock.json deploy/
-          cp backend/tsconfig.json deploy/
-          # Remove .env generated during local build so the deploy one is used
-          rm -f deploy/dist/.env
-          # Generate .env at deploy root (dotenv checks CWD)
-          cat > deploy/.env << EOF
+          cat > .env << EOF
           ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
           COOKIE_DOMAIN=.mspi.io
           NODE_ENV=production
@@ -45,7 +25,15 @@ jobs:
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           EOF
-          cd deploy && zip -r /tmp/deploy.zip .
+
+      - name: Archive repo for Hostinger
+        run: |
+          zip -r /tmp/deploy.zip . \
+            -x "node_modules/*" \
+            -x "backend/node_modules/*" \
+            -x "frontend/node_modules/*" \
+            -x ".git/*" \
+            -x ".git"
 
       - name: Deploy to Hostinger
         run: |
