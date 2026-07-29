@@ -12,26 +12,33 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
+      - run: cd backend && npm ci
+      - run: cd frontend && npm ci
 
       - run: npm run build
 
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip 2>/dev/null
+
       - name: Generate .env
         run: |
-          cat > apps/launcher/backend/dist/.env << EOF
+          cat > backend/dist/.env << EOF
           ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
           COOKIE_DOMAIN=.mspi.io
           NODE_ENV=production
+          PORT=3000
           FRONTEND_URL=https://tools.mspi.io
           JWT_SECRET=${{ secrets.JWT_SECRET }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
           EOF
 
       - name: Create archive
         run: |
-          cd apps/launcher/backend/dist
+          cd backend/dist
           zip -r /tmp/deploy.zip .
 
       - name: Deploy to Hostinger
