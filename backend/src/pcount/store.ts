@@ -451,12 +451,12 @@ export async function deleteSession(id: number): Promise<void> {
 
 export async function deleteSessionProducts(sessionId: number): Promise<void> {
   if (dbAvailable) {
-    const db = getDb();
-    const prods = await db.select({ id: pcountProducts.id }).from(pcountProducts).where(eq(pcountProducts.session_id, sessionId));
-    for (const p of prods) {
-      await db.delete(pcountProductExtra).where(eq(pcountProductExtra.product_id, p.id));
-    }
-    await db.delete(pcountProducts).where(eq(pcountProducts.session_id, sessionId));
+    const pool = getDbPool();
+    await pool.execute(
+      `DELETE FROM pcount_product_extra WHERE product_id IN (SELECT id FROM pcount_products WHERE session_id = ?)`,
+      [sessionId]
+    );
+    await pool.execute(`DELETE FROM pcount_products WHERE session_id = ?`, [sessionId]);
     return;
   }
   for (const [pid, p] of memProducts) {
@@ -466,10 +466,16 @@ export async function deleteSessionProducts(sessionId: number): Promise<void> {
 
 export async function setDisplayColumns(sessionId: number, columns: string[]): Promise<void> {
   if (dbAvailable) {
-    const db = getDb();
-    await db.delete(pcountDisplayColumns).where(eq(pcountDisplayColumns.session_id, sessionId));
-    for (const col of columns) {
-      await db.insert(pcountDisplayColumns).values({ session_id: sessionId, column_name: col });
+    const pool = getDbPool();
+    await pool.execute(`DELETE FROM pcount_display_columns WHERE session_id = ?`, [sessionId]);
+    if (columns.length > 0) {
+      const placeholders = columns.map(() => '(?,?)').join(',');
+      const params: any[] = [];
+      for (const col of columns) params.push(sessionId, col);
+      await pool.execute(
+        `INSERT INTO pcount_display_columns (session_id,column_name) VALUES ${placeholders}`,
+        params
+      );
     }
     return;
   }
@@ -503,51 +509,64 @@ export async function createProducts(sessionId: number, products: { product_code
   if (products.length === 0) return 0;
 
   if (dbAvailable) {
-    const db = getDb();
-    const batchSize = 1000;
     const pool = getDbPool();
+    const batchSize = 1000;
+    const extraBatchSize = 2000;
 
     const allExtraRows: { product_id: number; column_name: string; column_value: string }[] = [];
     const codeToId = new Map<string, number>();
 
-    for (let i = 0; i < products.length; i += batchSize) {
-      const batch = products.slice(i, i + batchSize);
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
 
-      const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
-      const params: any[] = [];
-      for (const p of batch) {
-        params.push(sessionId, p.product_code, p.description || '', parseCategory(p.product_code), p.system_qty || 0, 0, 'pending');
+      for (let i = 0; i < products.length; i += batchSize) {
+        const batch = products.slice(i, i + batchSize);
+
+        const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
+        const params: any[] = [];
+        for (const p of batch) {
+          params.push(sessionId, p.product_code, p.description || '', parseCategory(p.product_code), p.system_qty || 0, 0, 'pending');
+        }
+
+        const [rows] = await conn.execute(
+          `INSERT INTO pcount_products (session_id,product_code,description,category,system_qty,counted_qty,status) VALUES ${placeholders} RETURNING id,product_code`,
+          params
+        );
+
+        for (const r of rows as any[]) {
+          codeToId.set(r.product_code, r.id);
+        }
       }
 
-      const [rows] = await pool.execute(
-        `INSERT INTO pcount_products (session_id,product_code,description,category,system_qty,counted_qty,status) VALUES ${placeholders} RETURNING id,product_code`,
-        params
-      );
-
-      for (const r of rows as any[]) {
-        codeToId.set(r.product_code, r.id);
-      }
-    }
-
-    for (const p of products) {
-      if (p.extra) {
-        const pid = codeToId.get(p.product_code);
-        if (!pid) continue;
-        for (const [key, value] of Object.entries(p.extra)) {
-          if (key !== 'product_code' && key !== 'description' && key !== 'system_qty') {
-            allExtraRows.push({ product_id: pid, column_name: key, column_value: String(value || '') });
+      for (const p of products) {
+        if (p.extra) {
+          const pid = codeToId.get(p.product_code);
+          if (!pid) continue;
+          for (const [key, value] of Object.entries(p.extra)) {
+            if (key !== 'product_code' && key !== 'description' && key !== 'system_qty') {
+              allExtraRows.push({ product_id: pid, column_name: key, column_value: String(value || '') });
+            }
           }
         }
       }
-    }
 
-    if (allExtraRows.length > 0) {
-      const placeholders = allExtraRows.map(() => '(?,?,?)').join(',');
-      const params: any[] = [];
-      for (const r of allExtraRows) {
-        params.push(r.product_id, r.column_name, r.column_value);
+      for (let i = 0; i < allExtraRows.length; i += extraBatchSize) {
+        const batch = allExtraRows.slice(i, i + extraBatchSize);
+        const placeholders = batch.map(() => '(?,?,?)').join(',');
+        const params: any[] = [];
+        for (const r of batch) {
+          params.push(r.product_id, r.column_name, r.column_value);
+        }
+        await conn.execute(`INSERT INTO pcount_product_extra (product_id,column_name,column_value) VALUES ${placeholders}`, params);
       }
-      await pool.execute(`INSERT INTO pcount_product_extra (product_id,column_name,column_value) VALUES ${placeholders}`, params);
+
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
     }
   } else {
     for (const p of products) {
@@ -615,13 +634,17 @@ export async function importCount(sessionId: number, products: { product_code: s
     }
 
     if (updates.length > 0) {
-      await db.transaction(async (tx) => {
-        for (const u of updates) {
-          await tx.update(pcountProducts)
-            .set({ counted_qty: u.counted_qty, status: u.status as any })
-            .where(and(eq(pcountProducts.session_id, sessionId), eq(pcountProducts.product_code, u.code)));
-        }
-      });
+      const pool = getDbPool();
+      const qtyWhens = updates.map(() => 'WHEN ? THEN ?').join(' ');
+      const statusWhens = updates.map(() => 'WHEN ? THEN ?').join(' ');
+      const params: any[] = [];
+      for (const u of updates) params.push(u.code, u.counted_qty);
+      for (const u of updates) params.push(u.code, u.status);
+      params.push(sessionId);
+      await pool.execute(
+        `UPDATE pcount_products SET counted_qty = CASE product_code ${qtyWhens} END, status = CASE product_code ${statusWhens} END WHERE session_id = ?`,
+        params
+      );
     }
   } else {
     for (const ep of existing) {

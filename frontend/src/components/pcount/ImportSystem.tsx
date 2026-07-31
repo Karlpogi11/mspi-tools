@@ -46,6 +46,25 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
     });
   }, [currentDisplayColumns]);
 
+  function detectHeaderRow(raw: string[][]): number {
+    const maxScan = Math.min(raw.length, 8);
+    let best = 0;
+    let bestScore = -1;
+    const headerHints = /(code|sku|description|name|qty|quantity|brand|category|price|cost|barcode|serial|retail|group|model)/i;
+    for (let i = 0; i < maxScan; i++) {
+      const cells = raw[i] || [];
+      const nonEmpty = cells.filter(c => c !== undefined && String(c).trim() !== '').length;
+      const named = cells.filter(c => headerHints.test(String(c || ''))).length;
+      const numeric = cells.filter(c => !isNaN(Number(String(c || '').trim()))).length;
+      const score = named * 3 + nonEmpty - numeric;
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   function parseSheet(headerIdx: number) {
     const wb = workbookRef.current;
     const XLSX = xlsxRef.current;
@@ -57,7 +76,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
       const hdrRow = raw[headerIdx] || [];
       const dataRows = raw.slice(headerIdx + 1).filter(r => r.some(c => c !== undefined && c !== ''));
       if (dataRows.length === 0) { setError('No data rows found after header'); return; }
-      const cols = hdrRow.map(h => String(h || `Column_${hdrRow.indexOf(h)}`));
+      const cols = hdrRow.map((h, i) => String(h || `Column_${i + 1}`));
       setRawRows(dataRows);
       const json = dataRows.map(row => {
         const obj: Record<string, string> = {};
@@ -83,7 +102,6 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
     const f = e.target.files?.[0];
     if (!f) return;
     setFile(f);
-    setHeaderRow(1);
     setError('');
     const reader = new FileReader();
     reader.onload = async (ev) => {
@@ -92,7 +110,11 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
         xlsxRef.current = XLSX;
         const data = new Uint8Array(ev.target?.result as ArrayBuffer);
         workbookRef.current = XLSX.read(data, { type: 'array' });
-        parseSheet(0);
+        const sheet = workbookRef.current.Sheets[workbookRef.current.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 }) as string[][];
+        const detected = detectHeaderRow(raw);
+        setHeaderRow(detected + 1);
+        parseSheet(detected);
       } catch { setError('Failed to parse Excel file'); }
     };
     reader.readAsArrayBuffer(f);
@@ -363,6 +385,9 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
                           <th className="text-left px-3 py-2 font-medium text-[#6e6e73]">#</th>
                           <th className="text-left px-3 py-2 font-medium text-[#2563eb]">Product Code</th>
                           <th className="text-left px-3 py-2 font-medium text-[#2563eb]">Description</th>
+                          {mapping.quantity && (
+                            <th className="text-left px-3 py-2 font-medium text-[#2563eb]">System Qty ({mapping.quantity})</th>
+                          )}
                           {mapping.displayColumns.map(h => (
                             <th key={h} className="text-left px-3 py-2 font-medium text-[#2563eb]">{h}</th>
                           ))}
@@ -377,6 +402,9 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
                             <td className="px-3 py-2 text-[#6e6e73]">{i + 1}</td>
                             <td className="px-3 py-2 text-[#1d1d1f] font-mono text-[12px] max-w-[140px] truncate">{row[mapping.productCode]}</td>
                             <td className="px-3 py-2 text-[#1d1d1f] max-w-[200px] truncate">{row[mapping.description]}</td>
+                            {mapping.quantity && (
+                              <td className="px-3 py-2 text-[#1d1d1f] tabular-nums">{row[mapping.quantity]}</td>
+                            )}
                             {mapping.displayColumns.length > 0
                               ? mapping.displayColumns.map(h => <td key={h} className="px-3 py-2 text-[#1d1d1f] truncate max-w-[120px]">{row[h]}</td>)
                               : headers.filter(h => h !== mapping.productCode && h !== mapping.description).slice(0, 6).map(h => (

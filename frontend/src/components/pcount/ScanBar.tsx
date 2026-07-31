@@ -55,6 +55,19 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
     inputRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target || !target.closest) return;
+      if (inputRef.current === target || inputRef.current?.contains(target)) return;
+      if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (target.closest('[role="dialog"], .fixed.inset-0')) return;
+      inputRef.current?.focus();
+    }
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, []);
+
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
     processingRef.current = true;

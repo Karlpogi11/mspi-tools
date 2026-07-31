@@ -16,6 +16,7 @@ interface Props {
 const ALL_COLUMNS = [
   { key: 'Product Code', label: 'Product Code', core: true },
   { key: 'Description', label: 'Description', core: true },
+  { key: 'System Qty', label: 'System Qty', core: true },
   { key: 'Qty', label: 'Qty', core: true },
   { key: 'Product SKU Number', label: 'Product SKU Number' },
   { key: 'Barcode', label: 'Barcode' },
@@ -31,7 +32,7 @@ const ALL_COLUMNS = [
 ];
 
 const CORE_KEYS = ALL_COLUMNS.filter(c => c.core).map(c => c.key);
-const STORAGE_KEY = 'pcount.tableColumns';
+const STORAGE_KEY = 'pcount.tableColumns.v2';
 
 const statusStyles: Record<string, { bg: string; dot: string; label: string }> = {
   pending:  { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#6e6e73]', label: 'Pending' },
@@ -46,6 +47,12 @@ function loadSaved(): string[] {
       const parsed = JSON.parse(saved) as string[];
       const valid = ALL_COLUMNS.map(c => c.key).filter(k => parsed.includes(k));
       if (valid.length > 0) return valid;
+    }
+    const legacy = localStorage.getItem('pcount.tableColumns');
+    if (legacy) {
+      const parsed = JSON.parse(legacy) as string[];
+      const valid = ALL_COLUMNS.map(c => c.key).filter(k => parsed.includes(k));
+      if (valid.length > 0) return Array.from(new Set([...valid, 'System Qty']));
     }
   } catch {}
   return ALL_COLUMNS.map(c => c.key);
@@ -188,7 +195,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                   className={`px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider ${
                     col.key === 'Product Code'
                       ? 'text-left cursor-pointer select-none hover:text-[#1d1d1f]'
-                      : col.key === 'Qty' ? 'text-right' : 'text-left'
+                      : col.key === 'Qty' || col.key === 'System Qty' ? 'text-right' : 'text-left'
                   }`}
                 >
                   {col.label}{col.key === 'Product Code' ? ` ${sortDesc ? '\u2193' : '\u2191'}` : ''}
@@ -234,6 +241,13 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                     if (col.key === 'Description') {
                       return (
                         <td key={col.key} className="px-4 py-3 text-[#1d1d1f] max-w-[220px] truncate">{p.description}</td>
+                      );
+                    }
+                    if (col.key === 'System Qty') {
+                      return (
+                        <td key={col.key} className="px-4 py-3 text-right">
+                          <span className="font-medium tabular-nums text-[#6e6e73]">{p.system_qty}</span>
+                        </td>
                       );
                     }
                     if (col.key === 'Qty') {
