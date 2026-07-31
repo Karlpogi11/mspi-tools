@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import type { WorkBook } from 'xlsx';
-import type { Product } from '../../lib/api';
+import { type Product, readJson } from '../../lib/api';
 
 interface Props {
   sessionId: number;
@@ -212,7 +212,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
           })),
         }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error);
       onComplete();
     } catch (importError) {
@@ -234,14 +234,14 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
 
       {!file ? (
         <div className="space-y-3">
-          <div
-            onClick={() => inputRef.current?.click()}
-            className="border-2 border-dashed border-[#d2d2d7] rounded-xl p-8 text-center hover:border-[#2563eb] cursor-pointer transition-colors"
-          >
-            <p className="text-[14px] text-[#6e6e73]">Click to select count Excel file</p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => inputRef.current?.click()}
+              className="px-3 py-1.5 border border-[#d2d2d7] text-[13px] font-medium rounded-lg hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+            >
+              Select count Excel file
+            </button>
             <input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
-          </div>
-          <div className="text-center">
             <button
               onClick={handleDownloadTemplate}
               disabled={downloadingTemplate}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { type ScanResult } from '../../lib/api';
+import { type ScanResult, readJson } from '../../lib/api';
 
 interface Props {
   sessionId: number;
@@ -79,7 +79,7 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
           continue;
         }
 
-        const result: ScanResult = await res.json();
+        const result: ScanResult = await readJson(res);
         const isOverscan = result.system_qty > 0 && result.counted_qty > result.system_qty;
         if (result.match) playTing();
         if (isOverscan) {

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WorkBook } from 'xlsx';
-import type { Product } from '../../lib/api';
+import { type Product, readJson } from '../../lib/api';
 
 interface Props {
   sessionId: number;
@@ -136,7 +136,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
         credentials: 'include',
         body: JSON.stringify({ display_columns: mapping.displayColumns, products }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error);
       setShowUpload(false);
       setConfirmReplace(false);

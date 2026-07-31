@@ -91,7 +91,7 @@ export default function AdminToolsPage() {
         </div>
         <button
           onClick={() => { resetForm(); setShowForm(true); }}
-          className="h-9 px-4 bg-[#2563eb] text-white text-[13px] font-medium hover:bg-[#1d4ed8] transition-colors cursor-pointer"
+          className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
         >
           Add tool
         </button>
@@ -172,13 +172,13 @@ export default function AdminToolsPage() {
           <div className="flex gap-2 mt-5">
             <button
               onClick={saveTool}
-              className="h-9 px-4 bg-[#2563eb] text-white text-[13px] font-medium hover:bg-[#1d4ed8] transition-colors cursor-pointer"
+              className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
             >
               {editingId ? 'Save changes' : 'Create tool'}
             </button>
             <button
               onClick={resetForm}
-              className="h-9 px-4 border border-[#d2d2d7] text-[13px] text-[#1d1d1f] font-medium hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+              className="px-4 py-2 border border-[#d2d2d7] text-[13px] text-[#1d1d1f] font-medium rounded-lg hover:bg-[#f5f5f7] transition-colors cursor-pointer"
             >
               Cancel
             </button>

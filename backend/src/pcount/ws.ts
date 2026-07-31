@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { IncomingMessage } from 'http';
 import { verifyAccessToken } from '../auth.js';
+import { isMember } from './store.js';
 
 const clients = new Map<WebSocket, { sessionId: number; scannerId: string; scanning: boolean; ip: string }>();
 const sessions = new Map<number, Set<WebSocket>>();
@@ -9,23 +10,29 @@ const heartbeats = new Map<WebSocket, number>();
 
 let wss: WebSocketServer;
 
-export function initWs(server: Server, options: { allowUnauthenticated?: boolean } = {}) {
+export function initWs(server: Server, _options: { allowUnauthenticated?: boolean } = {}) {
   wss = new WebSocketServer({ server, path: '/ws' });
 
-  wss.on('connection', (ws, request) => {
-    if (!options.allowUnauthenticated && !hasValidSession(request)) {
+  wss.on('connection', async (ws, request) => {
+    const auth = getSessionAuth(request);
+    if (!auth) {
       ws.close(1008, 'Authentication required');
       return;
     }
 
     let joined = false;
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
         const { type, sessionId, scannerId, scanning } = msg;
 
         if (type === 'join' && sessionId && scannerId) {
+          const isAllowed = await isMember(sessionId, auth.userId);
+          if (!isAllowed) {
+            ws.send(JSON.stringify({ type: 'join_error', error: 'You do not have access to this session' }));
+            return;
+          }
           clients.set(ws, { sessionId, scannerId, scanning: scanning === true, ip: getClientIp(request) });
           if (!sessions.has(sessionId)) sessions.set(sessionId, new Set());
           sessions.get(sessionId)!.add(ws);
@@ -81,17 +88,18 @@ export function initWs(server: Server, options: { allowUnauthenticated?: boolean
   }, 15_000);
 }
 
-function hasValidSession(request: IncomingMessage): boolean {
+function getSessionAuth(request: IncomingMessage): { userId: number } | null {
   const token = request.headers.cookie
     ?.split(';')
     .map(part => part.trim())
     .find(part => part.startsWith('token='))
     ?.slice('token='.length);
-  if (!token) return false;
+  if (!token) return null;
   try {
-    return Boolean(verifyAccessToken(decodeURIComponent(token)));
+    const payload = verifyAccessToken(decodeURIComponent(token));
+    return payload ? { userId: payload.userId } : null;
   } catch {
-    return false;
+    return null;
   }
 }
 

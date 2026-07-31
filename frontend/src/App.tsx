@@ -6,8 +6,10 @@ import Layout from './components/Layout';
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const PendingApprovalPage = lazy(() => import('./pages/PendingApprovalPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminToolsPage = lazy(() => import('./pages/AdminToolsPage'));
+const AdminPcountPage = lazy(() => import('./pages/admin/AdminPcountPage'));
 const PcountIndexPage = lazy(() => import('./pages/pcount/IndexPage'));
 const PcountSessionPage = lazy(() => import('./pages/pcount/SessionPage'));
 const RfpuPage = lazy(() => import('./pages/RfpuPage'));
@@ -47,6 +49,14 @@ export default function App() {
                 }
               />
               <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute>
+                    <AdminPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/admin/users"
                 element={
                   <ProtectedRoute>
@@ -59,6 +69,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <AdminToolsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/pcount"
+                element={
+                  <ProtectedRoute>
+                    <AdminPcountPage />
                   </ProtectedRoute>
                 }
               />

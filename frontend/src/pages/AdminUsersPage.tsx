@@ -101,7 +101,7 @@ export default function AdminUsersPage() {
                           onChange={(e) => {
                             if (e.target.value) assignRole(u.id, Number(e.target.value));
                           }}
-                          className="h-8 px-2 text-[12px] border border-[#d2d2d7] bg-white text-[#1d1d1f] outline-none focus:border-[#2563eb] cursor-pointer"
+                          className="h-8 px-2 text-[12px] border border-[#d2d2d7] bg-white text-[#1d1d1f] outline-none focus:border-[#2563eb] cursor-pointer rounded-lg"
                         >
                           <option value="">{u.roleId ? 'Change role' : 'Assign role'}</option>
                           {roles.map((r) => (
@@ -133,12 +133,12 @@ export default function AdminUsersPage() {
               value={newRoleName}
               onChange={(e) => setNewRoleName(e.target.value)}
               placeholder="New role name"
-              className="h-9 px-3 text-[13px] border border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder-[#6e6e73] outline-none focus:border-[#2563eb] flex-1"
+              className="h-9 px-3 text-[13px] border border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder-[#6e6e73] outline-none focus:border-[#2563eb] flex-1 rounded-lg"
               onKeyDown={(e) => e.key === 'Enter' && createRole()}
             />
             <button
               onClick={createRole}
-              className="h-9 px-4 bg-[#2563eb] text-white text-[13px] font-medium hover:bg-[#1d4ed8] transition-colors cursor-pointer"
+              className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
             >
               Add role
             </button>

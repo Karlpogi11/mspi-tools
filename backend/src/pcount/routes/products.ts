@@ -4,7 +4,22 @@ import { broadcast, getScannerCountWs } from '../ws.js';
 
 const router = Router();
 
-router.get('/sessions/:id/products', async (req, res) => {
+async function requireMember(req: any, res: any, next: any) {
+  try {
+    const id = parseInt(req.params.id);
+    await store.assertExists(id);
+    await store.assertMember(id, req.user!.userId);
+    next();
+  } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+router.get('/sessions/:id/products', requireMember, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
     const { status, sort } = req.query;
@@ -14,12 +29,16 @@ router.get('/sessions/:id/products', async (req, res) => {
     });
     res.json(products);
   } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Failed to list products' });
   }
 });
 
-router.get('/sessions/:id/products/:code', async (req, res) => {
+router.get('/sessions/:id/products/:code', requireMember, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
     const code = req.params.code;
@@ -27,15 +46,21 @@ router.get('/sessions/:id/products/:code', async (req, res) => {
     if (!product) return res.status(404).json({ error: 'Product not found' });
     res.json(product);
   } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     res.status(500).json({ error: 'Failed to get product' });
   }
 });
 
-router.put('/sessions/:id/products/:code', async (req, res) => {
+router.put('/sessions/:id/products/:code', requireMember, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
     const code = req.params.code;
     const { counted_qty, adjusted_qty, status, notes } = req.body;
+
+    await store.assertWritable(sessionId);
 
     const update: Record<string, unknown> = {};
     if (counted_qty !== undefined) update.counted_qty = counted_qty;
@@ -48,16 +73,22 @@ router.put('/sessions/:id/products/:code', async (req, res) => {
     broadcast(sessionId, { type: 'product_updated', product });
     res.json(product);
   } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     res.status(500).json({ error: 'Failed to update product' });
   }
 });
 
-router.post('/sessions/:id/scan', async (req, res) => {
+router.post('/sessions/:id/scan', requireMember, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
     const { product_code } = req.body;
 
     if (!product_code) return res.status(400).json({ error: 'product_code required' });
+
+    await store.assertWritable(sessionId);
 
     const result = await store.scanProduct(sessionId, (product_code as string).trim());
     if (!result) return res.status(404).json({ error: 'Product not found in session' });
@@ -65,12 +96,16 @@ router.post('/sessions/:id/scan', async (req, res) => {
     broadcast(sessionId, { type: 'product_scanned', product: result.product, match: result.match });
     res.json({ ...result.product, match: result.match });
   } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Failed to scan product' });
   }
 });
 
-router.post('/sessions/:id/import-system', async (req, res) => {
+router.post('/sessions/:id/import-system', requireMember, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
     const { products, display_columns } = req.body;
@@ -82,6 +117,8 @@ router.post('/sessions/:id/import-system', async (req, res) => {
 
     const session = await store.getSession(sessionId);
     if (!session) return res.status(404).json({ error: 'Session not found' });
+
+    await store.assertWritable(sessionId);
 
     if (!replace && getScannerCountWs(sessionId) > 0) {
       return res.status(409).json({ error: 'Cannot import — another scanner is currently connected.' });
@@ -101,12 +138,16 @@ router.post('/sessions/:id/import-system', async (req, res) => {
     broadcast(sessionId, { type: 'products_imported', count });
     res.json({ message: `Imported ${count} products`, count, replaced: replace });
   } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Failed to import system data' });
   }
 });
 
-router.post('/sessions/:id/import-count', async (req, res) => {
+router.post('/sessions/:id/import-count', requireMember, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
     const { products } = req.body;
@@ -115,10 +156,16 @@ router.post('/sessions/:id/import-count', async (req, res) => {
       return res.status(400).json({ error: 'No products provided' });
     }
 
+    await store.assertWritable(sessionId);
+
     const matched = await store.importCount(sessionId, products);
     broadcast(sessionId, { type: 'counts_imported', matched });
     res.json({ message: `Import complete: ${matched} matched` });
   } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Failed to import count data' });
   }

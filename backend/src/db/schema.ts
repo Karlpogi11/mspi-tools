@@ -6,6 +6,7 @@ import {
   text,
   primaryKey,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/mysql-core';
 
 export const roles = mysqlTable('roles', {
@@ -50,9 +51,31 @@ export const pcountSessions = mysqlTable('pcount_sessions', {
   name: varchar('name', { length: 255 }).notNull(),
   status: varchar('status', { length: 20 }).default('active').notNull(),
   sort_desc: int('sort_desc').default(1).notNull(),
+  created_by: int('created_by').references(() => users.id, { onDelete: 'set null' }),
+  join_code: varchar('join_code', { length: 4 }),
+  submitted_at: timestamp('submitted_at'),
+  submitted_by: int('submitted_by').references(() => users.id, { onDelete: 'set null' }),
   created_at: timestamp('created_at').defaultNow().notNull(),
   updated_at: timestamp('updated_at').defaultNow().notNull().onUpdateNow(),
-});
+}, (table) => ({
+  joinCodeUnique: uniqueIndex('pcount_sessions_join_code_unique').on(table.join_code),
+}));
+
+export const pcountSessionMembers = mysqlTable(
+  'pcount_session_members',
+  {
+    session_id: int('session_id')
+      .notNull()
+      .references(() => pcountSessions.id, { onDelete: 'cascade' }),
+    user_id: int('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    joined_at: timestamp('joined_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.session_id, table.user_id] }),
+  })
+);
 
 export const pcountDisplayColumns = mysqlTable('pcount_display_columns', {
   id: int('id').autoincrement().notNull().primaryKey(),

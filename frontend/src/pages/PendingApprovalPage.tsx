@@ -20,7 +20,7 @@ export default function PendingApprovalPage() {
         </p>
         <button
           onClick={logout}
-          className="w-full h-9 bg-[#2563eb] text-white text-[14px] font-medium hover:bg-[#1d4ed8] transition-colors cursor-pointer"
+          className="w-full px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
         >
           Sign out
         </button>

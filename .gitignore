@@ -4,3 +4,6 @@ dist/
 .env.local
 *.tsbuildinfo
 frontend/dist/
+.turbo/
+apps/
+packages/

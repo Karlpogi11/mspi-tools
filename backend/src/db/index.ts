@@ -21,7 +21,7 @@ export async function initDb(databaseUrl?: string) {
     keepAliveInitialDelay: 10000,
   });
   await pool.query('SELECT 1');
-  db = drizzle(pool, { schema, mode: 'default' });
+  db = drizzle(pool as any, { schema, mode: 'default' });
   dbReady = true;
   return db;
 }

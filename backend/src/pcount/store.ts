@@ -1,6 +1,6 @@
 import { getDb, getDbPool } from '../db/index.js';
-import { pcountSessions, pcountDisplayColumns, pcountProducts, pcountProductExtra } from '../db/schema.js';
-import { eq, and, desc, asc, like, inArray } from 'drizzle-orm';
+import { pcountSessions, pcountSessionMembers, pcountDisplayColumns, pcountProducts, pcountProductExtra, users } from '../db/schema.js';
+import { eq, and, desc, asc, like, inArray, or } from 'drizzle-orm';
 
 let dbAvailable = false;
 
@@ -12,11 +12,25 @@ export function isDbAvailable() {
   return dbAvailable;
 }
 
+export class PcountError extends Error {
+  status: number;
+  data?: unknown;
+  constructor(status: number, message: string, data?: unknown) {
+    super(message);
+    this.status = status;
+    this.data = data;
+  }
+}
+
 export interface SessionRow {
   id: number;
   name: string;
   status: string;
   sort_desc: number;
+  created_by: number | null;
+  join_code: string | null;
+  submitted_at: string | null;
+  submitted_by: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -45,10 +59,19 @@ export interface SessionWithProgress extends SessionRow {
   display_columns?: string[];
   online_count?: number;
   active_scanner_count?: number;
+  is_owner?: boolean;
+  joined?: boolean;
+  owner_email?: string | null;
 }
 
 function castSession(s: typeof pcountSessions.$inferSelect): SessionRow {
-  return { id: s.id, name: s.name, status: s.status, sort_desc: s.sort_desc, created_at: String(s.created_at), updated_at: String(s.updated_at) };
+  return {
+    id: s.id, name: s.name, status: s.status, sort_desc: s.sort_desc,
+    created_by: s.created_by, join_code: s.join_code,
+    submitted_at: s.submitted_at ? String(s.submitted_at) : null,
+    submitted_by: s.submitted_by,
+    created_at: String(s.created_at), updated_at: String(s.updated_at),
+  };
 }
 
 function castProduct(p: typeof pcountProducts.$inferSelect): ProductRow {
@@ -68,6 +91,71 @@ async function attachExtras(rows: (typeof pcountProducts.$inferSelect)[]): Promi
   return rows.map(r => ({ ...castProduct(r), extra: map.get(r.id) || {} }));
 }
 
+export function generateJoinCode(): string {
+  const code = Math.floor(1000 + Math.random() * 9000).toString();
+  return code;
+}
+
+export async function isMember(sessionId: number, userId: number): Promise<boolean> {
+  if (dbAvailable) {
+    const db = getDb();
+    const rows = await db
+      .select({ id: pcountSessionMembers.user_id })
+      .from(pcountSessionMembers)
+      .where(and(eq(pcountSessionMembers.session_id, sessionId), eq(pcountSessionMembers.user_id, userId)))
+      .limit(1);
+    return rows.length > 0;
+  }
+  const s = memSessions.get(sessionId);
+  return s ? (s.created_by === userId || memMembers.get(sessionId)?.has(userId) || false) : false;
+}
+
+export async function assertMember(sessionId: number, userId: number): Promise<void> {
+  if (!(await isMember(sessionId, userId))) {
+    throw new PcountError(403, 'You do not have access to this session');
+  }
+}
+
+export async function assertOwner(sessionId: number, userId: number): Promise<void> {
+  if (!(await isOwner(sessionId, userId))) {
+    throw new PcountError(403, 'Only the session creator can do this');
+  }
+}
+
+export async function isOwner(sessionId: number, userId: number): Promise<boolean> {
+  if (dbAvailable) {
+    const db = getDb();
+    const [row] = await db.select({ created_by: pcountSessions.created_by }).from(pcountSessions).where(eq(pcountSessions.id, sessionId)).limit(1);
+    return row?.created_by === userId;
+  }
+  return memSessions.get(sessionId)?.created_by === userId;
+}
+
+export async function isSubmitted(sessionId: number): Promise<boolean> {
+  if (dbAvailable) {
+    const db = getDb();
+    const [row] = await db.select({ submitted_at: pcountSessions.submitted_at }).from(pcountSessions).where(eq(pcountSessions.id, sessionId)).limit(1);
+    return Boolean(row?.submitted_at);
+  }
+  return Boolean(memSessions.get(sessionId)?.submitted_at);
+}
+
+export async function assertWritable(sessionId: number): Promise<void> {
+  if (await isSubmitted(sessionId)) {
+    throw new PcountError(409, 'Session has been submitted and is locked. Reopen it to make changes.');
+  }
+}
+
+export async function assertExists(sessionId: number): Promise<void> {
+  if (dbAvailable) {
+    const db = getDb();
+    const [row] = await db.select({ id: pcountSessions.id }).from(pcountSessions).where(eq(pcountSessions.id, sessionId)).limit(1);
+    if (!row) throw new PcountError(404, 'Session not found');
+    return;
+  }
+  if (!memSessions.has(sessionId)) throw new PcountError(404, 'Session not found');
+}
+
 async function dbListProducts(sessionId: number, opts?: { status?: string; sort?: string }): Promise<ProductWithExtra[]> {
   const db = getDb();
   const conds = [eq(pcountProducts.session_id, sessionId)];
@@ -85,10 +173,12 @@ async function dbGetProduct(sessionId: number, code: string): Promise<ProductWit
 }
 
 const memSessions = new Map<number, SessionRow>();
+const memMembers = new Map<number, Set<number>>();
 const memDisplayColumns = new Map<number, string[]>();
 const memProducts = new Map<number, ProductRow>();
 const memProductExtras = new Map<number, Record<string, string>>();
-let nextSessionId = 1;
+const memJoinCodes = new Set<string>();
+let nextSessionId = 100;
 let nextProductId = 1;
 
 function memNow() {
@@ -110,17 +200,88 @@ function memGetProduct(sessionId: number, code: string): ProductWithExtra | null
   return { ...p, extra: memProductExtras.get(p.id) || {} };
 }
 
-export async function createSession(name: string): Promise<SessionRow> {
+async function ensureUniqueJoinCode(): Promise<string> {
   if (dbAvailable) {
     const db = getDb();
-    const [inserted] = await db.insert(pcountSessions).values({ name }).$returningId();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const code = generateJoinCode();
+      const [existing] = await db.select({ id: pcountSessions.id }).from(pcountSessions).where(eq(pcountSessions.join_code, code)).limit(1);
+      if (!existing) return code;
+    }
+    throw new PcountError(500, 'Could not generate a unique join code');
+  }
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const code = generateJoinCode();
+    if (!memJoinCodes.has(code)) {
+      memJoinCodes.add(code);
+      return code;
+    }
+  }
+  throw new PcountError(500, 'Could not generate a unique join code');
+}
+
+export async function createSession(name: string, createdBy: number): Promise<SessionRow> {
+  const joinCode = await ensureUniqueJoinCode();
+
+  if (dbAvailable) {
+    const db = getDb();
+    const [inserted] = await db.insert(pcountSessions).values({ name, created_by: createdBy, join_code: joinCode }).$returningId();
+    await db.insert(pcountSessionMembers).values({ session_id: inserted.id, user_id: createdBy });
     const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.id, inserted.id));
     return castSession(row);
   }
   const id = nextSessionId++;
-  const row: SessionRow = { id, name, status: 'active', sort_desc: 1, created_at: memNow(), updated_at: memNow() };
+  const row: SessionRow = {
+    id, name, status: 'active', sort_desc: 1, created_by: createdBy, join_code: joinCode,
+    submitted_at: null, submitted_by: null, created_at: memNow(), updated_at: memNow(),
+  };
   memSessions.set(id, row);
+  const members = new Set<number>();
+  members.add(createdBy);
+  memMembers.set(id, members);
   return row;
+}
+
+export async function joinSession(joinCode: string, userId: number): Promise<SessionRow> {
+  const code = joinCode.trim();
+
+  if (dbAvailable) {
+    const db = getDb();
+    const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.join_code, code)).limit(1);
+    if (!row) throw new PcountError(404, 'No session found with that code');
+
+    if (row.created_by === userId) {
+      throw new PcountError(409, 'You already own this session', { sessionId: row.id });
+    }
+
+    const [existing] = await db
+      .select({ id: pcountSessionMembers.user_id })
+      .from(pcountSessionMembers)
+      .where(and(eq(pcountSessionMembers.session_id, row.id), eq(pcountSessionMembers.user_id, userId)))
+      .limit(1);
+
+    if (!existing) {
+      await db.insert(pcountSessionMembers).values({ session_id: row.id, user_id: userId });
+    }
+    return castSession(row);
+  }
+
+  const session = Array.from(memSessions.values()).find(s => s.join_code === code);
+  if (!session) throw new PcountError(404, 'No session found with that code');
+  if (session.created_by === userId) throw new PcountError(409, 'You already own this session', { sessionId: session.id });
+  if (!memMembers.has(session.id)) memMembers.set(session.id, new Set());
+  memMembers.get(session.id)!.add(userId);
+  return session;
+}
+
+export async function findSessionByCode(joinCode: string): Promise<SessionRow | null> {
+  const code = joinCode.trim();
+  if (dbAvailable) {
+    const db = getDb();
+    const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.join_code, code)).limit(1);
+    return row ? castSession(row) : null;
+  }
+  return Array.from(memSessions.values()).find(s => s.join_code === code) || null;
 }
 
 async function dbSessionWithProgress(s: typeof pcountSessions.$inferSelect): Promise<SessionWithProgress> {
@@ -134,37 +295,125 @@ async function dbSessionWithProgress(s: typeof pcountSessions.$inferSelect): Pro
   const total = Number(row?.total || 0);
   const checked = Number(row?.checked || 0);
   const cols = await db.select().from(pcountDisplayColumns).where(eq(pcountDisplayColumns.session_id, s.id));
-  return { ...castSession(s), progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: cols.map(c => c.column_name) };
+  let owner_email: string | null = null;
+  if (s.created_by != null) {
+    const [owner] = await db.select({ email: users.email }).from(users).where(eq(users.id, s.created_by)).limit(1);
+    owner_email = owner?.email ?? null;
+  }
+  return { ...castSession(s), progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: cols.map(c => c.column_name), owner_email };
 }
 
-export async function listSessions(): Promise<SessionWithProgress[]> {
+export async function listSessions(userId: number): Promise<SessionWithProgress[]> {
   if (dbAvailable) {
     const db = getDb();
-    const sessions = await db.select().from(pcountSessions).orderBy(desc(pcountSessions.created_at));
-    return Promise.all(sessions.map(s => dbSessionWithProgress(s)));
+    const sessions = await db.select().from(pcountSessions);
+    sessions.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return Promise.all(sessions.map(async (s) => {
+      const withProgress = await dbSessionWithProgress(s);
+      return { ...withProgress, is_owner: s.created_by === userId, joined: s.created_by === userId || await isMember(s.id, userId) };
+    }));
   }
   const sessions = Array.from(memSessions.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
   return sessions.map(s => {
     const prods = Array.from(memProducts.values()).filter(p => p.session_id === s.id);
     const total = prods.length;
     const checked = prods.filter(p => p.status !== 'pending').length;
-    return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [] };
+    return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: s.created_by === userId || memMembers.get(s.id)?.has(userId) || false };
   });
 }
 
-export async function getSession(id: number): Promise<SessionWithProgress | null> {
+export async function searchSessions(q: string, userId: number): Promise<SessionWithProgress[]> {
+  const query = q.trim();
+  if (query.length === 0) return [];
+
+  if (dbAvailable) {
+    const db = getDb();
+    const nameLike = `%${query}%`;
+
+    const byName = await db.select().from(pcountSessions).where(like(pcountSessions.name, nameLike));
+
+    let byCode: typeof pcountSessions.$inferSelect | undefined;
+    const found = await findSessionByCode(query);
+    if (found) {
+      const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.id, found.id)).limit(1);
+      byCode = row;
+    }
+
+    const sessions = [...byName];
+    if (byCode && !sessions.some(s => s.id === byCode.id)) {
+      sessions.push(byCode);
+    }
+
+    const unique = Array.from(new Map(sessions.map(s => [s.id, s])).values());
+    return Promise.all(unique.map(async (s) => {
+      const withProgress = await dbSessionWithProgress(s);
+      return { ...withProgress, is_owner: s.created_by === userId, joined: await isMember(s.id, userId) };
+    }));
+  }
+
+  const byName = Array.from(memSessions.values())
+    .filter(s => s.name.toLowerCase().includes(query.toLowerCase()));
+  const byCode = Array.from(memSessions.values()).find(s => s.join_code === query);
+  const sessions = [...byName];
+  if (byCode && !sessions.some(s => s.id === byCode.id)) sessions.push(byCode);
+  return sessions.map(s => {
+    const prods = Array.from(memProducts.values()).filter(p => p.session_id === s.id);
+    const total = prods.length;
+    const checked = prods.filter(p => p.status !== 'pending').length;
+    return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: memMembers.get(s.id)?.has(userId) || s.created_by === userId };
+  });
+}
+
+export async function getSession(id: number, userId?: number): Promise<SessionWithProgress | null> {
   if (dbAvailable) {
     const db = getDb();
     const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.id, id));
     if (!row) return null;
-    return dbSessionWithProgress(row);
+    const withProgress = await dbSessionWithProgress(row);
+    return {
+      ...withProgress,
+      is_owner: userId !== undefined && row.created_by === userId,
+      joined: userId !== undefined && (row.created_by === userId || await isMember(id, userId)),
+    };
   }
   const row = memSessions.get(id);
   if (!row) return null;
   const prods = Array.from(memProducts.values()).filter(p => p.session_id === id);
   const total = prods.length;
   const checked = prods.filter(p => p.status !== 'pending').length;
-  return { ...row, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(id) || [] };
+  return { ...row, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(id) || [], is_owner: userId !== undefined && row.created_by === userId, joined: userId !== undefined && (row.created_by === userId || memMembers.get(id)?.has(userId)) };
+}
+
+export async function submitSession(id: number, userId: number): Promise<SessionRow | null> {
+  await assertMember(id, userId);
+
+  if (dbAvailable) {
+    const db = getDb();
+    await db.update(pcountSessions).set({ submitted_at: new Date(), submitted_by: userId }).where(eq(pcountSessions.id, id));
+    const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.id, id));
+    return castSession(row);
+  }
+  const existing = memSessions.get(id);
+  if (!existing) return null;
+  const updated = { ...existing, submitted_at: memNow(), submitted_by: userId, updated_at: memNow() };
+  memSessions.set(id, updated);
+  return updated;
+}
+
+export async function reopenSession(id: number, userId: number): Promise<SessionRow | null> {
+  await assertOwner(id, userId);
+
+  if (dbAvailable) {
+    const db = getDb();
+    await db.update(pcountSessions).set({ submitted_at: null, submitted_by: null }).where(eq(pcountSessions.id, id));
+    const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.id, id));
+    return castSession(row);
+  }
+  const existing = memSessions.get(id);
+  if (!existing) return null;
+  const updated = { ...existing, submitted_at: null, submitted_by: null, updated_at: memNow() };
+  memSessions.set(id, updated);
+  return updated;
 }
 
 export async function updateSession(id: number, data: Partial<SessionRow>): Promise<SessionRow | null> {
@@ -194,6 +443,7 @@ export async function deleteSession(id: number): Promise<void> {
   }
   memSessions.delete(id);
   memDisplayColumns.delete(id);
+  memMembers.delete(id);
   for (const [pid, p] of memProducts) {
     if (p.session_id === id) { memProducts.delete(pid); memProductExtras.delete(pid); }
   }
@@ -456,4 +706,37 @@ function parseCategory(code: string): string {
 export async function hasScannedProducts(sessionId: number): Promise<boolean> {
   const products = await listProducts(sessionId);
   return products.some(p => p.counted_qty > 0);
+}
+
+export async function adminListSessions(): Promise<(SessionWithProgress & { member_count: number })[]> {
+  if (!dbAvailable) throw new PcountError(503, 'Database unavailable');
+  const db = getDb();
+  const pool = getDbPool();
+  const sessions = await db.select().from(pcountSessions).orderBy(desc(pcountSessions.created_at));
+  return Promise.all(sessions.map(async (s) => {
+    const withProgress = await dbSessionWithProgress(s);
+    const [rows] = await pool.execute('SELECT COUNT(*) as c FROM pcount_session_members WHERE session_id = ?', [s.id]);
+    const member_count = Number((rows as any[])[0]?.c || 0);
+    return { ...withProgress, member_count };
+  }));
+}
+
+export async function adminGetSession(sessionId: number): Promise<SessionWithProgress | null> {
+  if (!dbAvailable) throw new PcountError(503, 'Database unavailable');
+  const db = getDb();
+  const [row] = await db.select().from(pcountSessions).where(eq(pcountSessions.id, sessionId));
+  if (!row) return null;
+  return dbSessionWithProgress(row);
+}
+
+export async function adminListSessionProducts(sessionId: number): Promise<ProductWithExtra[]> {
+  if (!dbAvailable) throw new PcountError(503, 'Database unavailable');
+  return dbListProducts(sessionId);
+}
+
+export async function adminGetUser(userId: number): Promise<{ id: number; email: string } | null> {
+  if (!dbAvailable) return null;
+  const db = getDb();
+  const [row] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+  return row || null;
 }

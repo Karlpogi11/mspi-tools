@@ -9,7 +9,13 @@ const router = Router();
 router.get('/my-tools', authenticateToken, async (req: Request, res: Response) => {
   try {
     const db = getDb();
-    const { roleId } = req.user!;
+    const { roleId, roleName } = req.user!;
+
+    if (roleName === 'Admin') {
+      const allTools = await db.select().from(tools);
+      res.json(allTools);
+      return;
+    }
 
     if (!roleId) {
       res.json([]);

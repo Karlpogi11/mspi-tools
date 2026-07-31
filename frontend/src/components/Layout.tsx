@@ -3,8 +3,7 @@ import { useAuth } from '../lib/auth';
 
 const navItems = [
   { to: '/', label: 'Home' },
-  { to: '/admin/users', label: 'Users' },
-  { to: '/admin/tools', label: 'Tools' },
+  { to: '/admin', label: 'Admin' },
 ];
 
 export default function Layout() {
@@ -26,11 +25,11 @@ export default function Layout() {
               MSPI Tools
             </Link>
             <nav className="flex items-center gap-0.5">
-              {navItems.map((item) => (
+              {navItems.filter(item => item.to !== '/admin' || user?.roleName === 'Admin').map((item) => (
                 <Link
                   key={item.to}
                   to={item.to}
-                  className={`px-3 py-1 text-[13px] font-medium rounded-md transition-all ${
+                  className={`px-3 py-1 text-[13px] font-medium rounded-lg transition-all ${
                     isActive(item.to)
                       ? 'bg-[#2563eb] text-white'
                       : 'text-[#6e6e73] hover:text-[#1d1d1f] hover:bg-[#f5f5f7]'
@@ -44,7 +43,7 @@ export default function Layout() {
           <div className="flex items-center gap-4">
             <span className="text-[13px] text-[#6e6e73]">{user?.fullName || user?.email}</span>
             {user?.roleName && (
-              <span className="text-[11px] px-2 py-0.5 rounded-md bg-[#f5f5f7] text-[#6e6e73] border border-[#d2d2d7]">
+              <span className="text-[11px] px-2 py-0.5 rounded-lg bg-[#f5f5f7] text-[#6e6e73] border border-[#d2d2d7]">
                 {user.roleName}
               </span>
             )}

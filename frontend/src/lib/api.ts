@@ -1,19 +1,54 @@
 const BASE = import.meta.env.VITE_API_URL || '/api';
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.error || 'An error occurred');
+export async function readJson<T>(res: Response): Promise<T> {
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    throw new Error('The server is unavailable right now. Please try again in a moment.');
   }
+  return res.json() as Promise<T>;
+}
 
-  return data;
+async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        ...options,
+      });
+    } catch {
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 800));
+        continue;
+      }
+      throw new Error('The server is unavailable right now. Please try again in a moment.');
+    }
+
+    let data: T;
+    try {
+      data = await readJson<T>(res);
+    } catch (err) {
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 800));
+        continue;
+      }
+      throw err;
+    }
+
+    if (!res.ok) {
+      const err = new Error(((data as { error?: string } | null)?.error) || 'An error occurred') as Error & { data?: unknown };
+      err.data = data;
+      throw err;
+    }
+
+    return data;
+  }
+  throw new Error('The server is unavailable right now. Please try again in a moment.');
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  return fetchJson<T>(path, options);
 }
 
 export interface User {
@@ -50,8 +85,26 @@ export interface Session {
   display_columns: string[];
   online_count?: number;
   active_scanner_count?: number;
+  created_by: number | null;
+  join_code: string | null;
+  submitted_at: string | null;
+  submitted_by: number | null;
+  is_owner?: boolean;
+  joined?: boolean;
+  owner_email?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PcountAdminSession extends Session {
+  member_count: number;
+}
+
+export interface PcountAdminDetail {
+  session: Session;
+  products: Product[];
+  creator: { id: number; email: string } | null;
+  submitter: { id: number; email: string } | null;
 }
 
 export interface Product {
@@ -139,10 +192,32 @@ export const api = {
     list: () => request<Session[]>('/pcount/sessions'),
     get: (id: number) => request<Session>(`/pcount/sessions/${id}`),
     create: () => request<Session>('/pcount/sessions', { method: 'POST' }),
+    search: (q: string) =>
+      request<Session[]>(`/pcount/sessions/search?q=${encodeURIComponent(q)}`),
+    join: (code: string) =>
+      request<Session>('/pcount/sessions/join', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      }),
+    submit: (id: number) =>
+      request<{ message: string; session: Session }>(`/pcount/sessions/${id}/submit`, {
+        method: 'POST',
+      }),
+    reopen: (id: number) =>
+      request<{ message: string; session: Session }>(`/pcount/sessions/${id}/reopen`, {
+        method: 'POST',
+      }),
     update: (id: number, data: Partial<Session>) =>
       request<Session>(`/pcount/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: number) =>
       request<{ message: string }>(`/pcount/sessions/${id}`, { method: 'DELETE' }),
+  },
+
+  pcountAdmin: {
+    listSessions: () => request<PcountAdminSession[]>('/pcount/admin/sessions'),
+    getSession: (id: number) =>
+      request<PcountAdminDetail>(`/pcount/admin/sessions/${id}`),
+    exportUrl: (id: number) => `/api/pcount/admin/sessions/${id}/export`,
   },
 
   products: {

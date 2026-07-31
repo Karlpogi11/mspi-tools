@@ -1,15 +1,37 @@
-import { type Product } from '../../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { type Product, readJson } from '../../lib/api';
 
 interface Props {
   products: Product[];
-  displayColumns: string[];
+  defaultColumns?: string[];
   sortDesc: boolean;
   onToggleSort: () => void;
   onUpdate: (product: Product) => void;
   onSelect?: (product: Product) => void;
   selectedCode?: string | null;
   overscanCode?: string | null;
+  readOnly?: boolean;
 }
+
+const ALL_COLUMNS = [
+  { key: 'Product Code', label: 'Product Code', core: true },
+  { key: 'Description', label: 'Description', core: true },
+  { key: 'Qty', label: 'Qty', core: true },
+  { key: 'Product SKU Number', label: 'Product SKU Number' },
+  { key: 'Barcode', label: 'Barcode' },
+  { key: 'Brand', label: 'Brand' },
+  { key: 'Category', label: 'Category' },
+  { key: 'Group', label: 'Group' },
+  { key: 'Price', label: 'Price' },
+  { key: 'Retail value', label: 'Retail value' },
+  { key: 'Available Qty', label: 'Available Qty' },
+  { key: 'Serial Total Qty', label: 'Serial Total Qty' },
+  { key: 'Unit Cost', label: 'Unit Cost' },
+  { key: 'Total Cost', label: 'Total Cost' },
+];
+
+const CORE_KEYS = ALL_COLUMNS.filter(c => c.core).map(c => c.key);
+const STORAGE_KEY = 'pcount.tableColumns';
 
 const statusStyles: Record<string, { bg: string; dot: string; label: string }> = {
   pending:  { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#6e6e73]', label: 'Pending' },
@@ -17,7 +39,52 @@ const statusStyles: Record<string, { bg: string; dot: string; label: string }> =
   missing:  { bg: 'bg-[#fffbeb]',        dot: 'bg-[#d97706]', label: 'Missing' },
 };
 
-export default function ProductTable({ products, displayColumns, sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode }: Props) {
+function loadSaved(): string[] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved) as string[];
+      const valid = ALL_COLUMNS.map(c => c.key).filter(k => parsed.includes(k));
+      if (valid.length > 0) return valid;
+    }
+  } catch {}
+  return ALL_COLUMNS.map(c => c.key);
+}
+
+function resolveColumns(defaultColumns: string[]): string[] {
+  if (defaultColumns.length > 0) {
+    const mapped = ALL_COLUMNS.map(c => c.key).filter(k => defaultColumns.includes(k));
+    return Array.from(new Set([...CORE_KEYS, ...mapped]));
+  }
+  return loadSaved();
+}
+
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode, readOnly }: Props) {
+  const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
+  const [showPicker, setShowPicker] = useState(false);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const lastDefaultRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (defaultColumns.length > 0 && JSON.stringify(lastDefaultRef.current) !== JSON.stringify(defaultColumns)) {
+      lastDefaultRef.current = defaultColumns;
+      setVisible(resolveColumns(defaultColumns));
+    }
+  }, [defaultColumns]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(visible));
+  }, [visible]);
+
+  useEffect(() => {
+    if (!showPicker) return;
+    function onDocClick(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowPicker(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showPicker]);
+
   if (products.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-[#d2d2d7] p-10 text-center">
@@ -35,6 +102,8 @@ export default function ProductTable({ products, displayColumns, sortDesc, onTog
     sortDesc ? b.product_code.localeCompare(a.product_code) : a.product_code.localeCompare(b.product_code)
   );
 
+  const shown = ALL_COLUMNS.filter(c => visible.includes(c.key));
+
   async function handleRecount(product: Product) {
     try {
       const res = await fetch(`/api/pcount/sessions/${product.session_id}/products/${encodeURIComponent(product.product_code)}`, {
@@ -43,7 +112,7 @@ export default function ProductTable({ products, displayColumns, sortDesc, onTog
         credentials: 'include',
         body: JSON.stringify({ counted_qty: 0, status: 'pending' }),
       });
-      const data = await res.json();
+      const data = await readJson<Partial<Product>>(res);
       if (res.ok) onUpdate({ ...product, ...data });
     } catch {}
   }
@@ -57,20 +126,73 @@ export default function ProductTable({ products, displayColumns, sortDesc, onTog
           30%, 70% { transform: translateX(4px); }
         }
       `}</style>
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#d2d2d7] bg-[#fafafa]">
+        <span className="text-[12px] font-medium text-[#6e6e73] uppercase tracking-wider">Display these columns</span>
+        <div className="relative" ref={pickerRef}>
+          <button
+            onClick={() => setShowPicker(!showPicker)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#d2d2d7] bg-white text-[13px] font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+          >
+            <svg className="w-3.5 h-3.5 text-[#6e6e73]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
+            </svg>
+            {visible.length === 0 ? 'None' : `${visible.length}/${ALL_COLUMNS.length} selected`}
+            <svg className="w-3.5 h-3.5 text-[#6e6e73]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          {showPicker && (
+            <div className="absolute right-0 top-full mt-1.5 w-64 bg-white rounded-xl border border-[#d2d2d7] shadow-lg p-2 z-20">
+              <div className="flex items-center justify-between px-2 pt-1 pb-2 border-b border-[#d2d2d7]/60">
+                <span className="text-[12px] font-semibold text-[#1d1d1f]">Display these columns</span>
+                <button
+                  onClick={() => setVisible(visible.length === ALL_COLUMNS.length ? [] : ALL_COLUMNS.map(c => c.key))}
+                  className="text-[12px] font-medium text-[#2563eb] hover:text-[#1d4ed8] hover:underline transition-colors cursor-pointer"
+                >
+                  {visible.length === ALL_COLUMNS.length ? 'Clear all' : 'Select all'}
+                </button>
+              </div>
+              <div className="max-h-64 overflow-y-auto py-1">
+                {ALL_COLUMNS.map(col => (
+                  <label
+                    key={col.key}
+                    className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[#f5f5f7] cursor-pointer select-none"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visible.includes(col.key)}
+                      onChange={() => {
+                        setVisible(prev =>
+                          prev.includes(col.key) ? prev.filter(k => k !== col.key) : [...prev, col.key]
+                        );
+                      }}
+                      className="w-4 h-4 rounded accent-[#2563eb] cursor-pointer"
+                    />
+                    <span className="text-[13px] text-[#1d1d1f]">{col.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
       <div className="overflow-x-auto max-h-[65vh]">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7] sticky top-0 z-10">
-              <th className="text-left px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider cursor-pointer select-none hover:text-[#1d1d1f]" onClick={onToggleSort}>
-                Product Code {sortDesc ? '\u2193' : '\u2191'}
-              </th>
-              <th className="text-left px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Description</th>
-              <th className="text-left px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Cat</th>
-              <th className="text-right px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">System Qty</th>
-              <th className="text-right px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Actual Qty</th>
-              <th className="text-center px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Status</th>
-              {displayColumns.map(col => (
-                <th key={col} className="text-left px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">{col}</th>
+              {shown.map(col => (
+                <th
+                  key={col.key}
+                  onClick={col.key === 'Product Code' ? onToggleSort : undefined}
+                  className={`px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider ${
+                    col.key === 'Product Code'
+                      ? 'text-left cursor-pointer select-none hover:text-[#1d1d1f]'
+                      : col.key === 'Qty' ? 'text-right' : 'text-left'
+                  }`}
+                >
+                  {col.label}{col.key === 'Product Code' ? ` ${sortDesc ? '\u2193' : '\u2191'}` : ''}
+                </th>
               ))}
             </tr>
           </thead>
@@ -91,63 +213,60 @@ export default function ProductTable({ products, displayColumns, sortDesc, onTog
                     overscanCode === p.product_code ? 'animate-[overscan-shake_0.4s_ease-in-out] bg-[#fef2f2]' : ''
                   }`}
                 >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${st.dot} flex-shrink-0`} />
-                      <span className="font-mono text-[12px] text-[#1d1d1f] font-medium">{p.product_code}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-[#1d1d1f] max-w-[220px] truncate">{p.description}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-block text-[11px] px-2 py-0.5 rounded font-medium ${
-                      p.category === 'apple' ? 'text-[#2563eb] bg-[#eff6ff]' :
-                      p.category === '3pp' ? 'text-[#7c3aed] bg-[#f5f3ff]' :
-                      'text-[#6e6e73] bg-[#f5f5f7]'
-                    }`}>
-                      {p.category || '\u2014'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="font-semibold text-[#1d1d1f]">{p.system_qty}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <span className={`font-semibold tabular-nums ${
-                        isOver ? 'text-[#dc2626]' :
-                        isMatch ? 'text-[#16a34a]' :
-                        p.counted_qty > 0 ? 'text-[#d97706]' :
-                        'text-[#6e6e73]'
-                      }`}>
-                        {p.counted_qty}
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleRecount(p); }}
-                        title="Reset count"
-                        className="p-1 rounded hover:bg-[#f5f5f7] text-[#6e6e73] hover:text-[#dc2626] transition-colors"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                          <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ${st.bg} ${
-                      p.status === 'matched' ? 'text-[#16a34a]' :
-                      p.status === 'missing' ? 'text-[#d97706]' :
-                      'text-[#6e6e73]'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        p.status === 'matched' ? 'bg-[#16a34a]' :
-                        p.status === 'missing' ? 'bg-[#d97706]' :
-                        'bg-[#6e6e73]'
-                      }`} />
-                      {st.label}
-                    </span>
-                  </td>
-                  {displayColumns.map(col => (
-                    <td key={col} className="px-4 py-3 text-[#6e6e73] max-w-[140px] truncate text-[12px]">{p.extra[col] || '\u2014'}</td>
-                  ))}
+                  {shown.map(col => {
+                    if (col.key === 'Product Code') {
+                      return (
+                        <td key={col.key} className="px-4 py-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`w-2 h-2 rounded-full ${st.dot} flex-shrink-0`} />
+                            <span className="font-mono text-[12px] text-[#1d1d1f] font-medium">{p.product_code}</span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${st.bg} ${
+                              p.status === 'matched' ? 'text-[#16a34a]' :
+                              p.status === 'missing' ? 'text-[#d97706]' :
+                              'text-[#6e6e73]'
+                            }`}>
+                              {st.label}
+                            </span>
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === 'Description') {
+                      return (
+                        <td key={col.key} className="px-4 py-3 text-[#1d1d1f] max-w-[220px] truncate">{p.description}</td>
+                      );
+                    }
+                    if (col.key === 'Qty') {
+                      return (
+                        <td key={col.key} className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <span className={`font-semibold tabular-nums ${
+                              isOver ? 'text-[#dc2626]' :
+                              isMatch ? 'text-[#16a34a]' :
+                              p.counted_qty > 0 ? 'text-[#d97706]' :
+                              'text-[#6e6e73]'
+                            }`}>
+                              {p.counted_qty}
+                            </span>
+                            {!readOnly && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleRecount(p); }}
+                                title="Reset count"
+                                className="p-1 rounded-lg hover:bg-[#f5f5f7] text-[#6e6e73] hover:text-[#dc2626] transition-colors"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                  <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    }
+                    return (
+                      <td key={col.key} className="px-4 py-3 text-[#6e6e73] max-w-[140px] truncate text-[12px]">{p.extra[col.key] || '\u2014'}</td>
+                    );
+                  })}
                 </tr>
               );
             })}

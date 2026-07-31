@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api, type Session, type Product, type ScanResult } from '../../lib/api';
+import { api, type Session, type Product, type ScanResult, readJson } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import ProgressCircle from '../../components/pcount/ProgressCircle';
 import ImportSystem from '../../components/pcount/ImportSystem';
@@ -53,13 +53,8 @@ export default function PcountSessionPage() {
 
       if (prods.length === 0) {
         setStage('setup');
-      } else if (prods.some(p => p.counted_qty > 0)) {
-        hasBeenInVerify.current = true;
-        setStage('verify');
-      } else if (hasBeenInVerify.current) {
-        setStage('verify');
       } else {
-        setStage('count');
+        setStage('verify');
       }
     } catch {
       navigate('/pcount');
@@ -71,6 +66,13 @@ export default function PcountSessionPage() {
   useEffect(() => {
     loadSession();
   }, [loadSession]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      api.sessions.get(sessionId).then(s => setSession(s)).catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [sessionId]);
 
   const hasSessionProducts = products.length > 0;
 
@@ -286,6 +288,19 @@ export default function PcountSessionPage() {
             <p className="text-[12px] text-[#6e6e73] mt-0.5">
               {session.status} &middot; Created {new Date(session.created_at).toLocaleDateString()}
             </p>
+            {session.is_owner && session.join_code && (
+              <div className="mt-2 inline-flex items-center gap-2 border border-[#2563eb]/30 bg-[#2563eb]/5 px-2.5 py-1 rounded-lg">
+                <span className="text-[11px] text-[#6e6e73]">Join code</span>
+                <span className="text-[14px] font-bold tracking-[0.35em] text-[#2563eb]">{session.join_code}</span>
+                <button
+                  onClick={() => navigator.clipboard.writeText(session.join_code!)}
+                  title="Copy code"
+                  className="text-[11px] font-medium text-[#2563eb] hover:text-[#1d4ed8] cursor-pointer"
+                >
+                  Copy
+                </button>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4">
             {stage === 'verify' && (
@@ -309,11 +324,6 @@ export default function PcountSessionPage() {
                 <span className="sr-only">Export Excel</span>
               </button>
             )}
-            <div className="text-right text-[13px] text-[#6e6e73]">
-              <span className="font-medium text-[#1d1d1f]">{statusCounts.matched}</span> matched
-              <br />
-              <span className="font-medium text-[#1d1d1f]">{statusCounts.missing}</span> missing
-            </div>
             {stage === 'verify' && products.length > 0 && scannerCount > 0 && (
               <div className="flex items-center gap-1.5 text-[12px] text-[#6e6e73] bg-[#f5f5f7] rounded-full px-3 py-1.5">
                 <span className="w-2 h-2 rounded-full bg-[#16a34a] animate-pulse" />
@@ -351,7 +361,7 @@ export default function PcountSessionPage() {
           >
             3. Scan & Verify
           </button>
-        </div>
+          </div>
       </div>
 
       {stage === 'setup' && (
@@ -376,9 +386,9 @@ export default function PcountSessionPage() {
           <div className="mt-3 text-center">
             <button
               onClick={handleSkipToScan}
-              className="text-[13px] text-[#2563eb] hover:text-[#1d4ed8] cursor-pointer"
+              className="px-4 py-2 bg-[#15803d] text-white text-[13px] font-medium rounded-lg hover:bg-[#166534] transition-colors cursor-pointer"
             >
-              Skip &mdash; start live scanning instead
+              Skip &mdash; start live scanning instead <span className="opacity-75">(recommended)</span>
             </button>
           </div>
         </div>
@@ -423,7 +433,7 @@ export default function PcountSessionPage() {
             <div className="lg:col-span-2">
               <ProductTable
                 products={filteredProducts}
-                displayColumns={session.display_columns || []}
+                defaultColumns={session.display_columns || []}
                 sortDesc={sortDesc}
                 onToggleSort={() => setSortDesc(!sortDesc)}
                 onUpdate={handleProductUpdate}
@@ -443,7 +453,7 @@ export default function PcountSessionPage() {
                       credentials: 'include',
                       body: JSON.stringify({ counted_qty: 0, status: 'pending' }),
                     });
-                    const data = await res.json();
+                    const data = await readJson<Partial<Product>>(res);
                     if (res.ok) {
                       setLastScan(null);
                       setProducts(prev => prev.map(p => p.product_code === code ? { ...p, ...data } : p));
@@ -459,7 +469,7 @@ export default function PcountSessionPage() {
                       credentials: 'include',
                       body: JSON.stringify({ status }),
                     });
-                    const data = await res.json();
+                    const data = await readJson<Partial<Product>>(res);
                     if (res.ok) {
                       setProducts(prev => prev.map(p => p.product_code === code ? { ...p, ...data } : p));
                       loadSession();
@@ -486,7 +496,7 @@ export default function PcountSessionPage() {
           <p className="text-[14px] text-[#6e6e73] mb-3">No products imported yet.</p>
           <button
             onClick={() => setStage('setup')}
-            className="px-4 py-2 bg-[#2563eb] text-white text-[13px] rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
+            className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
           >
             Import System Export
           </button>

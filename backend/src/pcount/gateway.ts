@@ -6,15 +6,35 @@ import { setDbAvailable } from './store.js';
 import { initWs } from './ws.js';
 import sessionRoutes from './routes/sessions.js';
 import productRoutes from './routes/products.js';
+import adminRoutes from './routes/admin.js';
+import { requireAdmin } from '../auth.js';
 
-const pcountAuth: RequestHandler = process.env.NODE_ENV === 'development'
-  ? (_req, _res, next) => next()
-  : authenticateToken;
+const allowedOrigins = new Set(
+  [
+    process.env.FRONTEND_URL,
+    'https://tools.mspi.io',
+    'http://localhost:5173',
+  ].filter(Boolean) as string[]
+);
+
+const originCheck: RequestHandler = (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && !allowedOrigins.has(origin)) {
+    res.status(403).json({ error: 'Request origin not allowed' });
+    return;
+  }
+  next();
+};
 
 export const pcountRouter = Router();
-pcountRouter.use(pcountAuth);
+pcountRouter.use(authenticateToken);
+pcountRouter.use(originCheck);
 pcountRouter.use(sessionRoutes);
 pcountRouter.use(productRoutes);
+
+export const pcountAdminRouter = Router();
+pcountAdminRouter.use(authenticateToken, requireAdmin);
+pcountAdminRouter.use(adminRoutes);
 
 export async function initPcount(server: http.Server) {
   try {
@@ -25,5 +45,5 @@ export async function initPcount(server: http.Server) {
     console.warn('PCount database unavailable — using in-memory store');
     console.warn('Set DATABASE_URL and restart to use MySQL');
   }
-  initWs(server, { allowUnauthenticated: process.env.NODE_ENV === 'development' });
+  initWs(server, { allowUnauthenticated: false });
 }
