@@ -69,13 +69,11 @@ export default function AdminPcountPage() {
                 {selected.creator ? ` by ${selected.creator.email}` : ''}
               </p>
               <p className="text-[12px] text-[#6e6e73] mt-0.5">
-                {s.submitted_at ? (
+                {s.submitted_at && (
                   <span className="text-[#15803d] font-medium">
                     Submitted {new Date(s.submitted_at).toLocaleString()}
                     {selected.submitter ? ` by ${selected.submitter.email}` : ''}
                   </span>
-                ) : (
-                  <span className="text-[#d97706]">Not submitted yet</span>
                 )}
               </p>
             </div>

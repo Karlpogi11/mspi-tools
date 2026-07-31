@@ -62,6 +62,11 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
       if (inputRef.current === target || inputRef.current?.contains(target)) return;
       if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
       if (target.closest('[role="dialog"], .fixed.inset-0')) return;
+      const active = document.activeElement;
+      if (active && active !== inputRef.current && active !== document.body &&
+          (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) {
+        return;
+      }
       inputRef.current?.focus();
     }
     document.addEventListener('click', onDocClick);

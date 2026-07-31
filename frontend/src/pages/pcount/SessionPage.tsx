@@ -20,6 +20,7 @@ export default function PcountSessionPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [stage, setStage] = useState<Stage>('setup');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortDesc, setSortDesc] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -28,7 +29,10 @@ export default function PcountSessionPage() {
   const [overscanCode, setOverscanCode] = useState<string | null>(null);
   const [scannerCount, setScannerCount] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  
   const [exporting, setExporting] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [exportError, setExportError] = useState('');
   const scanBarRef = useRef<HTMLInputElement>(null);
   const scannerId = useRef<string>(crypto.randomUUID());
@@ -246,6 +250,7 @@ export default function PcountSessionPage() {
 
   const filteredProducts = products.filter(p => {
     if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+    if (categoryFilter !== 'all' && (p.category || '') !== categoryFilter) return false;
     if (searchQuery && !p.product_code.toLowerCase().includes(searchQuery.toLowerCase()) &&
         !p.description.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
@@ -262,6 +267,12 @@ export default function PcountSessionPage() {
     missing: products.filter(p => p.status === 'missing').length,
   };
 
+  const categoryCounts = {
+    all: products.length,
+    apple: products.filter(p => p.category === 'apple').length,
+    '3pp': products.filter(p => p.category === '3pp').length,
+  };
+
   if (loading) {
     return <div className="text-center py-20 text-[14px] text-[#6e6e73]">Loading...</div>;
   }
@@ -275,29 +286,57 @@ export default function PcountSessionPage() {
       <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
         <div className="flex items-center justify-between">
           <div>
-            <input
-              type="text"
-              value={session.name}
-              onChange={async (e) => {
-                const val = e.target.value;
-                setSession(s => s ? { ...s, name: val } : s);
-                await api.sessions.update(sessionId, { name: val });
-              }}
-              className="text-[18px] font-semibold text-[#1d1d1f] bg-transparent border-none outline-none focus:border-b focus:border-[#2563eb] pb-0.5"
-            />
+            <div className="flex items-center gap-2 group">
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={session.name}
+                onChange={async (e) => {
+                  const val = e.target.value;
+                  setSession(s => s ? { ...s, name: val } : s);
+                  await api.sessions.update(sessionId, { name: val });
+                }}
+                
+                title="Click to rename session"
+                className="text-[18px] font-semibold text-[#1d1d1f] bg-transparent border-none outline-none focus:border-b focus:border-[#2563eb] pb-0.5 cursor-text"
+              />
+              <button
+                onClick={() => nameInputRef.current?.focus()}
+                title="Rename session"
+                className="text-[#9a9aa0] hover:text-[#2563eb] transition-colors p-1 rounded-lg hover:bg-[#f5f5f7] cursor-pointer shrink-0"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                </svg>
+              </button>
+            </div>
             <p className="text-[12px] text-[#6e6e73] mt-0.5">
               {session.status} &middot; Created {new Date(session.created_at).toLocaleDateString()}
             </p>
             {session.is_owner && session.join_code && (
-              <div className="mt-2 inline-flex items-center gap-2 border border-[#2563eb]/30 bg-[#2563eb]/5 px-2.5 py-1 rounded-lg">
-                <span className="text-[11px] text-[#6e6e73]">Join code</span>
-                <span className="text-[14px] font-bold tracking-[0.35em] text-[#2563eb]">{session.join_code}</span>
+              <div className="mt-2 inline-flex items-center gap-2">
+                <span className="text-[12px] text-[#6e6e73]">Join code</span>
+                <span className="text-[16px] font-bold tracking-[0.35em] text-[#2563eb]">{session.join_code}</span>
                 <button
-                  onClick={() => navigator.clipboard.writeText(session.join_code!)}
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(session.join_code!);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  }}
                   title="Copy code"
-                  className="text-[11px] font-medium text-[#2563eb] hover:text-[#1d4ed8] cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-[#2563eb] hover:text-[#1d4ed8] hover:underline cursor-pointer"
                 >
-                  Copy
+                  {copied ? (
+                    <>
+                      <svg className="w-3.5 h-3.5 text-[#16a34a]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                      <span className="text-[#16a34a]">Copied</span>
+                    </>
+                  ) : (
+                    'Copy'
+                  )}
                 </button>
               </div>
             )}
@@ -336,32 +375,27 @@ export default function PcountSessionPage() {
 
         {exportError && <p className="mt-3 text-[12px] text-[#dc2626]">{exportError}</p>}
 
-        <div className="flex gap-2 mt-4">
-          <button
-            onClick={() => setStage('setup')}
-            className={`px-3 py-1.5 text-[12px] rounded-lg transition-colors cursor-pointer ${
-              stage === 'setup' ? 'bg-[#2563eb] text-white' : 'bg-[#f5f5f7] text-[#6e6e73] hover:text-[#1d1d1f]'
-            }`}
-          >
-            1. System Import
-          </button>
-          <button
-            onClick={() => setStage('count')}
-            className={`px-3 py-1.5 text-[12px] rounded-lg transition-colors cursor-pointer ${
-              stage === 'count' ? 'bg-[#2563eb] text-white' : 'bg-[#f5f5f7] text-[#6e6e73] hover:text-[#1d1d1f]'
-            }`}
-          >
-            2. Count Import
-          </button>
-          <button
-            onClick={() => setStage('verify')}
-            className={`px-3 py-1.5 text-[12px] rounded-lg transition-colors cursor-pointer ${
-              stage === 'verify' ? 'bg-[#2563eb] text-white' : 'bg-[#f5f5f7] text-[#6e6e73] hover:text-[#1d1d1f]'
-            }`}
-          >
-            3. Scan & Verify
-          </button>
-          </div>
+        <nav className="flex items-center gap-2 mt-4 text-[12px]">
+          {[
+            { key: 'setup', label: '1. System Import' },
+            { key: 'count', label: '2. Count Import' },
+            { key: 'verify', label: '3. Scan & Verify' },
+          ].map((item, i) => (
+            <span key={item.key} className="flex items-center gap-2">
+              {i > 0 && <span className="text-[#d2d2d7] text-[12px]">/</span>}
+              <button
+                onClick={() => setStage(item.key as 'setup' | 'count' | 'verify')}
+                className={`transition-colors cursor-pointer pb-0.5 underline underline-offset-4 ${
+                  stage === item.key
+                    ? 'text-[#2563eb] font-medium'
+                    : 'text-[#6e6e73] hover:text-[#1d1d1f]'
+                }`}
+              >
+                {item.label}
+              </button>
+            </span>
+          ))}
+        </nav>
       </div>
 
       {stage === 'setup' && (
@@ -396,29 +430,62 @@ export default function PcountSessionPage() {
 
       {stage === 'verify' && products.length > 0 && (
         <>
-          <div className="bg-white rounded-xl border border-[#d2d2d7] p-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              {Object.entries(statusCounts).map(([key, count]) => (
-                <button
-                  key={key}
-                  onClick={() => setStatusFilter(key)}
-                  className={`px-3 py-1.5 text-[12px] rounded-lg transition-colors cursor-pointer ${
-                    statusFilter === key
-                      ? 'bg-[#2563eb] text-white'
-                      : 'bg-[#f5f5f7] text-[#6e6e73] hover:text-[#1d1d1f]'
-                  }`}
-                >
-                  {key === 'all' ? 'All' : key.charAt(0).toUpperCase() + key.slice(1)} ({count})
-                </button>
-              ))}
+          <div className="bg-white rounded-xl border border-[#d2d2d7] p-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="inline-flex rounded-lg overflow-hidden border border-[#d2d2d7] divide-x divide-[#d2d2d7]">
+                {Object.entries(statusCounts).map(([key, count]) => (
+                  <button
+                    key={key}
+                    onClick={() => setStatusFilter(key)}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
+                      statusFilter === key
+                        ? 'bg-[#2563eb] text-white'
+                        : 'bg-white text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]'
+                    }`}
+                  >
+                    {key === 'all' ? 'All' : key.charAt(0).toUpperCase() + key.slice(1)}
+                    <span className={`text-[10px] font-semibold rounded-full px-1.5 py-px ${
+                      statusFilter === key ? 'bg-white/25 text-white' : 'bg-[#e8e8ed] text-[#6e6e73]'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="inline-flex rounded-lg overflow-hidden border border-[#d2d2d7] divide-x divide-[#d2d2d7]">
+                {Object.entries(categoryCounts).map(([key, count]) => (
+                  <button
+                    key={key}
+                    onClick={() => setCategoryFilter(categoryFilter === key ? 'all' : key)}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
+                      categoryFilter === key
+                        ? 'bg-[#2563eb] text-white'
+                        : 'bg-white text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]'
+                    }`}
+                  >
+                    {key === 'all' ? 'All categories' : key === '3pp' ? '3PP' : 'Apple'}
+                    <span className={`text-[10px] font-semibold rounded-full px-1.5 py-px ${
+                      categoryFilter === key ? 'bg-white/25 text-white' : 'bg-[#e8e8ed] text-[#6e6e73]'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                ))}
+              </div>
               <div className="flex-1" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search by code or description..."
-                className="px-3 py-1.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb] max-w-[220px]"
-              />
+              <div className="relative">
+                <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#9a9aa0] pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search by code or description..."
+                  className="pl-9 pr-3 py-1.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb] w-[220px] placeholder:text-[#9a9aa0]"
+                />
+              </div>
             </div>
           </div>
 

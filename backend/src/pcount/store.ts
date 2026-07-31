@@ -526,7 +526,7 @@ export async function createProducts(sessionId: number, products: { product_code
         const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
         const params: any[] = [];
         for (const p of batch) {
-          params.push(sessionId, p.product_code, p.description || '', parseCategory(p.product_code), p.system_qty || 0, 0, 'pending');
+          params.push(sessionId, p.product_code, p.description || '', parseCategory(p.product_code, p.extra), p.system_qty || 0, 0, 'pending');
         }
 
         const [rows] = await conn.execute(
@@ -575,7 +575,7 @@ export async function createProducts(sessionId: number, products: { product_code
         id, session_id: sessionId,
         product_code: p.product_code,
         description: p.description || '',
-        category: parseCategory(p.product_code),
+        category: parseCategory(p.product_code, p.extra),
         system_qty: p.system_qty || 0,
         counted_qty: 0,
         adjusted_qty: null,
@@ -719,7 +719,10 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
   return { product, match: isMatch };
 }
 
-function parseCategory(code: string): string {
+function parseCategory(code: string, extra?: Record<string, string>): string {
+  const brand = extra?.Brand || extra?.brand || '';
+  if (brand.toLowerCase().includes('apple')) return 'apple';
+  if (brand.trim()) return '3pp';
   const u = code.toUpperCase();
   if (u.startsWith('APP') || u.startsWith('APL')) return 'apple';
   if (u.startsWith('3PP') || u.startsWith('THR')) return '3pp';

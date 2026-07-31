@@ -146,7 +146,7 @@ export default function PcountIndexPage() {
             <div className="flex items-center gap-2">
               {s.online_count ? (
                 <span className="inline-flex items-center gap-1 text-[#16a34a] text-[12px]">
-                  <span className="w-1.5 h-1.5 bg-[#16a34a]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a]" />
                   {s.online_count}
                 </span>
               ) : null}
