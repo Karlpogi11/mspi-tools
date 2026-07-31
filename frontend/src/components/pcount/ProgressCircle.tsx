@@ -3,9 +3,10 @@ interface Props {
   size?: number;
   strokeWidth?: number;
   color?: string;
+  trackColor?: string;
 }
 
-export default function ProgressCircle({ progress, size = 48, strokeWidth = 4, color = '#2563eb' }: Props) {
+export default function ProgressCircle({ progress, size = 48, strokeWidth = 4, color = '#2563eb', trackColor = '#e5e5e5' }: Props) {
   const r = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * r;
   const offset = circumference - (Math.min(progress, 100) / 100) * circumference;
@@ -15,7 +16,7 @@ export default function ProgressCircle({ progress, size = 48, strokeWidth = 4, c
       <svg width={size} height={size} className="-rotate-90">
         <circle
           cx={size / 2} cy={size / 2} r={r}
-          fill="none" stroke="#e5e5e5" strokeWidth={strokeWidth}
+          fill="none" stroke={trackColor} strokeWidth={strokeWidth}
         />
         <circle
           cx={size / 2} cy={size / 2} r={r}

@@ -283,8 +283,20 @@ export default function PcountSessionPage() {
 
   return (
     <div className="space-y-4 pb-12">
-      <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
-        <div className="flex items-center justify-between">
+      <div className="relative overflow-hidden bg-[#0a0c14] rounded-xl border border-white/10 p-5 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.6)]">
+        <div className="pointer-events-none absolute inset-0 rounded-xl overflow-hidden">
+          <div className="absolute -top-1/2 -left-1/4 w-2/3 h-2/3 rounded-full bg-[#3b82f6]/40 blur-3xl" />
+          <div className="absolute -top-1/3 -right-1/4 w-2/3 h-2/3 rounded-full bg-[#a855f7]/35 blur-3xl" />
+          <div className="absolute -bottom-1/2 left-1/4 w-2/3 h-2/3 rounded-full bg-[#ec4899]/30 blur-3xl" />
+          <div className="absolute -bottom-1/2 -right-1/4 w-1/2 h-1/2 rounded-full bg-[#f59e0b]/25 blur-3xl" />
+          <div
+            className="absolute inset-0 opacity-[0.08] mix-blend-overlay"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+            }}
+          />
+        </div>
+        <div className="relative flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 group">
               <input
@@ -298,12 +310,12 @@ export default function PcountSessionPage() {
                 }}
                 
                 title="Click to rename session"
-                className="text-[18px] font-semibold text-[#1d1d1f] bg-transparent border-none outline-none focus:border-b focus:border-[#2563eb] pb-0.5 cursor-text"
+                className="text-[18px] font-semibold text-white bg-transparent border-none outline-none focus:border-b focus:border-white/70 pb-0.5 cursor-text placeholder:text-white/50"
               />
               <button
                 onClick={() => nameInputRef.current?.focus()}
                 title="Rename session"
-                className="text-[#9a9aa0] hover:text-[#2563eb] transition-colors p-1 rounded-lg hover:bg-[#f5f5f7] cursor-pointer shrink-0"
+                className="text-white/60 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9" />
@@ -311,13 +323,13 @@ export default function PcountSessionPage() {
                 </svg>
               </button>
             </div>
-            <p className="text-[12px] text-[#6e6e73] mt-0.5">
+            <p className="text-[12px] text-white/90 mt-0.5">
               {session.status} &middot; Created {new Date(session.created_at).toLocaleDateString()}
             </p>
             {session.is_owner && session.join_code && (
               <div className="mt-2 inline-flex items-center gap-2">
-                <span className="text-[12px] text-[#6e6e73]">Join code</span>
-                <span className="text-[16px] font-bold tracking-[0.35em] text-[#2563eb]">{session.join_code}</span>
+                <span className="text-[12px] text-white/90">Join code</span>
+                <span className="text-[16px] font-bold tracking-[0.35em] text-white">{session.join_code}</span>
                 <button
                   onClick={async () => {
                     await navigator.clipboard.writeText(session.join_code!);
@@ -325,14 +337,14 @@ export default function PcountSessionPage() {
                     setTimeout(() => setCopied(false), 1500);
                   }}
                   title="Copy code"
-                  className="inline-flex items-center gap-1 text-[12px] font-medium text-[#2563eb] hover:text-[#1d4ed8] hover:underline cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-white/90 hover:text-white hover:underline cursor-pointer"
                 >
                   {copied ? (
                     <>
-                      <svg className="w-3.5 h-3.5 text-[#16a34a]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg className="w-3.5 h-3.5 text-[#4ade80]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M20 6L9 17l-5-5" />
                       </svg>
-                      <span className="text-[#16a34a]">Copied</span>
+                      <span className="text-[#4ade80]">Copied</span>
                     </>
                   ) : (
                     'Copy'
@@ -348,10 +360,10 @@ export default function PcountSessionPage() {
                 disabled={products.length === 0 || exporting}
                 title="Export Excel"
                 aria-label="Export Excel"
-                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-[#d2d2d7] text-[#15803d] transition-colors hover:bg-[#f0fdf4] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-white/30 text-[#bbf7d0] transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {exporting ? (
-                  <span className="text-[11px] text-[#6e6e73]">&hellip;</span>
+                  <span className="text-[11px] text-white/80">&hellip;</span>
                 ) : (
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M4 3h10l4 4v7H4z" fill="currentColor" opacity=".16" />
@@ -364,31 +376,31 @@ export default function PcountSessionPage() {
               </button>
             )}
             {stage === 'verify' && products.length > 0 && scannerCount > 0 && (
-              <div className="flex items-center gap-1.5 text-[12px] text-[#6e6e73] bg-[#f5f5f7] rounded-full px-3 py-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#16a34a] animate-pulse" />
+              <div className="flex items-center gap-1.5 text-[12px] text-white bg-white/20 rounded-full px-3 py-1.5 backdrop-blur-sm">
+                <span className="w-2 h-2 rounded-full bg-[#4ade80] animate-pulse" />
                 {scannerCount}
               </div>
             )}
-            <ProgressCircle progress={progress} size={56} strokeWidth={4} />
+            <ProgressCircle progress={progress} size={56} strokeWidth={4} color="#bfdbfe" trackColor="rgba(255,255,255,0.25)" />
           </div>
         </div>
 
-        {exportError && <p className="mt-3 text-[12px] text-[#dc2626]">{exportError}</p>}
+        {exportError && <p className="mt-3 text-[12px] text-[#fca5a5]">{exportError}</p>}
 
-        <nav className="flex items-center gap-2 mt-4 text-[12px]">
+        <nav className="relative flex items-center gap-2 mt-4 text-[12px]">
           {[
             { key: 'setup', label: '1. System Import' },
             { key: 'count', label: '2. Count Import' },
             { key: 'verify', label: '3. Scan & Verify' },
           ].map((item, i) => (
             <span key={item.key} className="flex items-center gap-2">
-              {i > 0 && <span className="text-[#d2d2d7] text-[12px]">/</span>}
+              {i > 0 && <span className="text-white/40 text-[12px]">/</span>}
               <button
                 onClick={() => setStage(item.key as 'setup' | 'count' | 'verify')}
                 className={`transition-colors cursor-pointer pb-0.5 underline underline-offset-4 ${
                   stage === item.key
-                    ? 'text-[#2563eb] font-medium'
-                    : 'text-[#6e6e73] hover:text-[#1d1d1f]'
+                    ? 'text-white font-medium'
+                    : 'text-white/80 hover:text-white'
                 }`}
               >
                 {item.label}
