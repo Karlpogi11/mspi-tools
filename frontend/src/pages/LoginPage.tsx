@@ -37,40 +37,25 @@ export default function LoginPage() {
   };
 
   const Panel = () => (
-    <div className="hidden lg:flex lg:w-[300px] xl:w-[380px] bg-[#1e3a5f] items-center justify-center relative overflow-hidden">
-      <svg className="absolute inset-0 w-full h-full" viewBox="0 0 300 800" preserveAspectRatio="none" fill="none">
-        <rect width="300" height="800" fill="#1e3a5f" />
-        <polygon points="0,0 300,200 300,400 0,600" fill="#254a75" opacity="0.5" />
-        <polygon points="300,0 0,200 0,400 300,600" fill="#16304d" opacity="0.4" />
-        <polygon points="150,0 300,150 150,300 0,150" fill="#2a5684" opacity="0.3" />
-        <polygon points="0,200 150,350 0,500" fill="#1d3e63" opacity="0.35" />
-        <polygon points="300,400 150,550 300,700" fill="#254a75" opacity="0.25" />
-        <rect x="0" y="0" width="60" height="60" fill="#2a5684" opacity="0.15" />
-        <rect x="60" y="0" width="60" height="60" fill="#16304d" opacity="0.2" />
-        <rect x="120" y="0" width="60" height="60" fill="#2a5684" opacity="0.15" />
-        <rect x="180" y="0" width="60" height="60" fill="#16304d" opacity="0.2" />
-        <rect x="240" y="0" width="60" height="60" fill="#2a5684" opacity="0.15" />
-        <rect x="0" y="60" width="60" height="60" fill="#1d3e63" opacity="0.1" />
-        <rect x="60" y="60" width="60" height="60" fill="#2a5684" opacity="0.15" />
-        <rect x="180" y="60" width="60" height="60" fill="#1d3e63" opacity="0.1" />
-        <rect x="240" y="60" width="60" height="60" fill="#2a5684" opacity="0.15" />
-        <circle cx="80" cy="480" r="40" stroke="#3b6ea8" strokeWidth="1" opacity="0.2" />
-        <circle cx="220" cy="350" r="55" stroke="#3b6ea8" strokeWidth="1" opacity="0.15" />
-        <circle cx="150" cy="650" r="30" stroke="#3b6ea8" strokeWidth="1" opacity="0.2" />
-        <polygon points="50,680 80,710 50,740 20,710" fill="#2a5684" opacity="0.15" />
-        <polygon points="230,680 260,710 230,740 200,710" fill="#2a5684" opacity="0.15" />
-        <polygon points="140,720 160,740 140,760 120,740" fill="#3b6ea8" opacity="0.1" />
-      </svg>
-      <div className="relative z-10 flex flex-col items-center gap-3">
-        <svg width="56" height="56" viewBox="0 0 64 64" fill="none">
-          <rect x="2" y="2" width="60" height="60" rx="12" stroke="white" strokeWidth="1.5" opacity="0.3" />
-          <polygon points="32,12 44,28 38,48 26,48 20,28" stroke="white" strokeWidth="1.5" opacity="0.25" fill="none" />
-          <polygon points="32,18 39,28 35,42 29,42 25,28" fill="white" opacity="0.08" />
-          <line x1="32" y1="12" x2="32" y2="8" stroke="white" strokeWidth="1.5" opacity="0.3" strokeLinecap="round" />
-          <line x1="32" y1="52" x2="32" y2="56" stroke="white" strokeWidth="1.5" opacity="0.3" strokeLinecap="round" />
-          <circle cx="32" cy="28" r="3" fill="white" opacity="0.4" />
-        </svg>
-        <span className="text-white/60 text-[11px] font-medium tracking-widest uppercase">MSPI Tools</span>
+    <div className="hidden lg:flex lg:w-[300px] xl:w-[380px] bg-[#0c0f18] items-center justify-center relative overflow-hidden">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#172554]/85 via-[#1e3a8a]/45 to-transparent" />
+        <div
+          className="absolute inset-0 opacity-[0.38] mix-blend-overlay"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.32] mix-blend-overlay"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n2'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.6' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n2)'/%3E%3C/svg%3E")`,
+          }}
+        />
+      </div>
+      <div className="relative z-10 flex items-end justify-end h-full w-full p-4">
+        <span className="text-white/70 text-[13px] font-semibold tracking-[0.25em] uppercase">MSPI Tools</span>
       </div>
     </div>
   );
@@ -80,12 +65,6 @@ export default function LoginPage() {
       <Panel />
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="text-center max-w-sm">
-          <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-[#1e3a5f] flex items-center justify-center lg:hidden">
-            <svg width="20" height="20" viewBox="0 0 64 64" fill="none">
-              <polygon points="32,8 44,24 38,44 26,44 20,24" stroke="white" strokeWidth="1.5" opacity="0.4" fill="none" />
-              <circle cx="32" cy="24" r="2.5" fill="white" opacity="0.5" />
-            </svg>
-          </div>
           <h2 className="text-xl font-semibold text-[#1a1a2e] mb-2">Account created</h2>
           <p className="text-[#6e6e7a] text-sm leading-relaxed">
             Your account has been created and is pending admin approval. You'll receive access once your role is assigned.
@@ -109,12 +88,6 @@ export default function LoginPage() {
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-sm">
           <div className="lg:hidden flex items-center gap-3 mb-10">
-            <div className="w-9 h-9 rounded-lg bg-[#1e3a5f] flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 64 64" fill="none">
-                <polygon points="32,8 44,24 38,44 26,44 20,24" stroke="white" strokeWidth="1.5" opacity="0.4" fill="none" />
-                <circle cx="32" cy="24" r="2.5" fill="white" opacity="0.5" />
-              </svg>
-            </div>
             <span className="text-[#1a1a2e] text-lg font-semibold">MSPI Tools</span>
           </div>
 

@@ -283,18 +283,22 @@ export default function PcountSessionPage() {
 
   return (
     <div className="space-y-4 pb-12">
-      <div className="relative overflow-hidden bg-[#0a0c14] rounded-xl border border-white/10 p-5 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.6)]">
+      <div className="relative overflow-hidden bg-[#0c0f18]/90 backdrop-blur-2xl rounded-xl border border-white/10 p-5">
         <div className="pointer-events-none absolute inset-0 rounded-xl overflow-hidden">
-          <div className="absolute -top-1/2 -left-1/4 w-2/3 h-2/3 rounded-full bg-[#3b82f6]/40 blur-3xl" />
-          <div className="absolute -top-1/3 -right-1/4 w-2/3 h-2/3 rounded-full bg-[#a855f7]/35 blur-3xl" />
-          <div className="absolute -bottom-1/2 left-1/4 w-2/3 h-2/3 rounded-full bg-[#ec4899]/30 blur-3xl" />
-          <div className="absolute -bottom-1/2 -right-1/4 w-1/2 h-1/2 rounded-full bg-[#f59e0b]/25 blur-3xl" />
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#172554]/85 via-[#1e3a8a]/45 to-transparent" />
           <div
-            className="absolute inset-0 opacity-[0.08] mix-blend-overlay"
+            className="absolute inset-0 opacity-[0.38] mix-blend-overlay"
             style={{
               backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
             }}
           />
+        <div
+          className="absolute inset-0 opacity-[0.32] mix-blend-overlay"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n2'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.6' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n2)'/%3E%3C/svg%3E")`,
+          }}
+        />
         </div>
         <div className="relative flex items-center justify-between">
           <div>
