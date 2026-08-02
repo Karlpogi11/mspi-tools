@@ -357,9 +357,9 @@ export default function ReformatPage() {
     () => (pivot ? buildPivot(filteredRows.map((f) => f.row), outputNames, pivot) : null),
     [pivot, filteredRows, outputNames]
   );
-
-  const copyHeaders = pivotResult ? pivotResult.headers : outputNames;
-  const copyRows = pivotResult ? pivotResult.rows.map((row) => row.map((cell) => cell ?? '')) : sortedRows.map((f) => f.row);
+  const pivotActive = pivot !== null && pivot.values.length > 0 && pivotResult !== null;
+  const copyHeaders = pivotActive ? pivotResult!.headers : outputNames;
+  const copyRows = pivotActive ? pivotResult!.rows.map((row) => row.map((cell) => cell ?? '')) : sortedRows.map((f) => f.row);
 
   function toggleSort(column: string) {
     setSortRules((prev) => {

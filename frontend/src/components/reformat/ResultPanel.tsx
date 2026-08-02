@@ -433,8 +433,8 @@ export default function ResultPanel({
     onPivotChange(null);
   }
 
-  function zoneMenuItems(): { key: string; label: string; onClick: () => void }[] {
-    return [{ key: 'rem', label: 'Remove from report', onClick: () => removeFromReport(openPivotMenu?.startsWith('f:') || openPivotMenu?.startsWith('c:') || openPivotMenu?.startsWith('r:') ? openPivotMenu.slice(2) : '') }];
+  function zoneMenuItems(column: string): { key: string; label: string; onClick: () => void }[] {
+    return [{ key: 'rem', label: 'Remove from report', onClick: () => removeFromReport(column) }];
   }
 
   const sortDescText = draftSort.map((s) => `${s.column} (${s.dir === 'asc' ? 'ascending' : 'descending'})`).join(', ');
@@ -914,7 +914,7 @@ export default function ResultPanel({
 
           <div className="relative">
             <button
-              onClick={() => { setShowCopyMenu(!showCopyMenu); closeMenus(); setShowSort(false); setShowPivot(false); }}
+              onClick={() => { setShowCopyMenu(!showCopyMenu); setShowExportMenu(false); setShowSort(false); setShowPivot(false); }}
               className={`px-3 py-1.5 text-[12px] font-medium rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
                 copied
                   ? 'text-white bg-[#16a34a] border border-[#16a34a]'
@@ -944,7 +944,7 @@ export default function ResultPanel({
 
           <div className="relative">
             <button
-              onClick={() => { setShowExportMenu(!showExportMenu); closeMenus(); setShowSort(false); setShowPivot(false); }}
+              onClick={() => { setShowExportMenu(!showExportMenu); setShowCopyMenu(false); setShowSort(false); setShowPivot(false); }}
               className="px-3 py-1.5 text-[12px] font-medium text-white bg-[#2563eb] rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
             >
               Export
@@ -1158,25 +1158,11 @@ export default function ResultPanel({
         </>
       )}
 
-      <div className="mt-4 flex items-center gap-2 text-[12px] text-[#9ca3af]">
-        <button
-          onClick={() => { onExport('csv'); }}
-          className="px-3 py-1.5 text-[12px] text-[#2563eb] border border-[#2563eb]/40 rounded-lg hover:bg-[#eff6ff] transition-colors cursor-pointer"
-        >
-          Download CSV
-        </button>
-        <button
-          onClick={() => { onExport('xlsx'); }}
-          className="px-3 py-1.5 text-[12px] text-[#2563eb] border border-[#2563eb]/40 rounded-lg hover:bg-[#eff6ff] transition-colors cursor-pointer"
-        >
-          Download Excel
-        </button>
-        {(filterActive || sortActive || pivotActive) && (
-          <span className="ml-auto text-[12px] text-[#9ca3af]">
-            Copy &amp; export include {pivotActive ? 'the pivot summary' : filterActive || sortActive ? 'the visible (filtered/sorted) rows' : 'all rows'} only.
-          </span>
-        )}
-      </div>
+      {(filterActive || sortActive || pivotActive) && (
+        <div className="mt-4 text-right text-[12px] text-[#9ca3af]">
+          Copy &amp; export include {pivotActive ? 'the pivot summary' : filterActive || sortActive ? 'the visible (filtered/sorted) rows' : 'all rows'} only.
+        </div>
+      )}
     </div>
   );
 }
