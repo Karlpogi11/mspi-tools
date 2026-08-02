@@ -1,0 +1,1 @@
+ALTER TABLE `reformat_templates` ADD `removed_columns` text;

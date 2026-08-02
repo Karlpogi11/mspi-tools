@@ -75,6 +75,7 @@ export default function AdminToolsPage() {
     { value: 'chart', label: 'Chart' },
     { value: 'database', label: 'Database' },
     { value: 'clipboard', label: 'Clipboard' },
+    { value: 'table', label: 'Table' },
     { value: 'default', label: 'Default' },
   ];
 

@@ -125,6 +125,31 @@ export interface ScanResult extends Product {
   match: boolean;
 }
 
+export interface ReformatColumn {
+  name: string;
+  source: string;
+  constant: string;
+}
+
+export interface ReformatTemplate {
+  id: number;
+  name: string;
+  header_row: number;
+  columns: ReformatColumn[];
+  removed_columns: ReformatColumn[];
+  created_by: number;
+  is_owner: boolean;
+  owner_email: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReformatUser {
+  id: number;
+  email: string;
+  full_name: string;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ message: string; user: User }>('/auth/login', {
@@ -251,5 +276,37 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ products }),
       }),
+  },
+
+  reformat: {
+    listTemplates: () =>
+      request<{ owned: ReformatTemplate[]; shared: ReformatTemplate[] }>('/reformat/templates'),
+    getTemplate: (id: number) =>
+      request<ReformatTemplate>(`/reformat/templates/${id}`),
+    createTemplate: (data: { name: string; header_row: number; columns: ReformatColumn[]; removed_columns: ReformatColumn[] }) =>
+      request<ReformatTemplate>('/reformat/templates', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateTemplate: (id: number, data: { name?: string; header_row?: number; columns?: ReformatColumn[]; removed_columns?: ReformatColumn[] }) =>
+      request<ReformatTemplate>(`/reformat/templates/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    deleteTemplate: (id: number) =>
+      request<{ message: string }>(`/reformat/templates/${id}`, { method: 'DELETE' }),
+    listShares: (id: number) =>
+      request<ReformatUser[]>(`/reformat/templates/${id}/shares`),
+    share: (id: number, email: string) =>
+      request<ReformatUser>(`/reformat/templates/${id}/share`, {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      }),
+    unshare: (id: number, userId: number) =>
+      request<{ message: string }>(`/reformat/templates/${id}/share/${userId}`, {
+        method: 'DELETE',
+      }),
+    searchUsers: (q: string) =>
+      request<ReformatUser[]>(`/reformat/users/search?q=${encodeURIComponent(q)}`),
   },
 };

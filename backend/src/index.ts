@@ -13,6 +13,7 @@ import toolsRoutes from './routes/tools.js';
 import adminRoutes from './routes/admin.js';
 import { pcountRouter, pcountAdminRouter, initPcount } from './pcount/gateway.js';
 import rfpuRoutes from './rfpu/routes.js';
+import reformatRoutes from './reformat/routes.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -39,6 +40,7 @@ app.use('/api/admin', adminRoutes);
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
   { name: 'rfpu', router: rfpuRoutes, hasGateway: false },
+  { name: 'reformat', router: reformatRoutes, hasGateway: false },
 ];
 
 for (const tool of tools) {

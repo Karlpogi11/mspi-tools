@@ -65,6 +65,24 @@ async function seed() {
   ]);
 
   console.log('Site Monitor and PCount assigned to Admin role');
+
+  const [reformatTool] = await db.insert(tools).values({
+    name: 'ReFormat',
+    url: '/reformat',
+    icon: 'table',
+    description: 'Import Excel/CSV files, map and rearrange columns, and export the reformatted result.',
+  }).$returningId();
+
+  console.log('Tool created: ReFormat (/reformat)');
+
+  await db.insert(roleToolAccess).values([
+    { role_id: pmsRole.id, tool_id: reformatTool.id },
+    { role_id: csoRole.id, tool_id: reformatTool.id },
+    { role_id: engrRole.id, tool_id: reformatTool.id },
+    { role_id: adminRole.id, tool_id: reformatTool.id },
+  ]);
+
+  console.log('ReFormat assigned to PMS, CSO, ENGR, and Admin roles');
   console.log('\nSeed complete!');
   process.exit(0);
 }

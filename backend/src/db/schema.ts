@@ -104,3 +104,30 @@ export const pcountProductExtra = mysqlTable('pcount_product_extra', {
   column_name: varchar('column_name', { length: 255 }).notNull(),
   column_value: text('column_value'),
 });
+
+export const reformatTemplates = mysqlTable('reformat_templates', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  header_row: int('header_row').default(1).notNull(),
+  columns: text('columns'),
+  removed_columns: text('removed_columns'),
+  created_by: int('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull().onUpdateNow(),
+});
+
+export const reformatTemplateShares = mysqlTable(
+  'reformat_template_shares',
+  {
+    template_id: int('template_id')
+      .notNull()
+      .references(() => reformatTemplates.id, { onDelete: 'cascade' }),
+    user_id: int('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    shared_at: timestamp('shared_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.template_id, table.user_id] }),
+  })
+);
