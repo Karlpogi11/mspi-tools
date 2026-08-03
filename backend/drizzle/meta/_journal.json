@@ -15,6 +15,13 @@
       "when": 1785643307530,
       "tag": "0001_first_zeigeist",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1785730696919,
+      "tag": "0002_gray_sprite",
+      "breakpoints": true
     }
   ]
 }

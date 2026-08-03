@@ -131,3 +131,21 @@ export const reformatTemplateShares = mysqlTable(
     pk: primaryKey({ columns: [table.template_id, table.user_id] }),
   })
 );
+
+export const consumableMaster = mysqlTable(
+  'consumable_master',
+  {
+    id: int('id').autoincrement().notNull().primaryKey(),
+    part_number: varchar('part_number', { length: 100 }).notNull(),
+    description: varchar('description', { length: 255 }).notNull(),
+    category: varchar('category', { length: 100 }).default('Other').notNull(),
+    expires: varchar('expires', { length: 1 }).default('Y').notNull(),
+    unit: varchar('unit', { length: 20 }).default('pcs').notNull(),
+    created_by: int('created_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: timestamp('created_at').defaultNow().notNull(),
+    updated_at: timestamp('updated_at').defaultNow().notNull().onUpdateNow(),
+  },
+  (table) => ({
+    partNumberUnique: uniqueIndex('consumable_master_part_number_unique').on(table.part_number),
+  })
+);

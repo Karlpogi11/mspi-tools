@@ -14,6 +14,7 @@ const PcountIndexPage = lazy(() => import('./pages/pcount/IndexPage'));
 const PcountSessionPage = lazy(() => import('./pages/pcount/SessionPage'));
 const RfpuPage = lazy(() => import('./pages/RfpuPage'));
 const ReformatPage = lazy(() => import('./pages/reformat/ReformatPage'));
+const ConsumablesPage = lazy(() => import('./pages/consumables/ConsumablesPage'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -110,6 +111,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <ReformatPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/consumables"
+                element={
+                  <ProtectedRoute>
+                    <ConsumablesPage />
                   </ProtectedRoute>
                 }
               />

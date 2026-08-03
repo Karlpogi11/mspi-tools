@@ -83,6 +83,24 @@ async function seed() {
   ]);
 
   console.log('ReFormat assigned to PMS, CSO, ENGR, and Admin roles');
+
+  const [consumablesTool] = await db.insert(tools).values({
+    name: 'Label Maker',
+    url: '/consumables',
+    icon: 'tag',
+    description: 'Consumables label maker — log parts, auto-compute production/expiry from the 9D code, and print cut-out labels.',
+  }).$returningId();
+
+  console.log('Tool created: Label Maker (/consumables)');
+
+  await db.insert(roleToolAccess).values([
+    { role_id: pmsRole.id, tool_id: consumablesTool.id },
+    { role_id: csoRole.id, tool_id: consumablesTool.id },
+    { role_id: engrRole.id, tool_id: consumablesTool.id },
+    { role_id: adminRole.id, tool_id: consumablesTool.id },
+  ]);
+
+  console.log('Label Maker assigned to PMS, CSO, ENGR, and Admin roles');
   console.log('\nSeed complete!');
   process.exit(0);
 }

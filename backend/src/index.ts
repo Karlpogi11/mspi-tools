@@ -14,6 +14,7 @@ import adminRoutes from './routes/admin.js';
 import { pcountRouter, pcountAdminRouter, initPcount } from './pcount/gateway.js';
 import rfpuRoutes from './rfpu/routes.js';
 import reformatRoutes from './reformat/routes.js';
+import consumablesRoutes from './consumables/routes.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -41,6 +42,7 @@ const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
   { name: 'rfpu', router: rfpuRoutes, hasGateway: false },
   { name: 'reformat', router: reformatRoutes, hasGateway: false },
+  { name: 'consumables', router: consumablesRoutes, hasGateway: false },
 ];
 
 for (const tool of tools) {

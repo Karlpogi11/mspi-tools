@@ -131,6 +131,23 @@ export interface ReformatColumn {
   constant: string;
 }
 
+export interface ConsumableMaster {
+  id: number;
+  part_number: string;
+  description: string;
+  category: string;
+  expires: string;
+  unit: string;
+}
+
+export interface ConsumableMasterPayload {
+  part_number: string;
+  description: string;
+  category?: string;
+  expires?: string;
+  unit?: string;
+}
+
 export interface ReformatTemplate {
   id: number;
   name: string;
@@ -309,4 +326,58 @@ export const api = {
     searchUsers: (q: string) =>
       request<ReformatUser[]>(`/reformat/users/search?q=${encodeURIComponent(q)}`),
   },
+
+  consumables: {
+    listMaster: () =>
+      request<ConsumableMaster[]>('/consumables/master'),
+    createMaster: (data: ConsumableMasterPayload) =>
+      request<ConsumableMaster>('/consumables/master', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateMaster: (id: number, data: ConsumableMasterPayload) =>
+      request<ConsumableMaster>(`/consumables/master/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    deleteMaster: (id: number) =>
+      request<{ message: string }>(`/consumables/master/${id}`, { method: 'DELETE' }),
+    importMaster: (items: ConsumableMasterPayload[]) =>
+      request<{ added: number; updated: number; count: number }>('/consumables/master/import', {
+        method: 'POST',
+        body: JSON.stringify({ items }),
+      }),
+    downloadTemplate: async () => {
+      const res = await fetch(`${BASE}/consumables/template`, { credentials: 'include' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to download template');
+      }
+      await saveBlob(await res.blob(), 'consumables-template.xlsx');
+    },
+    exportLabels: async (labels: { line1: string; line2: string }[]) => {
+      const res = await fetch(`${BASE}/consumables/export-labels`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ labels }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to build labels file');
+      }
+      await saveBlob(await res.blob(), 'consumable-labels.xlsx');
+    },
+  },
 };
+
+export async function saveBlob(blob: Blob, filename: string): Promise<void> {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
