@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { api, type Tool, type Role } from '../lib/api';
 
 interface ToolForm {
@@ -87,6 +88,10 @@ export default function AdminToolsPage() {
     <div className="space-y-10">
       <div className="flex items-center justify-between">
         <div>
+          <Link to="/admin" className="inline-flex items-center gap-1 text-[12px] font-medium text-[#6e6e73] hover:text-[#2563eb] transition-colors mb-2">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+            Back to Admin
+          </Link>
           <h1 className="text-[26px] font-semibold text-[#1d1d1f] tracking-tight">Tools</h1>
           <p className="text-[14px] text-[#6e6e73] mt-1">Configure internal tools and access</p>
         </div>
@@ -99,7 +104,7 @@ export default function AdminToolsPage() {
       </div>
 
       {showForm && (
-        <div className="bg-white border border-[#d2d2d7] p-6">
+        <div className="bg-white rounded-xl border border-[#d2d2d7] p-6">
           <h2 className="text-[15px] font-semibold text-[#1d1d1f] mb-5">
             {editingId ? 'Edit tool' : 'New tool'}
           </h2>
@@ -188,14 +193,14 @@ export default function AdminToolsPage() {
       )}
 
       {tools.length === 0 ? (
-        <div className="bg-white border border-[#d2d2d7] p-8 text-center">
+        <div className="bg-white rounded-xl border border-[#d2d2d7] p-8 text-center">
           <p className="text-[14px] text-[#1d1d1f] font-medium">No tools configured</p>
           <p className="text-[13px] text-[#6e6e73] mt-1.5">
             Add your first internal tool to get started.
           </p>
         </div>
       ) : (
-        <div className="bg-white border border-[#d2d2d7]">
+        <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden">
           <table className="w-full text-[13px]">
             <thead>
               <tr className="border-b border-[#d2d2d7]">

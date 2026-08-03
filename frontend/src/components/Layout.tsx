@@ -19,23 +19,26 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-[#f5f5f7]">
       <header className="bg-white/80 backdrop-blur-md border-b border-[#d2d2d7]/60 sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-6 h-11 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <Link to="/" className="text-[14px] font-semibold text-[#1d1d1f] tracking-tight">
+        <div className="max-w-6xl mx-auto px-6 h-11 flex items-stretch justify-between">
+          <div className="flex items-stretch gap-6">
+            <Link to="/" className="flex items-center text-[14px] font-semibold text-[#1d1d1f] tracking-tight">
               MSPI Tools
             </Link>
-            <nav className="flex items-center gap-0.5">
+            <nav className="flex items-stretch gap-0.5">
               {navItems.filter(item => item.to !== '/admin' || user?.roleName === 'Admin').map((item) => (
                 <Link
                   key={item.to}
                   to={item.to}
-                  className={`px-3 py-1 text-[13px] font-medium rounded-lg transition-all ${
+                  className={`relative flex items-center px-3 text-[13px] font-medium transition-colors ${
                     isActive(item.to)
-                      ? 'bg-[#2563eb] text-white'
-                      : 'text-[#6e6e73] hover:text-[#1d1d1f] hover:bg-[#f5f5f7]'
+                      ? 'text-[#1d1d1f]'
+                      : 'text-[#6e6e73] hover:text-[#1d1d1f]'
                   }`}
                 >
                   {item.label}
+                  {isActive(item.to) && (
+                    <span className="absolute inset-x-3 bottom-0 h-[3px] rounded-full bg-[#2563eb]" />
+                  )}
                 </Link>
               ))}
             </nav>

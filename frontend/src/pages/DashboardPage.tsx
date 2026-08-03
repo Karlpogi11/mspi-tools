@@ -50,7 +50,7 @@ export default function DashboardPage() {
       </div>
 
       {tools.length === 0 ? (
-        <div className="bg-white border border-[#d2d2d7] p-10 text-center">
+        <div className="bg-white rounded-xl border border-[#d2d2d7] p-10 text-center">
           <div className="w-10 h-10 mx-auto mb-4 flex items-center justify-center rounded-xl bg-[#f5f5f7] text-[#2563eb]">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d={iconMap.default} />
@@ -67,7 +67,7 @@ export default function DashboardPage() {
             <a
               key={tool.id}
               href={tool.url}
-              className="group bg-white border border-[#d2d2d7] p-5 hover:border-[#2563eb] transition-all no-underline"
+              className="group bg-white rounded-xl border border-[#d2d2d7] p-5 hover:border-[#2563eb] transition-all no-underline"
             >
               <ToolIcon icon={tool.icon} active={false} />
               <h3 className="text-[15px] font-semibold text-[#1d1d1f] mt-4 group-hover:text-[#2563eb] transition-colors">
