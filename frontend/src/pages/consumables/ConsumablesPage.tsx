@@ -208,10 +208,45 @@ export default function ConsumablesPage() {
     <div>
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-[26px] font-semibold text-[#1d1d1f] tracking-tight">Label Maker</h1>
-          <p className="text-[14px] text-[#6e6e73] mt-1">
+          <h1 className="text-[24px] font-semibold text-[#1d1d1f] tracking-tight">Label Maker</h1>
+          <p className="text-[13px] text-[#6e6e73] mt-1">
             Add received consumables and print expiry labels. Production date auto-computes from the 9D code.
           </p>
+          <p className="text-[12px] text-[#9ca3af] mt-1">
+            {entries.length} row{entries.length === 1 ? '' : 's'} &middot; {master.length.toLocaleString()} parts on file
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <input
+            ref={importRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={handleImport}
+          />
+          <button
+            onClick={() => importRef.current?.click()}
+            disabled={busy}
+            className={secondaryBtnCls}
+          >
+            {iconUpload}
+            Import file
+          </button>
+          <button
+            onClick={() =>
+              api.consumables
+                .downloadTemplate()
+                .catch((err) => setError(err instanceof Error ? err.message : 'Download failed'))
+            }
+            className={secondaryBtnCls}
+          >
+            {iconDownload}
+            Download template
+          </button>
+          <button onClick={handleExport} disabled={busy || labelCount === 0} className={primaryBtnCls}>
+            {iconPrinter}
+            {busy ? 'Building\u2026' : `Download labels (${labelCount})`}
+          </button>
         </div>
       </div>
 
@@ -229,67 +264,23 @@ export default function ConsumablesPage() {
       )}
 
       <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden">
-        <div className="px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[#d2d2d7]/60">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="p-1.5 rounded-lg bg-[#f5f5f7] text-[#6e6e73] shrink-0">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
-            </span>
-            <span className="text-[13px] font-medium text-[#1d1d1f]">Received items</span>
-            <span className="text-[12px] text-[#9ca3af] whitespace-nowrap">
-              {entries.length} rows &middot; {master.length.toLocaleString()} parts on file
-            </span>
-          </div>
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
-            <input
-              ref={importRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="hidden"
-              onChange={handleImport}
-            />
-            <button
-              onClick={() => importRef.current?.click()}
-              disabled={busy}
-              className={secondaryBtnCls}
-            >
-              {iconUpload}
-              Import file
-            </button>
-            <button
-              onClick={() =>
-                api.consumables
-                  .downloadTemplate()
-                  .catch((err) => setError(err instanceof Error ? err.message : 'Download failed'))
-              }
-              className={secondaryBtnCls}
-            >
-              {iconDownload}
-              Download template
-            </button>
-            <button onClick={handleExport} disabled={busy || labelCount === 0} className={primaryBtnCls}>
-              {iconPrinter}
-              {busy ? 'Building\u2026' : `Download labels (${labelCount})`}
-            </button>
-          </div>
-        </div>
-
         <div className="overflow-x-auto">
-          <table className="w-full text-[13px]" style={{ minWidth: '900px' }}>
+          <table className="w-full text-[13px]" style={{ minWidth: '760px' }}>
             <thead>
               <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7]">
-                <th className="px-4 py-3 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-48">Part Number</th>
-                <th className="px-4 py-3 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-40">9D Code</th>
-                <th className="px-4 py-3 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">
+                <th className="px-3 py-2 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-40">Part Number</th>
+                <th className="px-3 py-2 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-28">9D Code</th>
+                <th className="px-3 py-2 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">
                   Description <span className="font-normal normal-case text-[#a1a1a6]">(auto)</span>
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-28">Qty Arrived</th>
-                <th className="px-4 py-3 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-44">
+                <th className="px-3 py-2 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-20">Qty Arrived</th>
+                <th className="px-3 py-2 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-36">
                   Production Date <span className="font-normal normal-case text-[#a1a1a6]">(auto)</span>
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-44">
+                <th className="px-3 py-2 text-left font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider w-36">
                   Expiry Date <span className="font-normal normal-case text-[#a1a1a6]">(auto)</span>
                 </th>
-                <th className="px-2 py-3 w-10" />
+                <th className="px-2 py-2 w-10" />
               </tr>
             </thead>
             <tbody>
@@ -299,7 +290,7 @@ export default function ConsumablesPage() {
                 return (
                   <Fragment key={entry.key}>
                     <tr className="border-b border-[#d2d2d7]/60">
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-1.5">
                         <input
                           ref={(el) => {
                             partRefs.current.set(entry.key, el);
@@ -310,7 +301,7 @@ export default function ConsumablesPage() {
                           placeholder="e.g. 923-12051"
                         />
                       </td>
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-1.5">
                         <input
                           className={inputCls}
                           value={entry.code}
@@ -319,7 +310,7 @@ export default function ConsumablesPage() {
                           placeholder="9D code"
                         />
                       </td>
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-1.5">
                         <AutoValue>
                           {part ? (
                             <span className="text-[#1d1d1f]">{part.description}</span>
@@ -333,7 +324,7 @@ export default function ConsumablesPage() {
                           ) : null}
                         </AutoValue>
                       </td>
-                      <td className="px-4 py-2 w-28">
+                      <td className="px-3 py-1.5 w-20">
                         <input
                           className={inputCls + ' text-right'}
                           type="number"
@@ -343,13 +334,13 @@ export default function ConsumablesPage() {
                           onKeyDown={(e) => moveNextOnEnter(e, entry.key)}
                         />
                       </td>
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-1.5">
   <AutoValue muted={!production}>{production || null}</AutoValue>
 </td>
-<td className="px-4 py-2">
+<td className="px-3 py-1.5">
   <AutoValue muted={!expiry}>{expiry || null}</AutoValue>
 </td>
-                      <td className="px-2 py-2 text-center">
+                      <td className="px-2 py-1.5 text-center">
                         <button
                           onClick={() => removeEntry(entry.key)}
                           className="p-1.5 rounded-lg text-[#a1a1a6] hover:text-[#dc2626] hover:bg-[#fef2f2] transition-colors cursor-pointer"
@@ -399,28 +390,28 @@ export default function ConsumablesPage() {
             </tbody>
           </table>
         </div>
-
-        <div className="px-4 py-2.5 border-t border-[#d2d2d7]/60 flex items-center justify-between gap-3">
-          <button
-            onClick={addEntry}
-            className="px-2.5 py-1 text-[12px] font-medium text-[#2563eb] hover:bg-[#eff6ff] rounded-lg transition-colors cursor-pointer"
-          >
-            + Add row
-          </button>
-          {labelCount > 0 && (
-            <span className="text-[12px] text-[#9ca3af]">
-              {labelCount} label{labelCount === 1 ? '' : 's'} ready to print &middot; {Math.max(1, Math.ceil(labelCount / 30))} sheet
-              {Math.ceil(labelCount / 30) === 1 ? '' : 's'}
-            </span>
-          )}
-        </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-[#d2d2d7] mt-4 overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-[#d2d2d7]/60">
+      <div className="flex items-center justify-between gap-3 mt-2 mb-4">
+        <button
+          onClick={addEntry}
+          className="px-2.5 py-1 text-[12px] font-medium text-[#2563eb] hover:bg-[#eff6ff] rounded-lg transition-colors cursor-pointer"
+        >
+          + Add row
+        </button>
+        {labelCount > 0 && (
+          <span className="text-[12px] text-[#9ca3af]">
+            {labelCount} label{labelCount === 1 ? '' : 's'} ready to print &middot; {Math.max(1, Math.ceil(labelCount / 30))} sheet
+            {Math.ceil(labelCount / 30) === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden">
+        <div className="px-4 py-2 border-b border-[#d2d2d7]/60">
           <h2 className="text-[13px] font-medium text-[#1d1d1f]">Print preview</h2>
         </div>
-        <div className="p-4 overflow-x-auto">
+        <div className="p-3 overflow-x-auto">
           {labelCount === 0 ? (
             <p className="text-[13px] text-[#9ca3af] text-center py-8">
               Fill in the received items above to build your label sheet preview.
