@@ -18,7 +18,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-[#f5f5f7]">
-      <header className="bg-white/80 backdrop-blur-md border-b border-[#d2d2d7]/60 sticky top-0 z-50">
+      <header className="bg-white/80 backdrop-blur-md border-b border-[#d2d2d7]/60 sticky top-0 z-50 print:hidden">
         <div className="max-w-6xl mx-auto px-6 h-11 flex items-stretch justify-between">
           <div className="flex items-stretch gap-6">
             <Link to="/" className="flex items-center text-[14px] font-semibold text-[#1d1d1f] tracking-tight">

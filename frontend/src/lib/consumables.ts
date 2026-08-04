@@ -15,6 +15,24 @@ export interface ConsumableEntry {
   qty: number;
 }
 
+export interface InventoryRow {
+  partNumber: string;
+  code: string;
+  description: string;
+  dateReceived: string;
+  qty: number;
+  productionDate: string;
+  expiryDate: string;
+}
+
+export function todayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export interface LabelBlock {
   line1: string;
   line2: string;
@@ -206,4 +224,23 @@ export function buildLabels(entries: ConsumableEntry[], master: ConsumableMaster
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+}
+
+const INVENTORY_HEADERS = ['Part Number', '9D Code', 'Description', 'Date Received', 'Qty Arrived', 'Production Date', 'Expiry Date'];
+
+function csvEscape(v: unknown): string {
+  const s = String(v ?? '');
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export function buildInventoryCsv(rows: InventoryRow[]): string {
+  const lines = [INVENTORY_HEADERS.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [r.partNumber, r.code, r.description, r.dateReceived, r.qty, r.productionDate, r.expiryDate]
+        .map(csvEscape)
+        .join(',')
+    );
+  }
+  return '\uFEFF' + lines.join('\r\n');
 }

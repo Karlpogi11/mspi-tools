@@ -266,4 +266,66 @@ router.post('/export-labels', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/export-inventory', async (req: Request, res: Response) => {
+  try {
+    const raw = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const rows = raw
+      .filter((x: any) => x)
+      .map((x: any) => ({
+        partNumber: typeof x?.partNumber === 'string' ? x.partNumber.trim() : '',
+        code: typeof x?.code === 'string' ? x.code.trim() : '',
+        description: typeof x?.description === 'string' ? x.description.trim() : '',
+        dateReceived: typeof x?.dateReceived === 'string' ? x.dateReceived.trim() : '',
+        qty: Number.isFinite(Number(x?.qty)) ? Math.max(1, Math.floor(Number(x.qty))) : 1,
+        productionDate: typeof x?.productionDate === 'string' ? x.productionDate.trim() : '',
+        expiryDate: typeof x?.expiryDate === 'string' ? x.expiryDate.trim() : '',
+      }))
+      .filter((r: any) => r.partNumber || r.code);
+    if (rows.length === 0) {
+      res.status(400).json({ error: 'No rows to export' });
+      return;
+    }
+
+    const wb = new Excel.Workbook();
+    const ws = wb.addWorksheet('Inventory');
+
+    const headers = ['Part Number', '9D Code', 'Description', 'Date Received', 'Qty Arrived', 'Production Date', 'Expiry Date'];
+    const thin: any = { style: 'thin' };
+    headers.forEach((h, i) => {
+      const cell = ws.getCell(1, i + 1);
+      cell.value = h;
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F7' } };
+      cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+    });
+
+    rows.forEach((r: any, i: number) => {
+      const row = i + 2;
+      const values = [r.partNumber, r.code, r.description, r.dateReceived, r.qty, r.productionDate, r.expiryDate];
+      values.forEach((v, c) => {
+        const cell = ws.getCell(row, c + 1);
+        cell.value = v;
+        if (c < 6) cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+      });
+    });
+
+    ws.autoFilter = { from: 'A1', to: `G${rows.length + 1}` };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    ws.getColumn(1).width = 16;
+    ws.getColumn(2).width = 16;
+    ws.getColumn(3).width = 36;
+    ws.getColumn(4).width = 14;
+    ws.getColumn(5).width = 12;
+    ws.getColumn(6).width = 16;
+    ws.getColumn(7).width = 16;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent('consumable-inventory.xlsx')}"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to build inventory file' });
+  }
+});
+
 export default router;

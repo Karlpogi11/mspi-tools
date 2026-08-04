@@ -1,3 +1,5 @@
+import type { InventoryRow } from './consumables';
+
 const BASE = import.meta.env.VITE_API_URL || '/api';
 
 export async function readJson<T>(res: Response): Promise<T> {
@@ -367,6 +369,19 @@ export const api = {
         throw new Error(data?.error || 'Failed to build labels file');
       }
       await saveBlob(await res.blob(), 'consumable-labels.xlsx');
+    },
+    exportInventory: async (rows: InventoryRow[]) => {
+      const res = await fetch(`${BASE}/consumables/export-inventory`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to build inventory file');
+      }
+      await saveBlob(await res.blob(), 'consumable-inventory.xlsx');
     },
   },
 };
