@@ -708,9 +708,12 @@ export default function ConsumablesPage() {
                   {labels.map((label, i) => (
                     <div
                       key={i}
-                      className="border border-[#1d1d1f] px-2.5 py-2 flex items-center justify-center text-center"
+                      className="relative border border-[#1d1d1f] px-2.5 py-2 flex items-center justify-center text-center"
                       style={{ minHeight: '34px' }}
                     >
+                      <span className="absolute top-0.5 left-1 text-[8px] font-bold text-[#6e6e73] leading-none">
+                        {i + 1}
+                      </span>
                       <div className="leading-tight">
                         <div className="text-[11px] font-bold text-[#1d1d1f] break-words">{label.line1}</div>
                         {label.line2 && <div className="text-[10px] text-[#6e6e73] mt-0.5">{label.line2}</div>}
