@@ -1,0 +1,23 @@
+npm warn config production Use `--omit=dev` instead.
+
+> dev
+> concurrently "cd frontend && npm run dev" "cd backend && npm run dev"
+
+(node:7256) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[0] 
+[0] > dev
+[0] > vite
+[0] 
+[1] 
+[1] > mspi-tools-backend@1.0.0 dev
+[1] > tsx watch src/index.ts
+[1] 
+[1] Database connected
+[0] 
+[0]   [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m2746[22m[2m[0m ms[22m
+[0] 
+[0]   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[0] [2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[1] PCount database connected
+[1] Gateway running on port 3001

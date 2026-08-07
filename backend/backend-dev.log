@@ -1,0 +1,7 @@
+
+> mspi-tools-backend@1.0.0 dev
+> tsx watch src/index.ts
+
+Database connected
+PCount database connected
+Gateway running on port 3001
