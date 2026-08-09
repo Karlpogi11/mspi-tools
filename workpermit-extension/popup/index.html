@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="index.css" />
+  <title>Work Permit Autofill</title>
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <div>
+        <h1>Work Permit Autofill</h1>
+        <p class="sub">Page 1: General Info &nbsp;•&nbsp; Page 2: Work Details</p>
+      </div>
+      <div class="head-actions">
+        <button id="btnFill" class="primary" title="Fill the form on the active tab">Fill current page</button>
+        <button id="btnProbe" title="Test only the Tenant Status dropdown and report what it sees">Test Tenant Status</button>
+        <button id="btnProbe1" title="Probe the 4 page-1 dropdowns: open their triggers and report the popup structure">Probe page 1 dropdowns</button>
+        <button id="btnDump" title="List every input/select on the page (including hidden) for debugging">Dump page fields</button>
+        <button id="btnMap" title="Copy detected fields to clipboard (for debugging)">Debug map</button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>Page 1 — Mall Details</h2>
+      <div class="grid cols-2">
+        <label>Trade Name
+          <input id="f_trade" data-field="mall.tradeName" spellcheck="false" />
+        </label>
+        <label>Classification
+          <input id="f_class" data-field="mall.classification" spellcheck="false" />
+        </label>
+        <label>Branch
+          <input id="f_branch" data-field="mall.branch" spellcheck="false" />
+        </label>
+        <label>Area Type
+          <input id="f_area" data-field="mall.areaType" spellcheck="false" />
+        </label>
+        <label class="span-2">Location <span class="hint">(leave blank to skip — you type it)</span>
+          <input id="f_loc" data-field="mall.location" spellcheck="false" />
+        </label>
+        <label class="span-2 check">
+          <input type="checkbox" id="f_ddowns" data-field="mallCombos" />
+          Auto-fill these dropdowns too <span class="hint">(Trade Name, Classification, Branch, Area Type — leave unchecked to pick them manually)</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Requestor Details</h2>
+      <div class="grid cols-3">
+        <label class="span-2">Name
+          <input id="f_reqName" data-field="requestor.name" spellcheck="false" />
+        </label>
+        <label>Position
+          <input id="f_reqPos" data-field="requestor.position" spellcheck="false" />
+        </label>
+        <label class="span-2">Contact Number
+          <input id="f_reqTel" data-field="requestor.contact" spellcheck="false" />
+        </label>
+        <label class="check">
+          <input type="checkbox" id="f_sameAsReq" data-field="sameAsRequestor" />
+          Same as the Requestor Details
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Contact Persons (up to 2)</h2>
+      <div id="contacts"></div>
+    </section>
+
+    <section class="panel">
+      <h2>2 — Work Details</h2>
+      <div class="grid cols-2">
+        <label>Tenant Status
+          <input id="f_status" data-field="work.tenantStatus" spellcheck="false" />
+        </label>
+        <label>Number of entries
+          <input id="f_num" data-field="work.numWork" type="number" min="1" max="10" />
+        </label>
+        <label>Scope
+          <input id="f_scope" data-field="work.scope" spellcheck="false" />
+        </label>
+        <label>Items to pull out
+          <input id="f_items" data-field="work.items" spellcheck="false" />
+        </label>
+        <label class="span-2">Details of work / Specific Scope
+          <input id="f_specific" data-field="work.specific" spellcheck="false" />
+        </label>
+        <label>From
+          <input id="f_from" data-field="work.fromTime" spellcheck="false" />
+        </label>
+        <label>To
+          <input id="f_to" data-field="work.toTime" spellcheck="false" />
+        </label>
+        <label class="span-2 check">
+          <input type="checkbox" id="f_urgent" data-field="work.urgent" />
+          This is an urgent request
+        </label>
+      </div>
+      <p class="note">Dates are always left blank — you type them manually.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Personnel <span class="muted">(one per line: First Last)</span></h2>
+      <textarea id="f_people" rows="6" spellcheck="false" placeholder="JIMSON SALAS&#10;LEOMAR BLANCO&#10;..."></textarea>
+    </section>
+
+    <footer class="foot">
+      <div class="foot-left">
+        <button id="btnSave" class="secondary">Save profile</button>
+        <button id="btnExport" class="secondary" title="Export profile JSON">Export</button>
+        <button id="btnImport" class="secondary" title="Import profile JSON">Import</button>
+        <button id="btnCopyLog" class="secondary" title="Copy the fill log to clipboard">Copy log</button>
+      </div>
+      <p id="status" class="status"></p>
+    </footer>
+
+    <pre id="log" class="log"></pre>
+  </main>
+  <script src="index.js"></script>
+</body>
+</html>
