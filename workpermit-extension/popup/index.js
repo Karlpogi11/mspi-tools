@@ -44,6 +44,29 @@ const DEFAULT_PROFILE = {
 const $ = (id) => document.getElementById(id);
 const state = { profile: structuredClone(DEFAULT_PROFILE), saveTimer: null };
 
+const PEST_CONTROL_PRESET = {
+  permitType: 'pest-control',
+  work: {
+    tenantStatus: 'Operating', numWork: 1, scope: 'Maintenance',
+    items: '', specific: 'Pest control/proofing/baiting/misting',
+    serviceProvider: 'HOMEFIX PEST CONTROL SERVICES', scopeOfWork: 'Disinfection',
+    fromTime: '', toTime: '', leaveScheduleBlank: true, urgent: false,
+  },
+  personnel: [
+    'Jimmy Rillen Jr', 'Luis Martin Jr.', 'Alfie Lacsa', 'Jhon Peter Tuscano',
+    'Lemuel German', 'Eufronio Aboquin', 'Christian Aldea', 'Angelica Lacia',
+    'Dominico Auxtero Jr.', 'Weniel Mationg', 'Marvin Candar',
+  ].map((line) => { const [first, ...rest] = line.replace(/\.$/, '').split(/\s+/); return { first, last: rest.join(' '), mi: '' }; }),
+  equipment: ['1pc Misting machine', '1pc spray can', 'asstd. chem', 'PPE'],
+};
+
+const PULL_OUT_PRESET = {
+  permitType: 'pullout',
+  work: structuredClone(DEFAULT_PROFILE.work),
+  personnel: structuredClone(DEFAULT_PROFILE.personnel),
+  equipment: [],
+};
+
 function deepMerge(base, patch) {
   if (Array.isArray(base)) return patch;
   if (patch && typeof patch === 'object' && base && typeof base === 'object') {
@@ -91,7 +114,7 @@ function render() {
     const card = document.createElement('div');
     card.className = 'contact-card';
     card.innerHTML = `
-      <span style="grid-column:1/-1;font-weight:700;color:#3a3a43">Contact ${i + 1}</span>
+      <h3>Contact ${i + 1}</h3>
       <label>Name<input class="c-name" value="${esc(c.name || '')}" /></label>
       <label>Position<input class="c-pos" value="${esc(c.position || '')}" /></label>
       <label>Contact Number<input class="c-tel" value="${esc(c.contact || '')}" /></label>
@@ -99,6 +122,8 @@ function render() {
     wrap.appendChild(card);
   });
   $('f_people').value = p.personnel.map((x) => `${x.first}${x.mi ? ' ' + x.mi : ''} ${x.last}`.trim()).join('\n');
+  $('f_equipment').value = (p.equipment || []).join('\n');
+  $('f_permitType').value = p.permitType || 'pullout';
 }
 
 function esc(s) {
@@ -123,7 +148,17 @@ function collect() {
     const m = /^(\S+)\s+(.+)$/.exec(rest);
     return { first, mi: '', last: rest };
   });
+  p.equipment = $('f_equipment').value.split('\n').map((l) => l.trim()).filter(Boolean);
   return p;
+}
+
+function applyPermitPreset(type) {
+  const current = collect();
+  const preset = type === 'pest-control' ? PEST_CONTROL_PRESET : PULL_OUT_PRESET;
+  state.profile = deepMerge(current, structuredClone(preset));
+  render();
+  persist();
+  setStatus('Pest Control template loaded', 'ok');
 }
 
 function bindFields() {
@@ -162,6 +197,23 @@ function clearLog() {
   l.style.display = 'none';
 }
 
+function setProgress(label, state) {
+  const wrap = $('progress');
+  if (!wrap) return;
+  const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  let row = wrap.querySelector(`[data-progress-key="${key}"]`);
+  if (!row) {
+    row = document.createElement('div');
+    row.className = 'progress-row';
+    row.dataset.progressKey = key;
+    row.innerHTML = '<span class="progress-icon"></span><span class="progress-label"></span>';
+    row.querySelector('.progress-label').textContent = label;
+    wrap.appendChild(row);
+  }
+  row.className = `progress-row ${state}`;
+  row.querySelector('.progress-icon').textContent = state === 'done' ? '✓' : state === 'failed' ? '!' : '◌';
+}
+
 async function sendToTab(msg) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || tab.id == null) throw new Error('No active tab');
@@ -169,7 +221,7 @@ async function sendToTab(msg) {
     return await chrome.tabs.sendMessage(tab.id, msg);
   } catch {
     await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: tab.id, allFrames: true },
       files: ['content/helpers.js', 'content/fill.js'],
     });
     await new Promise((r) => setTimeout(r, 250));
@@ -177,23 +229,45 @@ async function sendToTab(msg) {
   }
 }
 
-async function onFill() {
+async function onFill(testFirst = false) {
   clearLog();
+  $('progress').innerHTML = '';
   const cfg = collect();
+  cfg.testFirstType = testFirst;
+  $('btnFill').disabled = true;
+  $('btnTestFirst').disabled = true;
+  $('btnFill').textContent = 'Working…';
+  $('btnCancel').hidden = false;
   setStatus('Filling…');
   try {
     const res = await sendToTab({ type: 'wp-fill', cfg });
     if (!res || !res.ok) {
       setStatus(res?.message || res?.error || 'Fill failed', 'err');
-      appendLog({ text: (res?.message || res?.error || 'Unhandled error'), ok: false });
+      appendLog(res?.message || res?.error || 'Unhandled fill error', false);
       return;
     }
     (res.logs || []).forEach((l) => appendLog((l && (l.label || l.text)) || JSON.stringify(l), l.ok));
-    setStatus(res.ok ? `Done — page ${res.page} filled` : 'Done with warnings', 'ok');
+    const hasWarnings = (res.logs || []).some((l) => l && l.ok === false);
+    setStatus(hasWarnings ? `Done with warnings — page ${res.page}` : `Done — page ${res.page} filled`, hasWarnings ? 'err' : 'ok');
   } catch (e) {
-    setStatus('Could not reach the tab. Reload the page and retry.', 'err');
-    appendLog({ text: String(e.message || e), ok: false });
+    const message = String(e?.message || e || 'Unknown error');
+    setStatus(/cancelled/i.test(message) ? 'Fill cancelled' : 'Could not reach the tab. Reload the page and retry.', 'err');
+    appendLog(message, false);
+  } finally {
+    $('btnFill').disabled = false;
+    $('btnTestFirst').disabled = false;
+    $('btnFill').textContent = 'Fill current page';
+    $('btnCancel').disabled = false;
+    $('btnCancel').hidden = true;
   }
+}
+
+async function onCancel() {
+  $('btnCancel').disabled = true;
+  setStatus('Cancelling…');
+  try {
+    await sendToTab({ type: 'wp-cancel' });
+  } catch {}
 }
 
 const PROBE_FN = async () => {
@@ -539,10 +613,16 @@ function onImport() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === 'wp-progress') setProgress(msg.label, msg.state);
+  });
   await loadProfile();
   render();
   bindFields();
   $('btnFill').addEventListener('click', onFill);
+  $('btnTestFirst').addEventListener('click', () => onFill(true));
+  $('btnCancel').addEventListener('click', onCancel);
+  $('f_permitType').addEventListener('change', (event) => applyPermitPreset(event.target.value));
   $('btnProbe').addEventListener('click', probeTenant);
   $('btnProbe1').addEventListener('click', probePage1);
   $('btnDump').addEventListener('click', onDump);

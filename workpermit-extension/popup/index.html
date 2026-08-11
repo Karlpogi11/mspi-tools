@@ -9,18 +9,29 @@
 <body>
   <main class="wrap">
     <header class="head">
-      <div>
-        <h1>Work Permit Autofill</h1>
-        <p class="sub">Page 1: General Info &nbsp;•&nbsp; Page 2: Work Details</p>
+      <div class="brand">
+        <span class="eyebrow">MSPI TOOL</span>
+        <h1>Work Permit Extension</h1>
+        <p class="sub">Fill the fields on the active permit page.</p>
       </div>
       <div class="head-actions">
         <button id="btnFill" class="primary" title="Fill the form on the active tab">Fill current page</button>
-        <button id="btnProbe" title="Test only the Tenant Status dropdown and report what it sees">Test Tenant Status</button>
-        <button id="btnProbe1" title="Probe the 4 page-1 dropdowns: open their triggers and report the popup structure">Probe page 1 dropdowns</button>
-        <button id="btnDump" title="List every input/select on the page (including hidden) for debugging">Dump page fields</button>
-        <button id="btnMap" title="Copy detected fields to clipboard (for debugging)">Debug map</button>
+        <button id="btnTestFirst" class="secondary" title="Test only the first Type of Work row">Test first row</button>
+        <button id="btnCancel" class="cancel" title="Cancel the current fill operation" hidden>Cancel</button>
       </div>
     </header>
+
+    <section class="panel">
+      <h2>Permit Type</h2>
+      <div class="grid cols-2">
+        <label>Template
+          <select id="f_permitType">
+            <option value="pullout">Pullout</option>
+            <option value="pest-control">Pest Control</option>
+          </select>
+        </label>
+      </div>
+    </section>
 
     <section class="panel">
       <h2>Page 1 — Mall Details</h2>
@@ -50,12 +61,6 @@
     <section class="panel">
       <h2>Requestor Details</h2>
       <div class="grid cols-3">
-        <label class="span-2">Name
-          <input id="f_reqName" data-field="requestor.name" spellcheck="false" />
-        </label>
-        <label>Position
-          <input id="f_reqPos" data-field="requestor.position" spellcheck="false" />
-        </label>
         <label class="span-2">Contact Number
           <input id="f_reqTel" data-field="requestor.contact" spellcheck="false" />
         </label>
@@ -108,6 +113,11 @@
       <textarea id="f_people" rows="6" spellcheck="false" placeholder="JIMSON SALAS&#10;LEOMAR BLANCO&#10;..."></textarea>
     </section>
 
+    <section class="panel">
+      <h2>Equipment <span class="muted">(one per line)</span></h2>
+      <textarea id="f_equipment" rows="4" spellcheck="false" placeholder="1pc Misting machine&#10;1pc spray can&#10;asstd. chem&#10;PPE"></textarea>
+    </section>
+
     <footer class="foot">
       <div class="foot-left">
         <button id="btnSave" class="secondary">Save profile</button>
@@ -117,6 +127,18 @@
       </div>
       <p id="status" class="status"></p>
     </footer>
+
+    <div id="progress" class="progress" aria-live="polite"></div>
+
+    <details class="advanced">
+      <summary>Diagnostics</summary>
+      <div class="advanced-actions">
+        <button id="btnProbe" title="Test only the Tenant Status dropdown and report what it sees">Test Tenant Status</button>
+        <button id="btnProbe1" title="Probe the 4 page-1 dropdowns: open their triggers and report the popup structure">Probe page 1 dropdowns</button>
+        <button id="btnDump" title="List every input/select on the page (including hidden) for debugging">Dump page fields</button>
+        <button id="btnMap" title="Copy detected fields to clipboard (for debugging)">Copy field map</button>
+      </div>
+    </details>
 
     <pre id="log" class="log"></pre>
   </main>

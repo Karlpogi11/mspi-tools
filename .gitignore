@@ -4,6 +4,8 @@ dist/
 .env.local
 *.tsbuildinfo
 frontend/dist/
+backend/data/
+*.traineddata
 .turbo/
 apps/
 packages/

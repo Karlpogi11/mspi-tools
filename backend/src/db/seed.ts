@@ -101,6 +101,24 @@ async function seed() {
   ]);
 
   console.log('Label Maker assigned to PMS, CSO, ENGR, and Admin roles');
+
+  const [pdfExtractorTool] = await db.insert(tools).values({
+    name: 'PDF Extractor',
+    url: '/pdf-extractor',
+    icon: 'file',
+    description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date, files them by month, and logs every invoice.',
+  }).$returningId();
+
+  console.log('Tool created: PDF Extractor (/pdf-extractor)');
+
+  await db.insert(roleToolAccess).values([
+    { role_id: pmsRole.id, tool_id: pdfExtractorTool.id },
+    { role_id: csoRole.id, tool_id: pdfExtractorTool.id },
+    { role_id: engrRole.id, tool_id: pdfExtractorTool.id },
+    { role_id: adminRole.id, tool_id: pdfExtractorTool.id },
+  ]);
+
+  console.log('PDF Extractor assigned to PMS, CSO, ENGR, and Admin roles');
   console.log('\nSeed complete!');
   process.exit(0);
 }

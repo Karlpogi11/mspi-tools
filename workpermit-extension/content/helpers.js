@@ -52,6 +52,7 @@
     for (const opt of Array.from(el.options)) {
       if (norm(opt.textContent) === norm(value) || opt.value === value) {
         el.value = opt.value;
+        el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return true;
       }
@@ -277,18 +278,30 @@
         '[role=option], [class*=option], [data-value], li, .dropdown-item, .mat-option, .k-option, .el-select-dropdown__item, [role=menuitem], option, [class*=suggestion], tr[data-id], tr[data-recordid], [class*=select] tr[class*=select], [class*=lookup] td[class*=select], [class*=result] [class*=clickable-list-option]'
       );
       const list = [];
+      const seen = new Set();
       for (const o of Array.from(pool)) {
         if (!isVisible(o)) continue;
         const txt = norm(textOf(o));
         if (!txt || txt.length > 80) continue;
-        if (txt === valueN || txt.includes(valueN)) list.push({ el: o, txt });
+        if (txt === valueN || txt.includes(valueN) || valueN.includes(txt)) {
+          const item = o.closest('[role=option], .dropdown-item, .mat-option, .k-option, .el-select-dropdown__item, [role=menuitem], li') || o;
+          if (!seen.has(item)) {
+            seen.add(item);
+            list.push({ el: item, txt: norm(textOf(item)) });
+          }
+        }
       }
       const exact = list.find((x) => x.txt === valueN);
-      return exact ? exact.el : list[0] ? list[0].el : null;
+      return exact ? exact.el : list.sort((a, b) => a.txt.length - b.txt.length)[0]?.el || null;
     }, timeout, 150);
     if (!opt) return false;
     opt.scrollIntoView({ block: 'center' });
-    opt.click();
+    try {
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+        opt.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      }
+      opt.click();
+    } catch {}
     await sleep(350);
     return true;
   }
@@ -559,7 +572,54 @@
     if (!ok) {
       diag('combo', `"${labelKeys[0]}" could not pick «${value}» — visible list:`, JSON.stringify(collectSamples()));
     }
-    return ok ? 'ok' : 'typed';
+    return ok ? 'ok' : 'notmatched';
+  }
+
+  async function setComboElement(el, value) {
+    if (!el || value === undefined || value === null || value === '') return false;
+    if (el.tagName === 'SELECT') return setSelect(el, value);
+    await openCombo(el);
+
+    // Some Type of Work controls are editable autocomplete inputs. Use the
+    // input only to filter the list, then commit an actual option below.
+    const input = el.matches?.('input')
+      ? el
+      : el.querySelector?.('input[type=text], input:not([type]), input[type=search]');
+    if (input && !input.readOnly) {
+      await clearValue(input);
+      setText(input, value);
+      await sleep(650);
+    }
+
+    let picked = await pickFromOpened(document, value, 3500);
+    if (!picked) {
+      const search = findPopupSearch(document);
+      if (search) {
+        setText(search, value);
+        await sleep(650);
+        picked = await pickFromOpened(document, value, 4500);
+      }
+    }
+    if (!picked) {
+      const inner = el.querySelector?.('input[type=text], input:not([type]), input[type=search]');
+      if (inner) {
+        await clearValue(inner);
+        setText(inner, value);
+        await sleep(650);
+        picked = await pickFromOpened(document, value, 4500);
+      }
+    }
+    if (!picked && input) {
+      try {
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown', code: 'ArrowDown' }));
+        input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter' }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter' }));
+        picked = true;
+      } catch {}
+    }
+    if (!picked) await closeLists();
+    return !!picked;
   }
 
   async function setValueOn(el, value) {
@@ -603,7 +663,7 @@
   window.__wpH = {
     norm, textOf, sleep, waitFor, isVisible, isEditable, setText, setSelect,
     findField, findFields, findCheckbox, findButtonByText, findHeading, sectionByHeading, longestContainerOf: longestContainer,
-    collectAllDocs, allDocs, openCombo, typeInCombo, pickOption, setComboValue,
+    collectAllDocs, allDocs, openCombo, typeInCombo, pickOption, setComboValue, setComboElement,
     setValueOn, setTime, fillInput, labelFor, collectVisibleItems, pickFromOpened,
     dumpFields,
   };

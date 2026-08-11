@@ -113,6 +113,14 @@ npm run build
 # Frontend: host dist/ as static files
 ```
 
+## Available Tools
+
+- **Site Monitor** (`/rfpu`) — real-time RFPU deployment monitoring
+- **PCount** (`/pcount`) — product counting sessions
+- **ReFormat** (`/reformat`) — Excel/CSV column remapping
+- **Label Maker** (`/consumables`) — consumables expiry labels
+- **PDF Extractor** (`/pdf-extractor`) — drag-and-drop AWB/invoice PDFs; extracts invoice ref, HAWB, amount, delivery date and qty via OCR (tesseract.js), files them by month, logs to the `awb_log` table (Received Date is blank by design). Copy or export the results as Excel. A local inbox watcher is available via `npm run watch:pdf-extractor -w backend`. See `vault/Tool - PDF Extractor.md`.
+
 ## Project Structure
 
 ```

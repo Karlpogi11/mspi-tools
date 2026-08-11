@@ -77,6 +77,8 @@ export default function AdminToolsPage() {
     { value: 'database', label: 'Database' },
     { value: 'clipboard', label: 'Clipboard' },
     { value: 'table', label: 'Table' },
+    { value: 'tag', label: 'Tag' },
+    { value: 'file', label: 'File' },
     { value: 'default', label: 'Default' },
   ];
 

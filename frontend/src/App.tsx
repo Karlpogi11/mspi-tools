@@ -15,6 +15,7 @@ const PcountSessionPage = lazy(() => import('./pages/pcount/SessionPage'));
 const RfpuPage = lazy(() => import('./pages/RfpuPage'));
 const ReformatPage = lazy(() => import('./pages/reformat/ReformatPage'));
 const ConsumablesPage = lazy(() => import('./pages/consumables/ConsumablesPage'));
+const PdfExtractorPage = lazy(() => import('./pages/pdf-extractor/PdfExtractorPage'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -119,6 +120,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <ConsumablesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/pdf-extractor"
+                element={
+                  <ProtectedRoute>
+                    <PdfExtractorPage />
                   </ProtectedRoute>
                 }
               />

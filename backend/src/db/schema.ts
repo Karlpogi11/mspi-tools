@@ -149,3 +149,24 @@ export const consumableMaster = mysqlTable(
     partNumberUnique: uniqueIndex('consumable_master_part_number_unique').on(table.part_number),
   })
 );
+
+export const awbLog = mysqlTable(
+  'awb_log',
+  {
+    id: int('id').autoincrement().notNull().primaryKey(),
+    hawb: varchar('hawb', { length: 50 }).default(''),
+    invoice_reference: varchar('invoice_reference', { length: 20 }).notNull(),
+    invoice_total_amount: varchar('invoice_total_amount', { length: 20 }).default(''),
+    delivery_date: varchar('delivery_date', { length: 40 }).default(''),
+    total_qty: varchar('total_qty', { length: 20 }).default(''),
+    received_date: varchar('received_date', { length: 40 }).default(''),
+    original_filename: varchar('original_filename', { length: 255 }).default(''),
+    month_folder: varchar('month_folder', { length: 60 }).default(''),
+    status: varchar('status', { length: 20 }).default('ok').notNull(),
+    created_by: int('created_by').references(() => users.id, { onDelete: 'set null' }),
+    date_logged: timestamp('date_logged').defaultNow().notNull(),
+  },
+  (table) => ({
+    invoiceRefUnique: uniqueIndex('awb_log_invoice_ref_unique').on(table.invoice_reference),
+  })
+);

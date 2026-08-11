@@ -169,6 +169,41 @@ export interface ReformatUser {
   full_name: string;
 }
 
+export interface ExtractFieldValues {
+  HAWB: string;
+  InvoiceReference: string;
+  InvoiceTotalAmount: string;
+  DeliveryDate: string;
+  TotalQty: string;
+}
+
+export type ExtractStatus = 'ok' | 'duplicate' | 'error' | 'permit';
+
+export interface ExtractResult {
+  file: string;
+  status: ExtractStatus;
+  method?: string;
+  reasons?: string[];
+  fields?: ExtractFieldValues;
+  dest?: string;
+  monthFolder?: string;
+  permit?: boolean;
+}
+
+export interface AwbLogRow {
+  id: number;
+  hawb: string;
+  invoice_reference: string;
+  invoice_total_amount: string;
+  delivery_date: string;
+  total_qty: string;
+  received_date: string;
+  original_filename: string;
+  month_folder: string;
+  status: string;
+  date_logged: string | null;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ message: string; user: User }>('/auth/login', {
@@ -383,6 +418,25 @@ export const api = {
       }
       await saveBlob(await res.blob(), 'consumable-inventory.xlsx');
     },
+  },
+
+  pdfExtractor: {
+    extract: async (files: File[]): Promise<ExtractResult[]> => {
+      const form = new FormData();
+      for (const f of files) form.append('files', f);
+      const res = await fetch(`${BASE}/pdf-extractor/extract`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      const data = await readJson<{ results?: ExtractResult[]; error?: string }>(res);
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to process files');
+      }
+      return data.results ?? [];
+    },
+    log: () =>
+      request<AwbLogRow[]>('/pdf-extractor/log'),
   },
 };
 
