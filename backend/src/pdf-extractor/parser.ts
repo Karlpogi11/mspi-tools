@@ -46,12 +46,25 @@ function find(patterns: RegExp[], ...texts: string[]): string {
   return '';
 }
 
+function hawbAboveDeliveryDate(region: string): string {
+  const lines = region.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const deliveryIndex = lines.findIndex((line) => /delivery\s+date/i.test(line));
+  if (deliveryIndex < 0) return '';
+  for (let index = deliveryIndex - 1; index >= Math.max(0, deliveryIndex - 4); index--) {
+    const match = lines[index].match(/(?:HAWBS?\s*)?(\d[\d\s-]{5,20})\s*$/i);
+    if (match) return match[1].replace(/[\s-]+/g, '');
+  }
+  return '';
+}
+
 export function parseFields(text: string, region = ''): ParsedFields {
-  const hawb = find([
-    /HAWB[E]?[:\s#]+([0-9]{6,})/i,
+  let hawb = find([
+    /\bHAWBS?\b\s*(?:NO\.?|NUMBER|#)?\s*[:;#-]?\s*\n?\s*([0-9][0-9\s-]{5,20})/i,
+    /\bH[A4]WB[S5]?\b\s*(?:N[O0]\.?|#)?\s*[:;#-]?\s*\n?\s*([0-9][0-9\s-]{5,20})/i,
     /(?:Lon|AWB)[:\s#]+([0-9]{6,})/i,
     /(?:oN|aN)\s*[=\w]+[=:\s;]+\s*([0-9]{6,})/i,
-  ], text);
+  ], region, text).replace(/[\s-]+/g, '');
+  if (!hawb) hawb = hawbAboveDeliveryDate(region);
 
   let invoiceRef = find([
     /\b(SG0\d{7,})\b/i,

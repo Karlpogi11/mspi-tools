@@ -48,6 +48,24 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again later.' },
 });
 
+const passwordChangeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many password change attempts. Please try again later.' },
+});
+
+function passwordValidationError(password: unknown): string | null {
+  if (typeof password !== 'string') return 'A new password is required';
+  if (password.length < 12) return 'New password must be at least 12 characters';
+  if (password.length > 128) return 'New password must be 128 characters or fewer';
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    return 'New password must include uppercase, lowercase, number, and special characters';
+  }
+  return null;
+}
+
 router.post('/signup', signupLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password, fullName } = req.body;
@@ -89,9 +107,9 @@ router.post('/signup', signupLimiter, async (req: Request, res: Response) => {
 
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === 'production' && !['localhost', '127.0.0.1'].includes(req.hostname),
       sameSite: 'lax',
-      domain: process.env.COOKIE_DOMAIN,
+      domain: ['localhost', '127.0.0.1'].includes(req.hostname) ? undefined : process.env.COOKIE_DOMAIN,
       maxAge: 8 * 60 * 60 * 1000,
       path: '/',
     });
@@ -163,9 +181,9 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === 'production' && !['localhost', '127.0.0.1'].includes(req.hostname),
       sameSite: 'lax',
-      domain: process.env.COOKIE_DOMAIN,
+      domain: ['localhost', '127.0.0.1'].includes(req.hostname) ? undefined : process.env.COOKIE_DOMAIN,
       maxAge: 8 * 60 * 60 * 1000,
       path: '/',
     });
@@ -186,15 +204,64 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/logout', (_req: Request, res: Response) => {
+router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie('token', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV === 'production' && !['localhost', '127.0.0.1'].includes(req.hostname),
     sameSite: 'lax',
-    domain: process.env.COOKIE_DOMAIN,
+    domain: ['localhost', '127.0.0.1'].includes(req.hostname) ? undefined : process.env.COOKIE_DOMAIN,
     path: '/',
   });
   res.json({ message: 'Logged out' });
+});
+
+router.post('/change-password', authenticateToken, passwordChangeLimiter, async (req: Request, res: Response) => {
+  try {
+    const { currentPassword, newPassword } = req.body ?? {};
+    if (typeof currentPassword !== 'string' || currentPassword.length === 0) {
+      res.status(400).json({ error: 'Current password is required' });
+      return;
+    }
+
+    const validationError = passwordValidationError(newPassword);
+    if (validationError) {
+      res.status(400).json({ error: validationError });
+      return;
+    }
+
+    const db = getDb();
+    const result = await db.select().from(users).where(eq(users.id, req.user!.userId)).limit(1);
+    if (result.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const currentMatches = await bcrypt.compare(currentPassword, result[0].password_hash);
+    if (!currentMatches) {
+      res.status(401).json({ error: 'Current password is incorrect' });
+      return;
+    }
+
+    if (await bcrypt.compare(newPassword, result[0].password_hash)) {
+      res.status(400).json({ error: 'New password must be different from your current password' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await db.update(users).set({ password_hash: passwordHash }).where(eq(users.id, req.user!.userId));
+
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production' && !['localhost', '127.0.0.1'].includes(req.hostname),
+      sameSite: 'lax',
+      domain: ['localhost', '127.0.0.1'].includes(req.hostname) ? undefined : process.env.COOKIE_DOMAIN,
+      path: '/',
+    });
+    res.json({ message: 'Password changed. Please sign in again.' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 router.get('/me', authenticateToken, async (req: Request, res: Response) => {

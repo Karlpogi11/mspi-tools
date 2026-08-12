@@ -8,6 +8,7 @@ import path from 'path';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import { initDb } from './db/index.js';
+import { syncBuiltinToolCatalog } from './db/tool-catalog.js';
 import authRoutes from './routes/auth.js';
 import toolsRoutes from './routes/tools.js';
 import adminRoutes from './routes/admin.js';
@@ -16,6 +17,7 @@ import rfpuRoutes from './rfpu/routes.js';
 import reformatRoutes from './reformat/routes.js';
 import consumablesRoutes from './consumables/routes.js';
 import pdfExtractorRoutes from './pdf-extractor/routes.js';
+import { ensureAwbLogTable } from './pdf-extractor/store.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -97,12 +99,21 @@ if (existsSync(frontendIndex)) {
 }
 
 async function start() {
+  server.listen(PORT, () => {
+    console.log(`Gateway running on port ${PORT}`);
+  });
+
   try {
     await initDb();
     console.log('Database connected');
+    await ensureAwbLogTable();
+    console.log('PDF Extractor log table ready');
+    await syncBuiltinToolCatalog();
+    console.log('Built-in tool catalog synchronized');
   } catch (error) {
     console.warn('Database unavailable — API routes requiring DB will return errors');
     console.warn('Update DATABASE_URL in backend/.env and restart');
+    console.warn(error);
   }
 
   for (const tool of tools) {
@@ -111,9 +122,6 @@ async function start() {
     }
   }
 
-  server.listen(PORT, () => {
-    console.log(`Gateway running on port ${PORT}`);
-  });
 }
 
 start();

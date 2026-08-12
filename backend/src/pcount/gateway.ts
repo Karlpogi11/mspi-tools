@@ -1,6 +1,6 @@
 import { Router, RequestHandler } from 'express';
 import http from 'http';
-import { initDb } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import { authenticateToken } from '../auth.js';
 import { setDbAvailable } from './store.js';
 import { initWs } from './ws.js';
@@ -38,7 +38,7 @@ pcountAdminRouter.use(adminRoutes);
 
 export async function initPcount(server: http.Server) {
   try {
-    await initDb();
+    getDb();
     setDbAvailable(true);
     console.log('PCount database connected');
   } catch (error) {

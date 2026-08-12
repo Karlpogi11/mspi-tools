@@ -188,6 +188,20 @@ export interface ExtractResult {
   dest?: string;
   monthFolder?: string;
   permit?: boolean;
+  renamedFile?: string;
+  pageCount?: number;
+  deepAnalysis?: boolean;
+}
+
+export interface ExtractDownload {
+  url: string;
+  name: string;
+  count: number;
+}
+
+export interface ExtractBatch {
+  results: ExtractResult[];
+  download: ExtractDownload | null;
 }
 
 export interface AwbLogRow {
@@ -219,6 +233,12 @@ export const api = {
 
   logout: () =>
     request<{ message: string }>('/auth/logout', { method: 'POST' }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
 
   me: () =>
     request<User>('/auth/me'),
@@ -421,7 +441,7 @@ export const api = {
   },
 
   pdfExtractor: {
-    extract: async (files: File[]): Promise<ExtractResult[]> => {
+    extract: async (files: File[]): Promise<ExtractBatch> => {
       const form = new FormData();
       for (const f of files) form.append('files', f);
       const res = await fetch(`${BASE}/pdf-extractor/extract`, {
@@ -429,12 +449,44 @@ export const api = {
         credentials: 'include',
         body: form,
       });
-      const data = await readJson<{ results?: ExtractResult[]; error?: string }>(res);
+      const data = await readJson<{ results?: ExtractResult[]; download?: ExtractDownload | null; error?: string }>(res);
       if (!res.ok) {
         throw new Error(data?.error || 'Failed to process files');
       }
-      return data.results ?? [];
+      return { results: data.results ?? [], download: data.download ?? null };
     },
+    extractStream: async (files: File[], onProgress: (completed: number, total: number, file: string) => void): Promise<ExtractBatch> => {
+      const form = new FormData();
+      for (const file of files) form.append('files', file);
+      const res = await fetch(`${BASE}/pdf-extractor/extract-stream`, {
+        method: 'POST', credentials: 'include', body: form,
+      });
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to process files');
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let completedBatch: ExtractBatch | null = null;
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.type === 'progress') onProgress(event.completed, event.total, event.file);
+          if (event.type === 'error') throw new Error(event.error || 'Failed to process files');
+          if (event.type === 'complete') completedBatch = { results: event.results ?? [], download: event.download ?? null };
+        }
+        if (done) break;
+      }
+      if (!completedBatch) throw new Error('Processing ended before results were ready');
+      return completedBatch;
+    },
+    downloadUrl: (path: string) => `${BASE}${path.replace(/^\/api/, '')}`,
     log: () =>
       request<AwbLogRow[]>('/pdf-extractor/log'),
   },

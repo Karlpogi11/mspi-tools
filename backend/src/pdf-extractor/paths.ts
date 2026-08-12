@@ -12,9 +12,10 @@ export const INBOX = path.join(DATA_DIR, 'inbox');
 export const PROCESSED = path.join(DATA_DIR, 'processed');
 export const ERRORS = path.join(DATA_DIR, 'errors');
 export const PERMITS = path.join(DATA_DIR, 'permits');
+export const DOWNLOADS = path.join(DATA_DIR, 'downloads');
 
 export function ensureDirs() {
-  for (const dir of [INBOX, PROCESSED, ERRORS, PERMITS]) {
+  for (const dir of [INBOX, PROCESSED, ERRORS, PERMITS, DOWNLOADS]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }

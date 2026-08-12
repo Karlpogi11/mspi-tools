@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import * as XLSX from 'xlsx';
-import { api, type AwbLogRow, type ExtractResult, type ExtractStatus } from '../../lib/api';
+import { api, type AwbLogRow, type ExtractDownload, type ExtractResult, type ExtractStatus } from '../../lib/api';
 
 const LOG_COLUMNS = ['HAWB', 'InvoiceReference', 'InvoiceTotalAmount', 'DeliveryDate', 'TotalQty', 'ReceivedDate', 'OriginalFilename', 'DateLogged'];
 
@@ -29,6 +29,27 @@ const iconDownload = (
     <line x1="12" y1="15" x2="12" y2="3" />
   </svg>
 );
+
+function ProcessingSpinner() {
+  return (
+    <div className="relative w-16 h-16" role="img" aria-label="Scanning PDF documents">
+      <div className="absolute inset-0 rounded-full border-2 border-[#dbeafe] border-t-[#2563eb] border-r-[#2563eb] animate-spin" />
+      <div
+        className="absolute inset-[6px] rounded-full border border-dashed border-[#93c5fd] border-b-[#1d4ed8] animate-spin"
+        style={{ animationDirection: 'reverse', animationDuration: '1.6s' }}
+      />
+      <div className="absolute left-1/2 top-0 w-2 h-2 -translate-x-1/2 -translate-y-0.5 rounded-full bg-[#2563eb] shadow-[0_0_10px_#2563eb]" />
+      <div className="absolute right-0 top-1/2 w-1.5 h-1.5 -translate-y-1/2 rounded-full bg-[#60a5fa]" />
+      <div className="absolute inset-[14px] rounded-lg bg-white border border-[#bfdbfe] shadow-sm flex items-center justify-center overflow-hidden">
+        <svg className="w-6 h-6 text-[#2563eb]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+          <path d="M14 2v6h6M8 13h8M8 17h6" />
+        </svg>
+        <div className="absolute left-1 right-1 top-1/2 h-px bg-[#2563eb] shadow-[0_0_6px_#2563eb] animate-pulse" />
+      </div>
+    </div>
+  );
+}
 
 const statusMeta: Record<ExtractStatus | 'ok', { label: string; cls: string }> = {
   ok: { label: 'Logged', cls: 'bg-[#ecfdf5] text-[#047857] border-[#a7f3d0]' },
@@ -75,7 +96,12 @@ async function copyText(text: string): Promise<void> {
 
 function exportXlsx(rows: Array<Array<string | number>>, filename: string) {
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([[LOG_COLUMNS], ...rows]);
+  const ws = XLSX.utils.aoa_to_sheet([LOG_COLUMNS, ...rows]);
+  ws['!autofilter'] = { ref: `A1:H${Math.max(1, rows.length + 1)}` };
+  ws['!cols'] = [
+    { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 16 },
+    { wch: 12 }, { wch: 16 }, { wch: 32 }, { wch: 22 },
+  ];
   XLSX.utils.book_append_sheet(wb, ws, 'AWB Log');
   XLSX.writeFile(wb, filename);
 }
@@ -86,37 +112,67 @@ interface ResultRow {
   reasons?: string[];
   fields?: ExtractResult['fields'];
   monthFolder?: string;
+  renamedFile?: string;
+  pageCount?: number;
+  deepAnalysis?: boolean;
 }
 
 export default function PdfExtractorPage() {
   const [results, setResults] = useState<ResultRow[]>([]);
   const [log, setLog] = useState<AwbLogRow[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [processingFiles, setProcessingFiles] = useState<string[]>([]);
+  const [completedFiles, setCompletedFiles] = useState(0);
+  const [activeFile, setActiveFile] = useState('');
+  const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
+  const [downloads, setDownloads] = useState<ExtractDownload[]>([]);
+  const [resultsCopied, setResultsCopied] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const busyRef = useRef(false);
+  const queueRef = useRef<File[]>([]);
+  const processingStartedAtRef = useRef(0);
 
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
 
-  function loadLog() {
-    api.pdfExtractor
-      .log()
-      .then(setLog)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load log'));
+  async function toggleLogs() {
+    if (showLogs) {
+      setShowLogs(false);
+      return;
+    }
+    setLogsLoading(true);
+    setError('');
+    try {
+      setLog(await api.pdfExtractor.log());
+      setShowLogs(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load saved logs');
+    } finally {
+      setLogsLoading(false);
+    }
   }
 
-  useEffect(() => {
-    loadLog();
-  }, []);
+  async function refreshLogsIfVisible() {
+    if (!showLogs) return;
+    try {
+      setLog(await api.pdfExtractor.log());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh AWB history');
+    }
+  }
 
   useEffect(() => {
     function onDragEnter(e: DragEvent) {
       if (!e.dataTransfer?.types.includes('Files')) return;
+      if (busyRef.current) return;
       e.preventDefault();
       dragDepthRef.current += 1;
       setDragActive(true);
@@ -135,7 +191,7 @@ export default function PdfExtractorPage() {
       setDragActive(false);
       if (busyRef.current) return;
       const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.name.toLowerCase().endsWith('.pdf'));
-      if (files.length > 0) void handleFiles(files);
+      if (files.length > 0) enqueueFiles(files);
     }
     function onDocDragOver(e: DragEvent) {
       e.preventDefault();
@@ -159,47 +215,84 @@ export default function PdfExtractorPage() {
     };
   }, []);
 
-  async function handleFiles(files: File[]) {
+  function enqueueFiles(files: File[]) {
     const pdfs = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
     if (pdfs.length === 0) {
       setError('No PDF files found. Drop or import .pdf files.');
       return;
     }
+    queueRef.current.push(...pdfs);
+    setQueuedCount(queueRef.current.length);
+    setNotice(`${queueRef.current.length} PDF${queueRef.current.length === 1 ? '' : 's'} ready to run.`);
+  }
+
+  async function processQueue() {
+    if (busyRef.current || queueRef.current.length === 0) return;
+    busyRef.current = true;
+    const pdfs = queueRef.current.splice(0, 20);
+    setQueuedCount(queueRef.current.length);
+    setProcessingFiles(pdfs.map((file) => file.name));
+    setCompletedFiles(0);
+    setActiveFile(pdfs[0]?.name ?? '');
+    setEstimatedSeconds(null);
+    processingStartedAtRef.current = Date.now();
     setError('');
     setBusy(true);
     setNotice('');
     try {
-      const out = await api.pdfExtractor.extract(pdfs);
+      const response = await api.pdfExtractor.extractStream(pdfs, (completed, _total, file) => {
+        setCompletedFiles(completed);
+        setActiveFile(file);
+        const elapsedSeconds = (Date.now() - processingStartedAtRef.current) / 1000;
+        const remaining = Math.max(0, pdfs.length - completed);
+        setEstimatedSeconds(remaining === 0 ? 0 : Math.ceil((elapsedSeconds / completed) * remaining));
+      });
+      const out = response.results;
       setResults(
-        out.map((r) => ({
+        (current) => [...current, ...out.map((r) => ({
           file: r.file,
           status: r.status,
           reasons: r.reasons,
           fields: r.fields,
           monthFolder: r.monthFolder,
-        }))
+          renamedFile: r.renamedFile,
+          pageCount: r.pageCount,
+          deepAnalysis: r.deepAnalysis,
+        }))]
       );
+      if (response.download) setDownloads((current) => [...current, response.download!]);
       const logged = out.filter((r) => r.status === 'ok').length;
       const failed = out.filter((r) => r.status === 'error').length;
       const parts: string[] = [];
       if (logged > 0) parts.push(`${logged} invoice${logged === 1 ? '' : 's'} logged`);
       if (failed > 0) parts.push(`${failed} failed`);
       if (parts.length > 0) setNotice(`Processed ${out.length} file${out.length === 1 ? '' : 's'} — ${parts.join(', ')}.`);
-      loadLog();
+      await refreshLogsIfVisible();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process files');
     } finally {
+      busyRef.current = false;
       setBusy(false);
+      setProcessingFiles([]);
+      setCompletedFiles(0);
+      setActiveFile('');
+      setEstimatedSeconds(null);
+      setQueuedCount(queueRef.current.length);
+      if (queueRef.current.length > 0) void processQueue();
     }
   }
 
   function handleImport(e: ChangeEvent<HTMLInputElement>) {
     const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = '';
-    if (files.length > 0) void handleFiles(files);
+    if (files.length > 0) enqueueFiles(files);
   }
 
-  const resultRows = results.map((r) => [
+  const invoiceResults = results.filter((r) => r.status !== 'permit' && r.status !== 'error');
+  const permitResults = results.filter((r) => r.status === 'permit');
+  const errorResults = results.filter((r) => r.status === 'error');
+
+  const resultRows = invoiceResults.map((r) => [
     r.fields?.HAWB ?? '',
     r.fields?.InvoiceReference ?? '',
     r.fields?.InvoiceTotalAmount ?? '',
@@ -210,27 +303,23 @@ export default function PdfExtractorPage() {
     '',
   ]);
 
-  const logRows = log.map((r) => [
-    r.hawb,
-    r.invoice_reference,
-    r.invoice_total_amount,
-    r.delivery_date,
-    r.total_qty,
-    r.received_date ?? '',
-    r.original_filename,
-    r.date_logged ? new Date(r.date_logged).toLocaleString() : '',
+  const savedLogRows = log.map((row) => [
+    row.hawb,
+    row.invoice_reference,
+    row.invoice_total_amount,
+    row.delivery_date,
+    row.total_qty,
+    row.received_date ?? '',
+    row.original_filename,
+    row.date_logged ? new Date(row.date_logged).toLocaleString() : '',
   ]);
 
   async function copyResults() {
     if (resultRows.length === 0) return;
     await copyText(toTsv(resultRows));
+    setResultsCopied(true);
     setNotice('Results copied to clipboard');
-  }
-
-  async function copyLog() {
-    if (logRows.length === 0) return;
-    await copyText(toTsv(logRows));
-    setNotice('Log copied to clipboard');
+    window.setTimeout(() => setResultsCopied(false), 2200);
   }
 
   function exportResults() {
@@ -239,22 +328,44 @@ export default function PdfExtractorPage() {
     setNotice('Exported log to Excel');
   }
 
-  function exportLog() {
-    if (logRows.length === 0) return;
-    exportXlsx(logRows, 'awb-log.xlsx');
-    setNotice('Exported log to Excel');
+  function downloadArtifact(download: ExtractDownload) {
+    window.location.assign(api.pdfExtractor.downloadUrl(download.url));
+  }
+
+  function exportSavedLog() {
+    if (savedLogRows.length === 0) return;
+    exportXlsx(savedLogRows, 'awb-history.xlsx');
+    setNotice('AWB history exported to Excel');
+  }
+
+  function clearSelection() {
+    queueRef.current = [];
+    setQueuedCount(0);
+    setNotice('');
+    setError('');
+  }
+
+  function clearCurrentResults() {
+    setResults([]);
+    setDownloads([]);
+    setNotice('');
+    setError('');
   }
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="w-full max-w-5xl mx-auto flex items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-[20px] font-semibold text-[#1d1d1f] tracking-tight">PDF Extractor</h1>
           <p className="text-[12px] text-[#6e6e73] mt-0.5">
-            Drop or import AWB/invoice PDFs — extracts the invoice reference, HAWB, amount, delivery date, and quantity,
-            then files them by month. Received date is left blank. &middot; Drag &amp; drop anywhere on this page.
+            Add AWB and invoice PDFs. Files stay in upload order, are renamed using their SG invoice reference, and are separated by permit status.
           </p>
         </div>
+        {(results.length > 0 || downloads.length > 0) && (
+          <button onClick={clearCurrentResults} disabled={busy} className={secondaryBtnCls}>
+            Reset current batch
+          </button>
+        )}
       </div>
 
       {error && (
@@ -270,35 +381,106 @@ export default function PdfExtractorPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[#d2d2d7] p-6 mb-6">
+      <div className="w-full max-w-5xl mx-auto bg-white rounded-xl border border-[#d2d2d7] p-6 mb-6">
         <input ref={importRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleImport} />
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <div className="w-12 h-12 rounded-full bg-[#eff6ff] flex items-center justify-center text-[#2563eb] mb-3">
-            {iconUpload}
+        <h2 className="text-[16px] font-semibold text-[#1d1d1f] mb-1">Drop your PDFs</h2>
+        <p className="text-[13px] text-[#6e6e73] mb-5">
+          PDF files only. Select one or more files, review the count, then run the extraction.
+        </p>
+        <div
+          onClick={() => !busy && queuedCount === 0 && importRef.current?.click()}
+          className={`min-h-[320px] border-2 border-dashed rounded-xl px-8 py-10 flex flex-col items-center justify-center text-center transition-all ${
+            busy
+              ? 'border-[#d2d2d7] bg-[#fafafa]'
+              : dragActive
+                ? 'border-[#2563eb] bg-[#eff6ff]'
+                : queuedCount === 0
+                  ? 'border-[#d2d2d7] hover:border-[#2563eb] cursor-pointer'
+                  : 'border-[#93c5fd] bg-[#fafcff]'
+          }`}
+        >
+          <div className="mb-3">
+            {busy ? <ProcessingSpinner /> : (
+              <div className="w-12 h-12 rounded-full bg-[#eff6ff] flex items-center justify-center text-[#2563eb]">{iconUpload}</div>
+            )}
           </div>
-          <p className="text-[14px] font-medium text-[#1d1d1f]">
-            {busy ? 'Extracting PDFs…' : 'Drag &amp; drop PDFs here'}
-          </p>
-          <p className="text-[12px] text-[#9ca3af] mt-1">
-            {busy ? 'Scanning pages and pulling out the invoice details — this can take a few seconds per file.' : 'Any filename works — unrenamed files are fine, they get renamed to the invoice reference automatically.'}
-          </p>
-          <div className="mt-4">
-            <button onClick={() => importRef.current?.click()} disabled={busy} className={primaryBtnCls}>
-              {iconUpload}
-              {busy ? 'Processing…' : 'Import PDFs'}
-            </button>
-          </div>
+          {busy ? (
+            <div className="w-full max-w-md mt-4" role="status" aria-live="polite">
+              <p className="text-[15px] font-semibold text-[#1d1d1f]">
+                {completedFiles} of {processingFiles.length} complete
+              </p>
+              <p className="text-[12px] text-[#6e6e73] mt-1 truncate" title={activeFile}>
+                {completedFiles < processingFiles.length ? `Analyzing ${activeFile}` : 'Preparing your download...'}
+              </p>
+              <p className="text-[11px] text-[#86868b] mt-1 tabular-nums">
+                {estimatedSeconds === null ? 'Estimating time remaining...' : estimatedSeconds === 0 ? 'Finishing up...' : formatEta(estimatedSeconds)}
+              </p>
+              <div className="mt-4 flex items-center gap-3">
+                <div className="h-2 flex-1 rounded-full bg-[#e5e7eb] overflow-hidden" aria-hidden="true">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#2563eb] to-[#60a5fa] transition-[width] duration-500 ease-out"
+                    style={{ width: `${processingFiles.length ? Math.round((completedFiles / processingFiles.length) * 100) : 0}%` }}
+                  />
+                </div>
+                <span className="w-9 text-right text-[11px] tabular-nums font-medium text-[#2563eb]">
+                  {processingFiles.length ? Math.round((completedFiles / processingFiles.length) * 100) : 0}%
+                </span>
+              </div>
+            </div>
+          ) : queuedCount > 0 ? (
+            <div className="w-full max-w-md">
+              <p className="text-[20px] font-semibold text-[#1d1d1f]">{queuedCount}</p>
+              <p className="text-[14px] font-medium text-[#1d1d1f]">PDF{queuedCount === 1 ? '' : 's'} uploaded and ready</p>
+              <p className="text-[12px] text-[#9ca3af] mt-1">Review the count, then run the extraction when you are ready.</p>
+              <div className="flex items-center justify-center gap-2 mt-4">
+                <button onClick={clearSelection} className={`${secondaryBtnCls} min-w-[140px] justify-center`}>Clear selection</button>
+                <button onClick={() => void processQueue()} className={`${primaryBtnCls} min-w-[140px] justify-center px-6 py-2`}>Run extraction</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-[14px] font-medium text-[#1d1d1f]">Drag and drop PDFs here</p>
+              <p className="text-[12px] text-[#9ca3af] mt-1.5">or click anywhere in this area to browse</p>
+              <p className="text-[12px] text-[#9ca3af] mt-3">.pdf only</p>
+            </>
+          )}
         </div>
       </div>
 
-      {results.length > 0 && (
+      {downloads.length > 0 && (
+        <div className="bg-[#eff6ff] rounded-xl border border-[#bfdbfe] px-5 py-6 mb-6 text-center">
+          <div className="flex flex-col items-center gap-4">
+            <div className="max-w-2xl">
+              <h2 className="text-[13px] font-semibold text-[#1d1d1f]">Renamed files ready</h2>
+              <p className="text-[12px] text-[#6e6e73] mt-1">One upload downloads as PDF. Multiple uploads download as ZIP with Without Permit, With Permit, and Needs Attention folders.</p>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              {downloads.map((download, index) => (
+                <button key={`${download.url}-${index}`} onClick={() => downloadArtifact(download)} className={`${primaryBtnCls} min-w-[200px] justify-center px-5 py-2`}>
+                  {iconDownload}
+                  Download {download.count === 1 ? 'renamed PDF' : `${download.count} files (ZIP)`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {invoiceResults.length > 0 && (
         <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden mb-6">
           <div className="px-4 py-2 border-b border-[#d2d2d7]/60 flex items-center justify-between gap-3">
-            <h2 className="text-[13px] font-medium text-[#1d1d1f]">Latest extraction</h2>
+            <div>
+              <h2 className="text-[13px] font-medium text-[#1d1d1f]">Current batch results</h2>
+              <p className="text-[10px] text-[#9ca3af] mt-0.5">Temporary results from files processed in this browser session</p>
+            </div>
             <div className="flex items-center gap-2">
               <button onClick={copyResults} disabled={busy} className={secondaryBtnCls}>
-                {iconCopy}
-                Copy results
+                {resultsCopied ? (
+                  <svg className="w-3.5 h-3.5 text-[#16a34a]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                ) : iconCopy}
+                {resultsCopied ? 'Copied' : 'Copy results'}
               </button>
               <button onClick={exportResults} disabled={busy} className={secondaryBtnCls}>
                 {iconDownload}
@@ -322,9 +504,12 @@ export default function PdfExtractorPage() {
                 </tr>
               </thead>
               <tbody>
-                {results.map((r, i) => (
+                {invoiceResults.map((r, i) => (
                   <tr key={i} className="border-b border-[#d2d2d7]/60">
-                    <td className="px-3 py-1.5 text-[#1d1d1f] max-w-[200px] truncate" title={r.file}>{r.file}</td>
+                    <td className="px-3 py-1.5 text-[#1d1d1f] max-w-[220px]" title={r.file}>
+                      <span className="block truncate">{r.renamedFile || r.file}</span>
+                      {r.renamedFile && r.renamedFile !== r.file && <span className="block text-[10px] text-[#9ca3af] truncate">from {r.file}</span>}
+                    </td>
                     <td className="px-3 py-1.5">
                       <Badge status={r.status} />
                     </td>
@@ -355,74 +540,131 @@ export default function PdfExtractorPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden">
-        <div className="px-4 py-2 border-b border-[#d2d2d7]/60 flex items-center justify-between gap-3">
-          <h2 className="text-[13px] font-medium text-[#1d1d1f]">
-            AWB Log <span className="text-[#9ca3af] font-normal">({log.length})</span>
-          </h2>
-          <div className="flex items-center gap-2">
-            <button onClick={copyLog} className={secondaryBtnCls}>
-              {iconCopy}
-              Copy log
-            </button>
-            <button onClick={exportLog} className={secondaryBtnCls}>
-              {iconDownload}
-              Export Excel
-            </button>
+      {permitResults.length > 0 && (
+        <section className="bg-white rounded-xl border border-[#fde68a] overflow-hidden mb-6">
+          <div className="px-4 py-3 bg-[#fffbeb] border-b border-[#fde68a]">
+            <h2 className="text-[13px] font-semibold text-[#92400e]">With permit ({permitResults.length})</h2>
+            <p className="text-[11px] text-[#b45309] mt-0.5">Kept separate and excluded from Excel and the AWB table.</p>
           </div>
-        </div>
-        <div className="overflow-x-auto">
-          {log.length === 0 ? (
-            <p className="text-[13px] text-[#9ca3af] text-center py-10">
-              No invoices logged yet. Drop or import your first PDF above.
-            </p>
-          ) : (
-            <table className="w-full text-[13px]" style={{ minWidth: '1000px' }}>
-              <thead>
-                <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7]">
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Invoice Ref</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">HAWB</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Amount</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Delivery Date</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Qty</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Received Date</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Original File</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Month</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Date Logged</th>
-                </tr>
-              </thead>
-              <tbody>
-                {log.map((r) => (
-                  <tr key={r.id} className="border-b border-[#d2d2d7]/60">
-                    <td className="px-3 py-1.5 font-medium text-[#1d1d1f]">{r.invoice_reference}</td>
-                    <td className="px-3 py-1.5"><AutoValue>{r.hawb}</AutoValue></td>
-                    <td className="px-3 py-1.5"><AutoValue>{r.invoice_total_amount}</AutoValue></td>
-                    <td className="px-3 py-1.5"><AutoValue>{r.delivery_date}</AutoValue></td>
-                    <td className="px-3 py-1.5"><AutoValue>{r.total_qty}</AutoValue></td>
-                    <td className="px-3 py-1.5"><AutoValue muted>{r.received_date || null}</AutoValue></td>
-                    <td className="px-3 py-1.5 text-[#6e6e73] max-w-[220px] truncate" title={r.original_filename}>
-                      <AutoValue>{r.original_filename}</AutoValue>
-                    </td>
-                    <td className="px-3 py-1.5"><AutoValue>{r.month_folder}</AutoValue></td>
-                    <td className="px-3 py-1.5 text-[#6e6e73]">
-                      <AutoValue>{r.date_logged ? new Date(r.date_logged).toLocaleString() : null}</AutoValue>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+          <div className="divide-y divide-[#f3f4f6]">
+            {permitResults.map((r, index) => (
+              <div key={`${r.file}-${index}`} className="px-4 py-3 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-[#1d1d1f] truncate">{r.renamedFile || r.file}</p>
+                  <p className="text-[11px] text-[#6e6e73] truncate">Original: {r.file} · {r.pageCount ?? 0} pages</p>
+                </div>
+                <Badge status="permit" />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {errorResults.length > 0 && (
+        <section className="bg-white rounded-xl border border-[#fecaca] overflow-hidden mb-6">
+          <div className="px-4 py-3 bg-[#fef2f2] border-b border-[#fecaca]">
+            <h2 className="text-[13px] font-semibold text-[#991b1b]">Needs attention ({errorResults.length})</h2>
+            <p className="text-[11px] text-[#b91c1c] mt-0.5">Enhanced OCR was attempted before these files were marked as errors.</p>
+          </div>
+          <div className="divide-y divide-[#f3f4f6]">
+            {errorResults.map((r, index) => (
+              <div key={`${r.file}-${index}`} className="px-4 py-3 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-[#1d1d1f] truncate">{r.file}</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {(r.reasons ?? ['UNREADABLE']).map((reason) => <li key={reason} className="text-[11px] text-[#b91c1c]">{reasonLabel(reason)}</li>)}
+                  </ul>
+                </div>
+                <span className="shrink-0 text-[10px] text-[#6e6e73]">{r.deepAnalysis ? 'Deep analysis completed' : 'Analysis completed'}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="flex justify-center mt-8">
+        <button onClick={() => void toggleLogs()} disabled={logsLoading} className={`${secondaryBtnCls} min-w-[140px] justify-center px-5 py-2`}>
+          {logsLoading ? 'Loading logs...' : showLogs ? 'Hide logs' : 'View logs'}
+        </button>
       </div>
 
+      {showLogs && (
+        <section className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden mt-4">
+          <div className="px-4 py-3 border-b border-[#d2d2d7]/60 flex items-center justify-between gap-3">
+            <h2 className="text-[13px] font-medium text-[#1d1d1f]">AWB History <span className="text-[#9ca3af] font-normal">({log.length})</span></h2>
+            <button
+              onClick={exportSavedLog}
+              disabled={log.length === 0}
+              title="Export AWB history to Excel"
+              aria-label="Export AWB history to Excel"
+              className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[#d2d2d7] bg-white text-[#217346] hover:bg-[#f0fdf4] hover:border-[#86efac] transition-colors disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <path d="M14 2v6h6M8 13l4 5M12 13l-4 5M15 13h2M15 16h2M15 19h2" />
+              </svg>
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            {log.length === 0 ? (
+              <p className="text-[13px] text-[#9ca3af] text-center py-10">No saved invoices yet.</p>
+            ) : (
+              <table className="w-full text-[13px]" style={{ minWidth: '850px' }}>
+                <thead>
+                  <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7]">
+                    {['Invoice Ref', 'HAWB', 'Amount', 'Delivery Date', 'Qty', 'Original File', 'Month', 'Date Logged'].map((heading) => (
+                      <th key={heading} className="px-3 py-2 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">{heading}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {log.map((row) => (
+                    <tr key={row.id} className="border-b border-[#d2d2d7]/60 last:border-0">
+                      <td className="px-3 py-2 font-medium text-[#1d1d1f]">{row.invoice_reference}</td>
+                      <td className="px-3 py-2">{row.hawb || '—'}</td>
+                      <td className="px-3 py-2">{row.invoice_total_amount || '—'}</td>
+                      <td className="px-3 py-2">{row.delivery_date || '—'}</td>
+                      <td className="px-3 py-2">{row.total_qty || '—'}</td>
+                      <td className="px-3 py-2 text-[#6e6e73] max-w-[200px] truncate" title={row.original_filename}>{row.original_filename || '—'}</td>
+                      <td className="px-3 py-2">{row.month_folder || '—'}</td>
+                      <td className="px-3 py-2 text-[#6e6e73]">{row.date_logged ? new Date(row.date_logged).toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+      )}
+
       {dragActive && (
-        <div className="fixed inset-0 z-50 bg-[#2563eb]/10 border-4 border-dashed border-[#2563eb] rounded-2xl flex items-center justify-center pointer-events-none">
+        <div className="fixed inset-0 z-50 bg-[#2563eb]/10 border-4 border-dashed border-[#2563eb] flex items-center justify-center pointer-events-none">
           <div className="bg-white rounded-xl shadow-xl px-8 py-6 text-center">
-            <p className="text-[15px] font-semibold text-[#1d1d1f]">Drop to extract PDFs</p>
-            <p className="text-[12px] text-[#6e6e73] mt-1">Any filenames accepted — they get renamed to the invoice reference</p>
+            <p className="text-[15px] font-semibold text-[#1d1d1f]">Drop PDFs to add them to the queue</p>
+            <p className="text-[12px] text-[#6e6e73] mt-1">Existing results stay in place, and new files continue processing in order.</p>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+function reasonLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    MISSING_PAGE_2: 'Page 2 is missing',
+    INVOICE_REF: 'No valid SG invoice reference found',
+    HAWB: 'HAWB is missing',
+    InvoiceTotalAmount: 'Invoice amount is missing',
+    DeliveryDate: 'Delivery date is missing',
+    TotalQty: 'Total quantity is missing',
+    UNREADABLE: 'The PDF could not be read',
+  };
+  return labels[reason] ?? reason.replace(/_/g, ' ').toLowerCase();
+}
+
+function formatEta(seconds: number): string {
+  if (seconds < 5) return 'A few seconds remaining';
+  if (seconds < 60) return `About ${seconds} seconds remaining`;
+  const minutes = Math.ceil(seconds / 60);
+  return `About ${minutes} minute${minutes === 1 ? '' : 's'} remaining`;
 }

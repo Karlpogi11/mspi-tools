@@ -22,6 +22,9 @@ export interface ProcessResult {
   dest?: string;
   monthFolder?: string;
   permit?: boolean;
+  renamedFile?: string;
+  pageCount?: number;
+  deepAnalysis?: boolean;
 }
 
 export const upload = multer({
@@ -46,12 +49,16 @@ export async function processPdfFile(
   let fields: ParsedFields;
   let method = '';
   let permit = false;
+  let pageCount = 0;
+  let deepAnalysis = false;
 
   try {
     const r = await extractFieldsFromFile(filePath);
     fields = r.fields;
     method = r.method;
     permit = r.permit;
+    pageCount = r.pageCount;
+    deepAnalysis = r.deepAnalysis;
   } catch (err) {
     const dest = uniqueDest(ERRORS, `${path.parse(fileName).name}_UNREADABLE.pdf`);
     fs.renameSync(filePath, dest);
@@ -61,12 +68,26 @@ export async function processPdfFile(
       method,
       reasons: ['UNREADABLE'],
       dest: dest,
+      deepAnalysis: true,
     };
   }
 
+  const validInvoiceRef = /^SG\d{6,}$/i.test(fields.InvoiceReference || '');
+  const structuralReasons: string[] = [];
+  if (pageCount < 2) structuralReasons.push('MISSING_PAGE_2');
+  if (!validInvoiceRef) structuralReasons.push('INVOICE_REF');
+
+  if (structuralReasons.length > 0) {
+    const label = validInvoiceRef ? fields.InvoiceReference : path.parse(fileName).name;
+    const dest = uniqueDest(ERRORS, `${label}_MISSING_${structuralReasons.join('_')}.pdf`);
+    fs.renameSync(filePath, dest);
+    return { file: fileName, status: 'error', method, reasons: structuralReasons, fields, dest, permit, pageCount, deepAnalysis };
+  }
+
   if (permit) {
-    const ref = fields.InvoiceReference || path.parse(fileName).name;
-    const dest = uniqueDest(PERMITS, `${ref}.pdf`);
+    const ref = fields.InvoiceReference;
+    const renamedFile = `${ref}.pdf`;
+    const dest = uniqueDest(PERMITS, renamedFile);
     fs.renameSync(filePath, dest);
     return {
       file: fileName,
@@ -75,11 +96,13 @@ export async function processPdfFile(
       fields,
       dest,
       permit: true,
+      renamedFile,
+      pageCount,
+      deepAnalysis,
     };
   }
 
   const reasons = missingFields(fields);
-  if (!fields.InvoiceReference) reasons.push('INVOICE_REF');
 
   if (reasons.length > 0) {
     const label = fields.InvoiceReference || path.parse(fileName).name;
@@ -92,13 +115,16 @@ export async function processPdfFile(
       reasons,
       fields,
       dest,
+      pageCount,
+      deepAnalysis,
     };
   }
 
   const { folder } = monthFolderFor(fields.DeliveryDate);
   const monthDir = path.join(PROCESSED, folder);
   fs.mkdirSync(monthDir, { recursive: true });
-  const dest = uniqueDest(monthDir, `${fields.InvoiceReference}.pdf`);
+  const renamedFile = `${fields.InvoiceReference}.pdf`;
+  const dest = uniqueDest(monthDir, renamedFile);
   fs.renameSync(filePath, dest);
 
   const { inserted } = await insertAwbLog(
@@ -122,6 +148,9 @@ export async function processPdfFile(
     fields,
     dest,
     monthFolder: folder,
+    renamedFile,
+    pageCount,
+    deepAnalysis,
   };
 }
 

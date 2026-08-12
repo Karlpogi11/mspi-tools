@@ -14,6 +14,7 @@ export interface TextLayer {
   words: WordBox[];
   pageWidth: number;
   pageHeight: number;
+  pageCount: number;
 }
 
 export const REGION_X0 = 0.4; // right of 40% of page width
@@ -97,6 +98,7 @@ export async function extractTextLayer(pdfBuf: Buffer): Promise<TextLayer | null
       words: allWords,
       pageWidth,
       pageHeight,
+      pageCount: doc.numPages,
     };
   } catch (err) {
     console.error('[pdf] text layer failed:', (err as Error)?.message);

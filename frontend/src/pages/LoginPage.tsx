@@ -1,10 +1,16 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 
 type Mode = 'login' | 'signup';
 
 const ALLOWED_DOMAINS = ['mspi.io', 'mobilecare.com', 'powermaccenter.com'];
+const LOGIN_COOLDOWN_KEY = 'mspi-login-cooldown-until';
+
+function remainingLoginCooldown(): number {
+  const deadline = Number(window.localStorage.getItem(LOGIN_COOLDOWN_KEY) || 0);
+  return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+}
 
 function getEmailDomain(email: string): string | null {
   const parts = email.split('@');
@@ -19,10 +25,24 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loginCooldown, setLoginCooldown] = useState(remainingLoginCooldown);
   const [justSignedUp, setJustSignedUp] = useState(false);
 
   const { login, signup } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const statusMessage = (location.state as { message?: string } | null)?.message;
+
+  useEffect(() => {
+    if (loginCooldown <= 0) {
+      window.localStorage.removeItem(LOGIN_COOLDOWN_KEY);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setLoginCooldown(remainingLoginCooldown());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [loginCooldown]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +69,10 @@ export default function LoginPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
+      if (mode === 'login') {
+        window.localStorage.setItem(LOGIN_COOLDOWN_KEY, String(Date.now() + 15_000));
+        setLoginCooldown(15);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -89,6 +113,7 @@ export default function LoginPage() {
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
+          {statusMessage && <p className="rounded-lg bg-[#ecfdf3] px-3 py-2 text-[12.5px] text-[#166534]">{statusMessage}</p>}
           {mode === 'signup' && (
             <div>
               <label className="block text-[12.5px] font-medium text-[#1a1a2e] mb-1">Full name</label>
@@ -141,16 +166,20 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={submitting}
-            className="w-full h-9 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors disabled:opacity-50 cursor-pointer"
+            disabled={submitting || (mode === 'login' && loginCooldown > 0)}
+            className="w-full h-9 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            {submitting ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+            {submitting
+              ? 'Please wait...'
+              : mode === 'login' && loginCooldown > 0
+                ? `Try again in ${loginCooldown}s`
+                : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
         </form>
 
         <div className="mt-6 pt-5 border-t border-[#e8e8ed]">
           <button
-            onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setEmailError(''); }}
+            onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setEmailError(''); setLoginCooldown(remainingLoginCooldown()); }}
             className="w-full text-[12.5px] text-[#6e6e7a] hover:text-[#1a1a2e] transition-colors cursor-pointer"
           >
             {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
