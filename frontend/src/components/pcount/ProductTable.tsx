@@ -12,6 +12,8 @@ interface Props {
   overscanCode?: string | null;
   readOnly?: boolean;
   scrollToCode?: string | null;
+  editMode?: boolean;
+  onCountChange?: (code: string, count: number) => void | boolean | Promise<void | boolean>;
 }
 
 const ALL_COLUMNS = [
@@ -19,6 +21,7 @@ const ALL_COLUMNS = [
   { key: 'Description', label: 'Description', core: true },
   { key: 'System Qty', label: 'System Qty', core: true },
   { key: 'Qty', label: 'Qty', core: true },
+  { key: 'Is Match', label: 'Is Match' },
   { key: 'Product SKU Number', label: 'Product SKU Number' },
   { key: 'Barcode', label: 'Barcode' },
   { key: 'Brand', label: 'Brand' },
@@ -67,11 +70,15 @@ function resolveColumns(defaultColumns: string[]): string[] {
   return loadSaved();
 }
 
-export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode, readOnly, scrollToCode }: Props) {
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode, readOnly, scrollToCode, editMode = false, onCountChange }: Props) {
   const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
   const [showPicker, setShowPicker] = useState(false);
+  const [editingCode, setEditingCode] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [savingCode, setSavingCode] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const countInputRefs = useRef(new Map<string, HTMLInputElement>());
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const lastDefaultRef = useRef<string[]>([]);
 
@@ -81,6 +88,19 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
       setVisible(resolveColumns(defaultColumns));
     }
   }, [defaultColumns]);
+
+  useEffect(() => {
+    if (!editMode) setEditingCode(null);
+  }, [editMode]);
+
+  useEffect(() => {
+    if (!editingCode) return;
+    window.requestAnimationFrame(() => {
+      const input = countInputRefs.current.get(editingCode);
+      input?.focus();
+      input?.select();
+    });
+  }, [editingCode]);
 
   useEffect(() => {
     if (!scrollToCode) return;
@@ -126,7 +146,29 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
     sortDesc ? b.product_code.localeCompare(a.product_code) : a.product_code.localeCompare(b.product_code)
   );
 
-  const shown = ALL_COLUMNS.filter(c => visible.includes(c.key));
+  const shown = ALL_COLUMNS.filter(c => visible.includes(c.key) || (editMode && c.key === 'Is Match'));
+
+  function beginEdit(product: Product) {
+    if (!editMode || readOnly || savingCode) return;
+    setEditingCode(product.product_code);
+    setEditingValue(String(product.counted_qty));
+  }
+
+  async function saveEdit(product: Product, nextProduct?: Product) {
+    const count = Number(editingValue);
+    if (!Number.isInteger(count) || count < 0 || !onCountChange) return;
+
+    setSavingCode(product.product_code);
+    const result = await onCountChange(product.product_code, count);
+    setSavingCode(null);
+    if (result === false) return;
+
+    if (nextProduct) {
+      beginEdit(nextProduct);
+    } else {
+      setEditingCode(null);
+    }
+  }
 
   async function handleRecount(product: Product) {
     try {
@@ -212,10 +254,13 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                   className={`px-4 py-3 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider ${
                     col.key === 'Product Code'
                       ? 'text-left cursor-pointer select-none hover:text-[#1d1d1f]'
-                      : col.key === 'Qty' || col.key === 'System Qty' ? 'text-right' : 'text-left'
+                      : col.key === 'Qty' || col.key === 'System Qty' ? 'text-right'
+                      : col.key === 'Is Match' ? 'text-center' : 'text-left'
                   }`}
                 >
-                  {col.label}{col.key === 'Product Code' ? ` ${sortDesc ? '\u2193' : '\u2191'}` : ''}
+                  {editMode && col.key === 'System Qty' ? 'System Quantity' :
+                    editMode && col.key === 'Qty' ? 'Actual Quantity' : col.label}
+                  {col.key === 'Product Code' ? ` ${sortDesc ? '\u2193' : '\u2191'}` : ''}
                 </th>
               ))}
             </tr>
@@ -272,18 +317,59 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                       );
                     }
                     if (col.key === 'Qty') {
+                      const isEditing = editingCode === p.product_code;
                       return (
-                        <td key={col.key} className="px-4 py-3">
+                        <td
+                          key={col.key}
+                          className={`px-4 py-3 ${editMode && !readOnly ? 'cursor-text' : ''}`}
+                          onDoubleClick={() => beginEdit(p)}
+                          title={editMode && !readOnly ? 'Double-click to edit physical count' : undefined}
+                        >
                           <div className="flex items-center justify-end gap-2">
-                            <span className={`font-semibold tabular-nums ${
-                              isOver ? 'text-[#dc2626]' :
-                              isMatch ? 'text-[#16a34a]' :
-                              p.counted_qty > 0 ? 'text-[#d97706]' :
-                              'text-[#6e6e73]'
-                            }`}>
-                              {p.counted_qty}
-                            </span>
-                            {!readOnly && (
+                            {isEditing ? (
+                              <input
+                                ref={(node) => {
+                                  if (node) countInputRefs.current.set(p.product_code, node);
+                                  else countInputRefs.current.delete(p.product_code);
+                                }}
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={editingValue}
+                                disabled={savingCode === p.product_code}
+                                onChange={(e) => setEditingValue(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingCode(null);
+                                  }
+                                  if (e.key === 'Enter' || e.key === 'Tab') {
+                                    e.preventDefault();
+                                    const index = sorted.findIndex(item => item.product_code === p.product_code);
+                                    const nextProduct = e.key === 'Tab' ? sorted[index + 1] : undefined;
+                                    void saveEdit(p, nextProduct);
+                                  }
+                                }}
+                                className="w-20 rounded-md border border-[#2563eb] bg-white px-2 py-1 text-right text-[13px] font-semibold tabular-nums text-[#1d1d1f] outline-none ring-2 ring-[#2563eb]/15"
+                                aria-label={`Physical count for ${p.product_code}`}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); if (editMode) beginEdit(p); }}
+                                className={`font-semibold tabular-nums ${
+                                  isOver ? 'text-[#dc2626]' :
+                                  isMatch ? 'text-[#16a34a]' :
+                                  p.counted_qty > 0 ? 'text-[#d97706]' :
+                                  'text-[#6e6e73]'
+                                } ${editMode && !readOnly ? 'rounded-md px-2 py-1 hover:bg-[#eff6ff]' : ''}`}
+                                title={editMode && !readOnly ? 'Edit physical count' : undefined}
+                              >
+                                {p.counted_qty}
+                              </button>
+                            )}
+                            {!readOnly && !isEditing && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleRecount(p); }}
                                 title="Reset count"
@@ -295,6 +381,20 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                               </button>
                             )}
                           </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === 'Is Match') {
+                      const matchesExport = p.counted_qty === p.system_qty;
+                      return (
+                        <td key={col.key} className="px-4 py-3 text-center">
+                          <span className={`inline-flex min-w-12 justify-center rounded-md px-2 py-1 text-[11px] font-semibold ${
+                            matchesExport
+                              ? 'bg-[#f0fdf4] text-[#15803d]'
+                              : 'bg-[#fef2f2] text-[#b91c1c]'
+                          }`}>
+                            {matchesExport ? 'TRUE' : 'FALSE'}
+                          </span>
                         </td>
                       );
                     }

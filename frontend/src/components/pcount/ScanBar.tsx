@@ -58,6 +58,21 @@ function playInvalid() {
   } catch {}
 }
 
+function speakInvalid() {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const message = new SpeechSynthesisUtterance('Invalid');
+  message.lang = 'en-US';
+  message.rate = 1.35;
+  message.pitch = 1.05;
+  message.volume = 1;
+  const englishVoice = window.speechSynthesis.getVoices().find((voice) =>
+    voice.lang.toLowerCase().startsWith('en')
+  );
+  if (englishVoice) message.voice = englishVoice;
+  window.speechSynthesis.speak(message);
+}
+
 const INVALID_FLASH_MS = 900;
 
 const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId, onScanned, onScanQueued, onScanFailed }, forwardedRef) {
@@ -99,6 +114,7 @@ const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId
           const err = await res.json().catch(() => ({}));
           setError(err.error || 'Product not found');
           playInvalid();
+          speakInvalid();
           setInvalidFlash(true);
           window.setTimeout(() => setInvalidFlash(false), INVALID_FLASH_MS);
           onScanFailed?.(code);
@@ -117,6 +133,7 @@ const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId
       } catch {
         setError('Scan failed');
         playInvalid();
+        speakInvalid();
         setInvalidFlash(true);
         window.setTimeout(() => setInvalidFlash(false), INVALID_FLASH_MS);
         onScanFailed?.(code);

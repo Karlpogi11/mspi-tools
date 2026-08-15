@@ -3,6 +3,7 @@ import { type ScanResult } from '../../lib/api';
 
 interface Props {
   lastScan: ScanResult | null;
+  detailSource?: 'scan' | 'selection';
   onRecount: (code: string) => void;
   onComplete: (code: string) => void;
   onCountChange: (code: string, count: number) => void;
@@ -11,7 +12,7 @@ interface Props {
   progress: number;
 }
 
-export default function ScanPanel({ lastScan, onRecount, onComplete, onCountChange, onStatusChange, stats, progress }: Props) {
+export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, onComplete, onCountChange, onStatusChange, stats, progress }: Props) {
   const [editingCount, setEditingCount] = useState(false);
   const [countValue, setCountValue] = useState('0');
 
@@ -57,7 +58,9 @@ export default function ScanPanel({ lastScan, onRecount, onComplete, onCountChan
       {lastScan ? (
         <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-[12px] font-semibold text-[#6e6e73] uppercase tracking-wider">Last Scanned</h3>
+            <h3 className="text-[12px] font-semibold text-[#6e6e73] uppercase tracking-wider">
+              {detailSource === 'selection' ? 'Selected Product' : 'Last Scanned'}
+            </h3>
             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
               lastScan.match ? 'bg-[#f0fdf4] text-[#16a34a]' : 'bg-[#fffbeb] text-[#d97706]'
             }`}>

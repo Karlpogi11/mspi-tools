@@ -23,9 +23,11 @@ export default function PcountSessionPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [reviewMode, setReviewMode] = useState(false);
   const [sortDesc, setSortDesc] = useState(true);
   const [loading, setLoading] = useState(true);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
+  const [detailSource, setDetailSource] = useState<'scan' | 'selection'>('scan');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [overscanCode, setOverscanCode] = useState<string | null>(null);
   const [scannerCount, setScannerCount] = useState(0);
@@ -139,6 +141,7 @@ export default function PcountSessionPage() {
     productsRef.current = nextProducts;
     setProducts(nextProducts);
     setLastScan(next);
+    setDetailSource('scan');
     setSelectedProduct(null);
 
     if (next.system_qty > 0 && next.counted_qty > next.system_qty) {
@@ -160,6 +163,7 @@ export default function PcountSessionPage() {
     }
     pendingScansRef.current.delete(result.product_code);
     setLastScan(result);
+    setDetailSource('scan');
     setSelectedProduct(null);
 
     if (result.system_qty > 0 && result.counted_qty > result.system_qty) {
@@ -213,9 +217,9 @@ export default function PcountSessionPage() {
     } catch {}
   }, [loadSession, sessionId]);
 
-  const handleCountChange = useCallback(async (code: string, count: number) => {
+  const handleCountChange = useCallback(async (code: string, count: number): Promise<boolean> => {
     const product = productsRef.current.find((item) => item.product_code === code);
-    if (!product) return;
+    if (!product) return false;
     const status = count === 0 ? 'pending' : count >= product.system_qty ? 'matched' : 'missing';
     try {
       const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {
@@ -225,7 +229,7 @@ export default function PcountSessionPage() {
         body: JSON.stringify({ counted_qty: count, status }),
       });
       const data = await readJson<Partial<Product>>(res);
-      if (!res.ok) return;
+      if (!res.ok) return false;
       setProducts((prev) => {
         const updated = prev.map((item) => item.product_code === code ? { ...item, ...data } : item);
         productsRef.current = updated;
@@ -234,7 +238,10 @@ export default function PcountSessionPage() {
       setLastScan((prev) => prev?.product_code === code ? { ...prev, ...data, match: count === product.system_qty } as ScanResult : prev);
       await loadSession();
       scanBarRef.current?.focus();
-    } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }, [loadSession, sessionId]);
 
   const handleImportComplete = useCallback(() => {
@@ -317,6 +324,13 @@ export default function PcountSessionPage() {
     matched: products.filter(p => p.status === 'matched').length,
     missing: products.filter(p => p.status === 'missing').length,
   };
+
+  useEffect(() => {
+    if (reviewMode && statusCounts.missing === 0) {
+      setReviewMode(false);
+      setStatusFilter('all');
+    }
+  }, [reviewMode, statusCounts.missing]);
 
   const categoryCounts = {
     all: products.length,
@@ -518,7 +532,7 @@ export default function PcountSessionPage() {
                 {Object.entries(statusCounts).map(([key, count]) => (
                   <button
                     key={key}
-                    onClick={() => setStatusFilter(key)}
+                    onClick={() => { setStatusFilter(key); setReviewMode(false); }}
                     className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
                       statusFilter === key
                         ? 'bg-[#2563eb] text-white'
@@ -538,7 +552,7 @@ export default function PcountSessionPage() {
                 {Object.entries(categoryCounts).map(([key, count]) => (
                   <button
                     key={key}
-                    onClick={() => setCategoryFilter(categoryFilter === key ? 'all' : key)}
+                    onClick={() => { setCategoryFilter(categoryFilter === key ? 'all' : key); setReviewMode(false); }}
                     className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
                       categoryFilter === key
                         ? 'bg-[#2563eb] text-white'
@@ -554,6 +568,34 @@ export default function PcountSessionPage() {
                   </button>
                 ))}
               </div>
+              {statusCounts.missing > 0 && (
+                <button
+                  onClick={() => {
+                    if (reviewMode) {
+                      setReviewMode(false);
+                      setStatusFilter('all');
+                    } else {
+                      setReviewMode(true);
+                      setStatusFilter('missing');
+                      setCategoryFilter('all');
+                      setSearchQuery('');
+                      setLastScan(null);
+                      setSelectedProduct(null);
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
+                    reviewMode
+                      ? 'border-[#2563eb] bg-[#eff6ff] text-[#1d4ed8]'
+                      : 'border-[#fde68a] bg-[#fffbeb] text-[#a16207] hover:bg-[#fef3c7]'
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <path d="M4 5h16M7 12h10M10 19h4" strokeLinecap="round" />
+                  </svg>
+                  {reviewMode ? 'Exit review' : 'Review differences'}
+                  <span className="rounded-full bg-white/70 px-1.5 py-px text-[10px]">{statusCounts.missing}</span>
+                </button>
+              )}
               <div className="flex-1" />
               <div className="relative">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#9a9aa0] pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -563,7 +605,7 @@ export default function PcountSessionPage() {
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  onChange={e => { setSearchQuery(e.target.value); setReviewMode(false); }}
                   placeholder="Search by code or description..."
                   className="pl-9 pr-3 py-1.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb] w-[220px] placeholder:text-[#9a9aa0]"
                 />
@@ -579,6 +621,13 @@ export default function PcountSessionPage() {
             onScanFailed={handleScanFailed}
           />
 
+          {reviewMode && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] px-3.5 py-2.5 text-[12px] text-[#1e40af]">
+              <span><strong>Review mode:</strong> only mismatched rows are shown. Edit the physical count directly in the Qty column.</span>
+              <span className="whitespace-nowrap text-[#3b82f6]">Enter or Tab saves &middot; Esc cancels</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2">
               <ProductTable
@@ -587,15 +636,22 @@ export default function PcountSessionPage() {
                 sortDesc={sortDesc}
                 onToggleSort={() => setSortDesc(!sortDesc)}
                 onUpdate={handleProductUpdate}
-                onSelect={(p) => { setSelectedProduct(p); setLastScan(null); }}
+                onSelect={(p) => {
+                  setSelectedProduct(p);
+                  setLastScan({ ...p, match: p.counted_qty === p.system_qty });
+                  setDetailSource('selection');
+                }}
                 selectedCode={selectedProduct?.product_code || lastScan?.product_code}
                 overscanCode={overscanCode}
                 scrollToCode={lastScan?.product_code || selectedProduct?.product_code}
+                editMode={reviewMode}
+                onCountChange={handleCountChange}
               />
             </div>
             <div className="lg:col-span-1">
               <ScanPanel
                 lastScan={lastScan}
+                detailSource={detailSource}
                 onRecount={async (code) => {
                   try {
                     const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {
