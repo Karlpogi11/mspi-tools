@@ -8,6 +8,7 @@ import ImportCount from '../../components/pcount/ImportCount';
 import ProductTable from '../../components/pcount/ProductTable';
 import ScanPanel from '../../components/pcount/ScanPanel';
 import ScanBar from '../../components/pcount/ScanBar';
+import ToolHelp from '../../components/ToolHelp';
 
 type Stage = 'setup' | 'count' | 'verify';
 
@@ -125,6 +126,9 @@ export default function PcountSessionPage() {
   }, []);
 
   const handleScanQueued = useCallback((code: string) => {
+    setStatusFilter('all');
+    setCategoryFilter('all');
+    setSearchQuery('');
     const product = productsRef.current.find(p => p.product_code === code);
     const pending = pendingScansRef.current.get(code) || 0;
     pendingScansRef.current.set(code, pending + 1);
@@ -185,6 +189,53 @@ export default function PcountSessionPage() {
     ));
     loadSession();
   }, [loadSession]);
+
+  const handleCompleteCount = useCallback(async (code: string) => {
+    const product = productsRef.current.find((item) => item.product_code === code);
+    if (!product) return;
+    try {
+      const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ counted_qty: product.system_qty, status: 'matched' }),
+      });
+      const data = await readJson<Partial<Product>>(res);
+      if (!res.ok) return;
+      setProducts((prev) => {
+        const updated = prev.map((item) => item.product_code === code ? { ...item, ...data } : item);
+        productsRef.current = updated;
+        return updated;
+      });
+      setLastScan((prev) => prev?.product_code === code ? { ...prev, ...data, match: true } as ScanResult : prev);
+      await loadSession();
+      scanBarRef.current?.focus();
+    } catch {}
+  }, [loadSession, sessionId]);
+
+  const handleCountChange = useCallback(async (code: string, count: number) => {
+    const product = productsRef.current.find((item) => item.product_code === code);
+    if (!product) return;
+    const status = count === 0 ? 'pending' : count >= product.system_qty ? 'matched' : 'missing';
+    try {
+      const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ counted_qty: count, status }),
+      });
+      const data = await readJson<Partial<Product>>(res);
+      if (!res.ok) return;
+      setProducts((prev) => {
+        const updated = prev.map((item) => item.product_code === code ? { ...item, ...data } : item);
+        productsRef.current = updated;
+        return updated;
+      });
+      setLastScan((prev) => prev?.product_code === code ? { ...prev, ...data, match: count === product.system_qty } as ScanResult : prev);
+      await loadSession();
+      scanBarRef.current?.focus();
+    } catch {}
+  }, [loadSession, sessionId]);
 
   const handleImportComplete = useCallback(() => {
     loadSession();
@@ -358,6 +409,21 @@ export default function PcountSessionPage() {
             )}
           </div>
           <div className="flex items-center gap-4">
+            <ToolHelp
+              toolName="PCount session"
+              purpose="Import inventory, count products collaboratively, identify quantity differences, and prepare a verified physical-count result."
+              steps={[
+                'Import the system inventory in System Import.',
+                'Import an existing count when available, or continue directly to scanning.',
+                'Share the join code with authorized counters.',
+                'Scan and review matched, missing, and excess quantities.',
+                'Correct exceptions and export the completed result.',
+              ]}
+              cards={[
+                { title: 'Live updates', description: 'Connected counters receive product and progress changes in real time.' },
+                { title: 'Scanning', description: 'Keep the scan field focused and verify visual feedback after each product code.' },
+              ]}
+            />
             {stage === 'verify' && (
               <button
                 onClick={handleExport}
@@ -506,6 +572,7 @@ export default function PcountSessionPage() {
           </div>
 
           <ScanBar
+            ref={scanBarRef}
             sessionId={sessionId}
             onScanned={handleScan}
             onScanQueued={handleScanQueued}
@@ -523,6 +590,7 @@ export default function PcountSessionPage() {
                 onSelect={(p) => { setSelectedProduct(p); setLastScan(null); }}
                 selectedCode={selectedProduct?.product_code || lastScan?.product_code}
                 overscanCode={overscanCode}
+                scrollToCode={lastScan?.product_code || selectedProduct?.product_code}
               />
             </div>
             <div className="lg:col-span-1">
@@ -544,6 +612,8 @@ export default function PcountSessionPage() {
                     }
                   } catch {}
                 }}
+                onComplete={handleCompleteCount}
+                onCountChange={handleCountChange}
                 onStatusChange={async (code, status) => {
                   try {
                     const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {

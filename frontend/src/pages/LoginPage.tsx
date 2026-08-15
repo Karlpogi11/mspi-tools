@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import type { ApiRequestError } from '../lib/api';
 
 type Mode = 'login' | 'signup';
 
 const ALLOWED_DOMAINS = ['mspi.io', 'mobilecare.com', 'powermaccenter.com'];
-const LOGIN_COOLDOWN_KEY = 'mspi-login-cooldown-until';
+const LOGIN_COOLDOWN_KEY = 'mspi-login-rate-limit-until-v2';
 
 function remainingLoginCooldown(): number {
   const deadline = Number(window.localStorage.getItem(LOGIN_COOLDOWN_KEY) || 0);
@@ -69,9 +70,11 @@ export default function LoginPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-      if (mode === 'login') {
-        window.localStorage.setItem(LOGIN_COOLDOWN_KEY, String(Date.now() + 15_000));
-        setLoginCooldown(15);
+      const apiError = err as ApiRequestError;
+      if (mode === 'login' && apiError.status === 429) {
+        const retryAfter = apiError.retryAfter ?? 60;
+        window.localStorage.setItem(LOGIN_COOLDOWN_KEY, String(Date.now() + retryAfter * 1000));
+        setLoginCooldown(retryAfter);
       }
     } finally {
       setSubmitting(false);

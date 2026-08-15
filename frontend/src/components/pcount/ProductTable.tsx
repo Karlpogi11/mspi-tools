@@ -11,6 +11,7 @@ interface Props {
   selectedCode?: string | null;
   overscanCode?: string | null;
   readOnly?: boolean;
+  scrollToCode?: string | null;
 }
 
 const ALL_COLUMNS = [
@@ -66,10 +67,12 @@ function resolveColumns(defaultColumns: string[]): string[] {
   return loadSaved();
 }
 
-export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode, readOnly }: Props) {
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode, readOnly, scrollToCode }: Props) {
   const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const lastDefaultRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -78,6 +81,20 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
       setVisible(resolveColumns(defaultColumns));
     }
   }, [defaultColumns]);
+
+  useEffect(() => {
+    if (!scrollToCode) return;
+    const row = rowRefs.current.get(scrollToCode);
+    const container = tableScrollRef.current;
+    if (!row || !container) return;
+    window.requestAnimationFrame(() => {
+      const rowRect = row.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const rowTop = rowRect.top - containerRect.top + container.scrollTop;
+      const targetTop = rowTop - (container.clientHeight - rowRect.height) / 2;
+      container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    });
+  }, [scrollToCode, products]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(visible));
@@ -184,7 +201,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
           )}
         </div>
       </div>
-      <div className="overflow-x-auto max-h-[65vh]">
+      <div ref={tableScrollRef} className="overflow-x-auto max-h-[65vh]">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7] sticky top-0 z-10">
@@ -213,6 +230,10 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
               return (
                 <tr
                   key={p.id}
+                  ref={(node) => {
+                    if (node) rowRefs.current.set(p.product_code, node);
+                    else rowRefs.current.delete(p.product_code);
+                  }}
                   onClick={() => onSelect?.(p)}
                   className={`border-b border-[#d2d2d7]/60 hover:bg-[#fafafa] cursor-pointer ${
                     isSelected ? 'bg-[#eff6ff] ring-2 ring-inset ring-[#2563eb]' : ''

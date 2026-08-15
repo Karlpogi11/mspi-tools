@@ -41,3 +41,21 @@ html::-webkit-scrollbar-thumb {
   border-radius: 5px;
   border: 2px solid #f5f5f7;
 }
+
+.scan-invalid-vignette {
+  background: radial-gradient(
+    ellipse at center,
+    transparent 48%,
+    rgba(220, 38, 38, 0.04) 64%,
+    rgba(220, 38, 38, 0.14) 82%,
+    rgba(185, 28, 28, 0.3) 100%
+  );
+  animation: scan-invalid-vignette 900ms ease-out both;
+}
+
+@keyframes scan-invalid-vignette {
+  0% { opacity: 0; }
+  16% { opacity: 1; }
+  56% { opacity: 1; }
+  100% { opacity: 0; }
+}

@@ -23,6 +23,7 @@ import TemplateSelector from '../../components/reformat/TemplateSelector';
 import UploadPanel from '../../components/reformat/UploadPanel';
 import MappingPanel from '../../components/reformat/MappingPanel';
 import ResultPanel from '../../components/reformat/ResultPanel';
+import ToolHelp from '../../components/ToolHelp';
 
 type Phase = 'upload' | 'mapping' | 'result';
 
@@ -375,12 +376,27 @@ export default function ReformatPage() {
   return (
     <div>
       <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-[24px] font-semibold text-[#1d1d1f] tracking-tight">ReFormat</h1>
           <p className="text-[13px] text-[#6e6e73] mt-1">
             Import an Excel/CSV file, rearrange and rename its columns with a saved template, then export or copy the result.
           </p>
         </div>
+        <ToolHelp
+          toolName="ReFormat"
+          purpose="Standardize Excel and CSV data by applying reusable column mappings, names, filters, sorting, and summaries before copying or exporting the final dataset."
+          steps={[
+            'Select an existing template or start a new mapping.',
+            'Upload an Excel or CSV source file.',
+            'Arrange, rename, add, or remove output columns.',
+            'Apply optional filters, sorting, or pivot summaries.',
+            'Copy the result or export it as Excel or CSV.',
+          ]}
+          cards={[
+            { title: 'Templates', description: 'Save mappings for repeated workflows and use templates shared with you by other users.' },
+            { title: 'Source files', description: 'Supports .xlsx, .xls, and .csv files with automatic header-row detection.' },
+          ]}
+        />
       </div>
 
       <nav className="mb-5 flex items-center gap-1.5 flex-wrap">

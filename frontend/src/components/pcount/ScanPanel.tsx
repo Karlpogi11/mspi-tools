@@ -1,14 +1,32 @@
+import { useEffect, useState } from 'react';
 import { type ScanResult } from '../../lib/api';
 
 interface Props {
   lastScan: ScanResult | null;
   onRecount: (code: string) => void;
+  onComplete: (code: string) => void;
+  onCountChange: (code: string, count: number) => void;
   onStatusChange: (code: string, status: string) => void;
   stats: { total: number; checked: number; matched: number; missing: number; pending: number };
   progress: number;
 }
 
-export default function ScanPanel({ lastScan, onRecount, onStatusChange, stats, progress }: Props) {
+export default function ScanPanel({ lastScan, onRecount, onComplete, onCountChange, onStatusChange, stats, progress }: Props) {
+  const [editingCount, setEditingCount] = useState(false);
+  const [countValue, setCountValue] = useState('0');
+
+  useEffect(() => {
+    setEditingCount(false);
+    setCountValue(String(lastScan?.counted_qty ?? 0));
+  }, [lastScan?.product_code, lastScan?.counted_qty]);
+
+  function saveCount() {
+    const count = Number(countValue);
+    if (!Number.isInteger(count) || count < 0) return;
+    onCountChange(lastScan!.product_code, count);
+    setEditingCount(false);
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
@@ -64,13 +82,40 @@ export default function ScanPanel({ lastScan, onRecount, onStatusChange, stats, 
               <div className={`flex-1 rounded-lg p-3 text-center ${
                 lastScan.match ? 'bg-[#f0fdf4] ring-1 ring-[#86efac]' : 'bg-[#fffbeb] ring-1 ring-[#fde68a]'
               }`}>
-                <p className="text-[11px] text-[#6e6e73] uppercase tracking-wider mb-1">Actual Qty</p>
-                <p className={`text-[22px] font-bold ${
-                  lastScan.match ? 'text-[#16a34a]' : 'text-[#d97706]'
-                }`}>{lastScan.counted_qty}</p>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <p className="text-[11px] text-[#6e6e73] uppercase tracking-wider">Actual Qty</p>
+                  {!editingCount && (
+                    <button onClick={() => setEditingCount(true)} className="text-[10px] font-medium text-[#2563eb] hover:underline cursor-pointer">Edit</button>
+                  )}
+                </div>
+                {editingCount ? (
+                  <input
+                    autoFocus
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={countValue}
+                    onChange={(e) => setCountValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveCount();
+                      if (e.key === 'Escape') setEditingCount(false);
+                    }}
+                    className="w-full px-2 py-1 text-center text-[20px] font-bold border border-[#2563eb] rounded-lg bg-white focus:outline-none"
+                  />
+                ) : (
+                  <p className={`text-[22px] font-bold ${
+                    lastScan.match ? 'text-[#16a34a]' : 'text-[#d97706]'
+                  }`}>{lastScan.counted_qty}</p>
+                )}
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {editingCount && (
+                <>
+                  <button onClick={saveCount} className="px-4 py-2 bg-[#2563eb] text-white text-[13px] rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer">Save count</button>
+                  <button onClick={() => setEditingCount(false)} className="px-4 py-2 border border-[#d2d2d7] text-[13px] rounded-lg hover:bg-[#f5f5f7] transition-colors cursor-pointer">Cancel</button>
+                </>
+              )}
               <select
                 value={lastScan.status}
                 onChange={e => onStatusChange(lastScan.product_code, e.target.value)}
@@ -89,6 +134,13 @@ export default function ScanPanel({ lastScan, onRecount, onStatusChange, stats, 
                 </svg>
                 Recount
               </button>
+              <button
+                onClick={() => onComplete(lastScan.product_code)}
+                disabled={lastScan.counted_qty >= lastScan.system_qty && lastScan.status === 'matched'}
+                className="px-4 py-2 bg-[#15803d] text-white text-[13px] rounded-lg hover:bg-[#166534] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                Complete count
+              </button>
             </div>
           </div>
         </div>
@@ -100,7 +152,7 @@ export default function ScanPanel({ lastScan, onRecount, onStatusChange, stats, 
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5z" />
             </svg>
             <p className="text-[14px] text-[#6e6e73]">Scan a product to see details</p>
-            <p className="text-[12px] text-[#d2d2d7] mt-1">Use the barcode scanner below</p>
+            <p className="text-[12px] text-[#9a9aa0] mt-1">Use the scanner above, then press Enter or Tab</p>
           </div>
         </div>
       )}

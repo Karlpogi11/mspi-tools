@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { forwardRef, useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import { type ScanResult, readJson } from '../../lib/api';
 
 interface Props {
@@ -40,10 +40,31 @@ function playBuzz() {
   } catch {}
 }
 
-export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFailed }: Props) {
+function playInvalid() {
+  try {
+    const ctx = new AudioContext();
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.22, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.38);
+    for (const [offset, frequency] of [[0, 240], [0.14, 170]] as const) {
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = frequency;
+      osc.connect(gain);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.11);
+    }
+  } catch {}
+}
+
+const INVALID_FLASH_MS = 900;
+
+const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId, onScanned, onScanQueued, onScanFailed }, forwardedRef) {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [overscan, setOverscan] = useState(false);
+  const [invalidFlash, setInvalidFlash] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -51,26 +72,10 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  useImperativeHandle(forwardedRef, () => inputRef.current as HTMLInputElement, []);
 
   useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      const target = e.target as HTMLElement | null;
-      if (!target || !target.closest) return;
-      if (inputRef.current === target || inputRef.current?.contains(target)) return;
-      if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
-      if (target.closest('[role="dialog"], .fixed.inset-0')) return;
-      const active = document.activeElement;
-      if (active && active !== inputRef.current && active !== document.body &&
-          (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) {
-        return;
-      }
-      inputRef.current?.focus();
-    }
-    document.addEventListener('click', onDocClick);
-    return () => document.removeEventListener('click', onDocClick);
+    inputRef.current?.focus();
   }, []);
 
   const processQueue = useCallback(async () => {
@@ -93,6 +98,9 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           setError(err.error || 'Product not found');
+          playInvalid();
+          setInvalidFlash(true);
+          window.setTimeout(() => setInvalidFlash(false), INVALID_FLASH_MS);
           onScanFailed?.(code);
           continue;
         }
@@ -108,6 +116,9 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
         onScanned(result);
       } catch {
         setError('Scan failed');
+        playInvalid();
+        setInvalidFlash(true);
+        window.setTimeout(() => setInvalidFlash(false), INVALID_FLASH_MS);
         onScanFailed?.(code);
       }
     }
@@ -127,14 +138,24 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
     void processQueue();
   }, [onScanQueued, processQueue]);
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function submitCode() {
     const code = value.trim();
     if (!code) return;
     if (scanTimer.current) clearTimeout(scanTimer.current);
     enqueueScan(code);
     setValue('');
     inputRef.current?.focus();
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submitCode();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Tab' || !value.trim()) return;
+    e.preventDefault();
+    submitCode();
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -165,6 +186,7 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
             type="text"
             value={value}
             onChange={handleChange}
+            onKeyDown={handleKeyDown}
             placeholder="Scan or type barcode..."
             className="w-full px-3 py-2 border border-[#d2d2d7] rounded-lg text-[14px] font-mono bg-[#f5f5f7] focus:outline-none focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] focus:bg-white transition-colors"
             autoComplete="off"
@@ -188,6 +210,19 @@ export default function ScanBar({ sessionId, onScanned, onScanQueued, onScanFail
           {error}
         </div>
       )}
+      {invalidFlash && (
+        <div
+          className="fixed inset-0 z-[100] pointer-events-none scan-invalid-vignette"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="absolute top-5 left-1/2 -translate-x-1/2 rounded-full bg-[#dc2626] px-4 py-2 text-[13px] font-semibold text-white shadow-lg">
+            Invalid scan
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+});
+
+export default ScanBar;

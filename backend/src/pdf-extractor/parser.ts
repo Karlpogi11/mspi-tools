@@ -57,6 +57,65 @@ function hawbAboveDeliveryDate(region: string): string {
   return '';
 }
 
+function hawbNearDeliveryBlock(text: string): string {
+  const dateIndex = text.search(/\b[0-9OoIl|]{1,2}\s*[/-]\s*[0-9OoIl|]{1,2}\s*[/-]\s*\d{2,4}\b/);
+  if (dateIndex < 0) return '';
+  const block = text.slice(dateIndex).split(/\bShip\s+To\b/i)[0];
+  const candidates = block.match(/\b[1-9]\d{9,11}\b/g) ?? [];
+  return candidates.at(-1) ?? '';
+}
+
+function normalizeDateCandidate(value: string): string {
+  const normalized = value
+    .replace(/[Oo]/g, '0')
+    .replace(/[Il|]/g, '1')
+    .replace(/\s+/g, '')
+    .trim();
+  const match = normalized.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (!match) return normalized;
+  let month = Number(match[1]);
+  let day = Number(match[2]);
+  if (month > 12 && day <= 12) [month, day] = [day, month];
+  return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${match[3]}`;
+}
+
+function isValidDateCandidate(value: string): boolean {
+  const match = normalizeDateCandidate(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!match) return false;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function findDeliveryDate(...texts: string[]): string {
+  const labeledDate = /Delivery\s*Date\s*[:=-]?\s*([0-9OoIl|]{1,2}\s*[/-]\s*[0-9OoIl|]{1,2}\s*[/-]\s*\d{2,4})/i;
+  const standaloneDate = /(?:^|\n)\s*([0-9OoIl|]{1,2}\s*[/-]\s*[0-9OoIl|]{1,2}\s*[/-]\s*\d{2,4})\s*(?=\n|$)/g;
+  const embeddedDate = /\b([0-9OoIl|]{1,2}\s*[/-]\s*[0-9OoIl|]{1,2}\s*[/-]\s*\d{2,4})\b/g;
+
+  for (const text of texts) {
+    const labeled = text.match(labeledDate)?.[1];
+    if (labeled && isValidDateCandidate(labeled)) return normalizeDateCandidate(labeled);
+  }
+  for (const text of texts) {
+    for (const match of text.matchAll(standaloneDate)) {
+      const candidate = match[1];
+      if (candidate && isValidDateCandidate(candidate)) return normalizeDateCandidate(candidate);
+    }
+  }
+  // Scanned packing lists often lose the label and leave the date beside OCR noise
+  // such as "Ship Date ... 26-05-2025". Accept only a valid date-shaped token.
+  for (const text of texts) {
+    for (const match of text.matchAll(embeddedDate)) {
+      const candidate = match[1];
+      if (candidate && isValidDateCandidate(candidate)) return normalizeDateCandidate(candidate);
+    }
+  }
+  return '';
+}
+
 export function parseFields(text: string, region = ''): ParsedFields {
   let hawb = find([
     /\bHAWBS?\b\s*(?:NO\.?|NUMBER|#)?\s*[:;#-]?\s*\n?\s*([0-9][0-9\s-]{5,20})/i,
@@ -65,6 +124,7 @@ export function parseFields(text: string, region = ''): ParsedFields {
     /(?:oN|aN)\s*[=\w]+[=:\s;]+\s*([0-9]{6,})/i,
   ], region, text).replace(/[\s-]+/g, '');
   if (!hawb) hawb = hawbAboveDeliveryDate(region);
+  if (!hawb) hawb = hawbNearDeliveryBlock(region || text);
 
   let invoiceRef = find([
     /\b(SG0\d{7,})\b/i,
@@ -89,9 +149,7 @@ export function parseFields(text: string, region = ''): ParsedFields {
     }
   }
 
-  const deliveryDate = find([
-    /Delivery\s+Date\s*[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-  ], text);
+  const deliveryDate = findDeliveryDate(text, region);
 
   let totalQty = find([
     /Total\s+Quantity[:\s]+(\d+)/i,

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Session } from '../../lib/api';
+import ToolHelp from '../../components/ToolHelp';
 
 export default function PcountIndexPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -190,17 +191,34 @@ export default function PcountIndexPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-[26px] font-semibold text-[#1d1d1f] tracking-tight">PCount</h1>
           <p className="text-[14px] text-[#6e6e73] mt-1">Product counting sessions</p>
         </div>
-        <button
-          onClick={createSession}
-          disabled={creating}
-          className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
-        >
-          {creating ? 'Creating\u2026' : 'New session'}
-        </button>
+        <div className="flex items-center gap-2">
+          <ToolHelp
+            toolName="PCount"
+            purpose="Run collaborative physical inventory counts, compare scanned quantities with system quantities in real time, and produce a verified count result."
+            steps={[
+              'Create a counting session or join one using its four-digit code.',
+              'Import the system inventory and select the columns to display.',
+              'Optionally import an existing physical-count file.',
+              'Scan product codes while connected users see updates in real time.',
+              'Review mismatches, correct quantities, and export the verified result.',
+            ]}
+            cards={[
+              { title: 'Collaboration', description: 'Multiple authorized users can join the same session and see count updates live.' },
+              { title: 'Session ownership', description: 'The owner controls the session, imports, join code, and final submission.' },
+            ]}
+          />
+          <button
+            onClick={createSession}
+            disabled={creating}
+            className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            {creating ? 'Creating\u2026' : 'New session'}
+          </button>
+        </div>
       </div>
 
       <div className="mb-5">

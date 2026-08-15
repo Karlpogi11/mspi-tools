@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import * as XLSX from 'xlsx';
 import { api, type AwbLogRow, type ExtractDownload, type ExtractResult, type ExtractStatus } from '../../lib/api';
+import ToolHelp from '../../components/ToolHelp';
 
 const LOG_COLUMNS = ['HAWB', 'InvoiceReference', 'InvoiceTotalAmount', 'DeliveryDate', 'TotalQty', 'ReceivedDate', 'OriginalFilename', 'DateLogged'];
 
@@ -8,6 +9,8 @@ const secondaryBtnCls =
   'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#d2d2d7] bg-white text-[12px] font-medium text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
 const primaryBtnCls =
   'inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#2563eb] text-white text-[12px] font-semibold hover:bg-[#1d4ed8] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer';
+const MAX_FILES_PER_RUN = 20;
+const MAX_FILE_SIZE_BYTES = 60 * 1024 * 1024;
 
 const iconUpload = (
   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -107,6 +110,7 @@ function exportXlsx(rows: Array<Array<string | number>>, filename: string) {
 }
 
 interface ResultRow {
+  id: string;
   file: string;
   status: ExtractStatus;
   reasons?: string[];
@@ -115,6 +119,9 @@ interface ResultRow {
   renamedFile?: string;
   pageCount?: number;
   deepAnalysis?: boolean;
+  retryFile?: File;
+  viewUrl?: string;
+  retryUrl?: string;
 }
 
 export default function PdfExtractorPage() {
@@ -138,10 +145,24 @@ export default function PdfExtractorPage() {
   const busyRef = useRef(false);
   const queueRef = useRef<File[]>([]);
   const processingStartedAtRef = useRef(0);
+  const runIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
+
+  useEffect(() => {
+    const hasCurrentSession = busy || queuedCount > 0 || results.length > 0 || downloads.length > 0;
+    if (!hasCurrentSession) return;
+    function confirmRefresh(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = 'Refreshing will reset the current PDF Extractor session.';
+    }
+    window.addEventListener('beforeunload', confirmRefresh);
+    return () => window.removeEventListener('beforeunload', confirmRefresh);
+  }, [busy, downloads.length, queuedCount, results.length]);
 
   async function toggleLogs() {
     if (showLogs) {
@@ -221,6 +242,11 @@ export default function PdfExtractorPage() {
       setError('No PDF files found. Drop or import .pdf files.');
       return;
     }
+    const oversized = pdfs.filter((file) => file.size > MAX_FILE_SIZE_BYTES);
+    if (oversized.length > 0) {
+      setError(`${oversized.map((file) => file.name).join(', ')} exceeds the 60 MB per-file limit.`);
+      return;
+    }
     queueRef.current.push(...pdfs);
     setQueuedCount(queueRef.current.length);
     setNotice(`${queueRef.current.length} PDF${queueRef.current.length === 1 ? '' : 's'} ready to run.`);
@@ -228,8 +254,12 @@ export default function PdfExtractorPage() {
 
   async function processQueue() {
     if (busyRef.current || queueRef.current.length === 0) return;
+    if (!runIdRef.current) {
+      runIdRef.current = crypto.randomUUID();
+      cancelledRef.current = false;
+    }
     busyRef.current = true;
-    const pdfs = queueRef.current.splice(0, 20);
+    const pdfs = queueRef.current.splice(0, MAX_FILES_PER_RUN);
     setQueuedCount(queueRef.current.length);
     setProcessingFiles(pdfs.map((file) => file.name));
     setCompletedFiles(0);
@@ -238,7 +268,13 @@ export default function PdfExtractorPage() {
     processingStartedAtRef.current = Date.now();
     setError('');
     setBusy(true);
-    setNotice('');
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    setNotice(
+      queueRef.current.length > 0
+        ? `Running a batch of ${pdfs.length} files. ${queueRef.current.length} ${queueRef.current.length === 1 ? 'file remains' : 'files remain'} and will start automatically.`
+        : `Running a batch of ${pdfs.length} file${pdfs.length === 1 ? '' : 's'}.`
+    );
     try {
       const response = await api.pdfExtractor.extractStream(pdfs, (completed, _total, file) => {
         setCompletedFiles(completed);
@@ -246,10 +282,11 @@ export default function PdfExtractorPage() {
         const elapsedSeconds = (Date.now() - processingStartedAtRef.current) / 1000;
         const remaining = Math.max(0, pdfs.length - completed);
         setEstimatedSeconds(remaining === 0 ? 0 : Math.ceil((elapsedSeconds / completed) * remaining));
-      });
+      }, abortController.signal, runIdRef.current ?? undefined);
       const out = response.results;
       setResults(
-        (current) => [...current, ...out.map((r) => ({
+        (current) => [...current, ...out.map((r, index) => ({
+          id: `${Date.now()}-${index}-${r.file}`,
           file: r.file,
           status: r.status,
           reasons: r.reasons,
@@ -258,6 +295,9 @@ export default function PdfExtractorPage() {
           renamedFile: r.renamedFile,
           pageCount: r.pageCount,
           deepAnalysis: r.deepAnalysis,
+          retryFile: r.status === 'error' ? pdfs[index] : undefined,
+          viewUrl: r.viewUrl,
+          retryUrl: r.retryUrl,
         }))]
       );
       if (response.download) setDownloads((current) => [...current, response.download!]);
@@ -269,8 +309,13 @@ export default function PdfExtractorPage() {
       if (parts.length > 0) setNotice(`Processed ${out.length} file${out.length === 1 ? '' : 's'} — ${parts.join(', ')}.`);
       await refreshLogsIfVisible();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to process files');
+      if ((err instanceof DOMException && err.name === 'AbortError') || cancelledRef.current) {
+        setNotice('Analysis cancelled. The remaining files were removed from the queue.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to process files');
+      }
     } finally {
+      abortControllerRef.current = null;
       busyRef.current = false;
       setBusy(false);
       setProcessingFiles([]);
@@ -278,8 +323,31 @@ export default function PdfExtractorPage() {
       setActiveFile('');
       setEstimatedSeconds(null);
       setQueuedCount(queueRef.current.length);
-      if (queueRef.current.length > 0) void processQueue();
+      if (queueRef.current.length > 0 && !cancelledRef.current) {
+        void processQueue();
+      } else if (!cancelledRef.current && runIdRef.current) {
+        const completedRunId = runIdRef.current;
+        runIdRef.current = null;
+        setNotice('All batches complete. Preparing one combined ZIP...');
+        try {
+          const download = await api.pdfExtractor.finalizeRun(completedRunId);
+          if (download) setDownloads((current) => [...current, download]);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to prepare combined download');
+        }
+      } else {
+        runIdRef.current = null;
+      }
     }
+  }
+
+  function cancelAnalysis() {
+    if (!busyRef.current) return;
+    if (!window.confirm('Cancel analysis? The current file will stop when possible, and remaining files will be removed from the queue.')) return;
+    cancelledRef.current = true;
+    queueRef.current = [];
+    setQueuedCount(0);
+    abortControllerRef.current?.abort();
   }
 
   function handleImport(e: ChangeEvent<HTMLInputElement>) {
@@ -352,20 +420,68 @@ export default function PdfExtractorPage() {
     setError('');
   }
 
+  function retryResult(result: ResultRow) {
+    if ((!result.retryFile && !result.retryUrl) || busyRef.current) return;
+    setResults((current) => current.filter((item) => item.id !== result.id));
+    if (result.retryFile) {
+      enqueueFiles([result.retryFile]);
+      void processQueue();
+      return;
+    }
+    void api.pdfExtractor.retry(result.retryUrl!).then(({ result: retried, download }) => {
+      setResults((current) => [...current, {
+        id: `${Date.now()}-${retried.file}`,
+        file: retried.file,
+        status: retried.status,
+        reasons: retried.reasons,
+        fields: retried.fields,
+        monthFolder: retried.monthFolder,
+        renamedFile: retried.renamedFile,
+        pageCount: retried.pageCount,
+        deepAnalysis: retried.deepAnalysis,
+        viewUrl: retried.viewUrl,
+        retryUrl: retried.retryUrl,
+      }]);
+      if (download) setDownloads((current) => [...current, download]);
+      setNotice(`Retried ${retried.file}.`);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : 'Failed to retry file');
+      setResults((current) => [...current, result]);
+    });
+  }
+
   return (
     <div>
       <div className="w-full max-w-5xl mx-auto flex items-start justify-between gap-4 mb-6">
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-[20px] font-semibold text-[#1d1d1f] tracking-tight">PDF Extractor</h1>
           <p className="text-[12px] text-[#6e6e73] mt-0.5">
             Add AWB and invoice PDFs. Files stay in upload order, are renamed using their SG invoice reference, and are separated by permit status.
           </p>
         </div>
-        {(results.length > 0 || downloads.length > 0) && (
-          <button onClick={clearCurrentResults} disabled={busy} className={secondaryBtnCls}>
-            Reset current batch
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          <ToolHelp
+            toolName="PDF Extractor"
+            purpose="Reduce manual encoding by extracting shipment and invoice details from PDFs, renaming files consistently, organizing them by status and delivery month, and recording valid invoices in the AWB log."
+            steps={[
+              'Add PDF files and start extraction.',
+              'The tool reads document text and uses OCR when needed.',
+              'It extracts the invoice reference, HAWB, amount, delivery date, and quantity.',
+              'Valid files are renamed using the SG invoice reference and organized automatically.',
+              'Completed batches are combined into one ordered download.',
+            ]}
+            cards={[
+              { title: 'File limits', description: '20 PDFs per batch and 60 MB per file. Additional files continue automatically.' },
+              { title: 'Needs attention', description: 'Review failed files with the eye button, then use Retry after confirming the document data.' },
+            ]}
+            note="Keep this page open while processing. Refreshing resets the current browser session."
+          />
+          {(results.length > 0 || downloads.length > 0) && (
+            <button onClick={clearCurrentResults} disabled={busy} className={secondaryBtnCls}>
+              Reset current batch
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -374,7 +490,7 @@ export default function PdfExtractorPage() {
           <button onClick={() => setError('')} className="text-[#dc2626] hover:opacity-70 cursor-pointer text-[15px] leading-none">×</button>
         </div>
       )}
-      {notice && (
+      {notice && !busy && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-[#ecfdf5] border border-[#a7f3d0] text-[13px] text-[#047857] flex items-start justify-between gap-3">
           <span>{notice}</span>
           <button onClick={() => setNotice('')} className="text-[#047857] hover:opacity-70 cursor-pointer text-[15px] leading-none">×</button>
@@ -385,7 +501,7 @@ export default function PdfExtractorPage() {
         <input ref={importRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleImport} />
         <h2 className="text-[16px] font-semibold text-[#1d1d1f] mb-1">Drop your PDFs</h2>
         <p className="text-[13px] text-[#6e6e73] mb-5">
-          PDF files only. Select one or more files, review the count, then run the extraction.
+          PDF files only. Up to {MAX_FILES_PER_RUN} files per run, with a 60 MB limit per file. Select one or more files, review the count, then run the extraction.
         </p>
         <div
           onClick={() => !busy && queuedCount === 0 && importRef.current?.click()}
@@ -405,17 +521,22 @@ export default function PdfExtractorPage() {
             )}
           </div>
           {busy ? (
-            <div className="w-full max-w-md mt-4" role="status" aria-live="polite">
-              <p className="text-[15px] font-semibold text-[#1d1d1f]">
-                {completedFiles} of {processingFiles.length} complete
+            <div className="w-full max-w-lg mt-4 rounded-xl border border-[#e5e7eb] bg-white px-4 py-4 text-left shadow-sm" role="status" aria-live="polite">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[15px] font-semibold text-[#1d1d1f]">Analyzing files</p>
+                  <p className="text-[12px] text-[#6e6e73] mt-0.5 tabular-nums">{completedFiles} of {processingFiles.length} complete</p>
+                </div>
+                {queuedCount > 0 && (
+                  <span className="shrink-0 inline-flex items-center rounded-full bg-[#eff6ff] px-2.5 py-1 text-[11px] font-medium text-[#2563eb]">
+                    {queuedCount} queued
+                  </span>
+                )}
+              </div>
+              <p className="text-[12px] text-[#6e6e73] mt-3 truncate" title={activeFile}>
+                {completedFiles < processingFiles.length ? activeFile : 'Preparing your download...'}
               </p>
-              <p className="text-[12px] text-[#6e6e73] mt-1 truncate" title={activeFile}>
-                {completedFiles < processingFiles.length ? `Analyzing ${activeFile}` : 'Preparing your download...'}
-              </p>
-              <p className="text-[11px] text-[#86868b] mt-1 tabular-nums">
-                {estimatedSeconds === null ? 'Estimating time remaining...' : estimatedSeconds === 0 ? 'Finishing up...' : formatEta(estimatedSeconds)}
-              </p>
-              <div className="mt-4 flex items-center gap-3">
+              <div className="mt-3 flex items-center gap-3">
                 <div className="h-2 flex-1 rounded-full bg-[#e5e7eb] overflow-hidden" aria-hidden="true">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-[#2563eb] to-[#60a5fa] transition-[width] duration-500 ease-out"
@@ -426,6 +547,13 @@ export default function PdfExtractorPage() {
                   {processingFiles.length ? Math.round((completedFiles / processingFiles.length) * 100) : 0}%
                 </span>
               </div>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-[#86868b] tabular-nums">
+                  {estimatedSeconds === null ? 'Estimating time...' : estimatedSeconds === 0 ? 'Finishing up...' : formatEta(estimatedSeconds)}
+                </span>
+                <button onClick={cancelAnalysis} className={`${secondaryBtnCls} px-3 py-1 text-[11px]`}>Cancel</button>
+              </div>
+              {queuedCount > 0 && <p className="text-[10px] text-[#9ca3af] mt-2">Queued files continue automatically after this batch.</p>}
             </div>
           ) : queuedCount > 0 ? (
             <div className="w-full max-w-md">
@@ -488,19 +616,13 @@ export default function PdfExtractorPage() {
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="max-h-[560px] overflow-auto">
             <table className="w-full text-[13px]" style={{ minWidth: '900px' }}>
               <thead>
                 <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7]">
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">File</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Status</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Invoice Ref</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">HAWB</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Amount</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Delivery Date</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Qty</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Received Date</th>
-                  <th className="px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">Filed to</th>
+                  {['File', 'Status', 'Invoice Ref', 'HAWB', 'Amount', 'Delivery Date', 'Qty', 'Received Date', 'Filed to'].map((heading) => (
+                    <th key={heading} className="sticky top-0 z-10 bg-[#f5f5f7] px-3 py-1 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">{heading}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -546,7 +668,7 @@ export default function PdfExtractorPage() {
             <h2 className="text-[13px] font-semibold text-[#92400e]">With permit ({permitResults.length})</h2>
             <p className="text-[11px] text-[#b45309] mt-0.5">Kept separate and excluded from Excel and the AWB table.</p>
           </div>
-          <div className="divide-y divide-[#f3f4f6]">
+          <div className="max-h-[360px] overflow-y-auto divide-y divide-[#f3f4f6]">
             {permitResults.map((r, index) => (
               <div key={`${r.file}-${index}`} className="px-4 py-3 flex items-center justify-between gap-4">
                 <div className="min-w-0">
@@ -566,7 +688,7 @@ export default function PdfExtractorPage() {
             <h2 className="text-[13px] font-semibold text-[#991b1b]">Needs attention ({errorResults.length})</h2>
             <p className="text-[11px] text-[#b91c1c] mt-0.5">Enhanced OCR was attempted before these files were marked as errors.</p>
           </div>
-          <div className="divide-y divide-[#f3f4f6]">
+          <div className="max-h-[360px] overflow-y-auto divide-y divide-[#f3f4f6]">
             {errorResults.map((r, index) => (
               <div key={`${r.file}-${index}`} className="px-4 py-3 flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -575,7 +697,23 @@ export default function PdfExtractorPage() {
                     {(r.reasons ?? ['UNREADABLE']).map((reason) => <li key={reason} className="text-[11px] text-[#b91c1c]">{reasonLabel(reason)}</li>)}
                   </ul>
                 </div>
-                <span className="shrink-0 text-[10px] text-[#6e6e73]">{r.deepAnalysis ? 'Deep analysis completed' : 'Analysis completed'}</span>
+                <div className="shrink-0 flex items-center gap-3">
+                  <span className="text-[10px] text-[#6e6e73]">{r.deepAnalysis ? 'Deep analysis completed' : 'Analysis completed'}</span>
+                  {r.viewUrl && (
+                    <button
+                      onClick={() => window.open(api.pdfExtractor.downloadUrl(r.viewUrl!), '_blank', 'noopener,noreferrer')}
+                      title="View failed PDF"
+                      aria-label={`View ${r.file}`}
+                      className="w-7 h-7 inline-flex items-center justify-center rounded-lg border border-[#d2d2d7] bg-white text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f] transition-colors cursor-pointer"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
+                        <circle cx="12" cy="12" r="2.5" />
+                      </svg>
+                    </button>
+                  )}
+                  <button onClick={() => retryResult(r)} disabled={busy || (!r.retryFile && !r.retryUrl)} className={`${secondaryBtnCls} px-2.5 py-1 text-[11px]`}>Retry</button>
+                </div>
               </div>
             ))}
           </div>
@@ -605,7 +743,7 @@ export default function PdfExtractorPage() {
               </svg>
             </button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="max-h-[560px] overflow-auto">
             {log.length === 0 ? (
               <p className="text-[13px] text-[#9ca3af] text-center py-10">No saved invoices yet.</p>
             ) : (
@@ -613,7 +751,7 @@ export default function PdfExtractorPage() {
                 <thead>
                   <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7]">
                     {['Invoice Ref', 'HAWB', 'Amount', 'Delivery Date', 'Qty', 'Original File', 'Month', 'Date Logged'].map((heading) => (
-                      <th key={heading} className="px-3 py-2 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">{heading}</th>
+                      <th key={heading} className="sticky top-0 z-10 bg-[#f5f5f7] px-3 py-2 text-left font-semibold text-[#6e6e73] text-[11px] uppercase tracking-wide">{heading}</th>
                     ))}
                   </tr>
                 </thead>
@@ -645,6 +783,7 @@ export default function PdfExtractorPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

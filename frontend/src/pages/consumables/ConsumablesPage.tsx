@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment, type ChangeEvent, type ReactNode } from 'react';
 import { api, saveBlob, type ConsumableMaster } from '../../lib/api';
+import ToolHelp from '../../components/ToolHelp';
 import {
   parseReceivingWorkbook,
   productionDateFromCode,
@@ -422,13 +423,28 @@ export default function ConsumablesPage() {
   return (
     <div>
       <div className="flex items-start justify-between gap-4 mb-6 print:hidden">
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-[20px] font-semibold text-[#1d1d1f] tracking-tight">Label Maker</h1>
           <p className="text-[12px] text-[#6e6e73] mt-0.5">
             Add received consumables and print expiry labels. &middot; Drag &amp; drop a file anywhere on this page to import.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <ToolHelp
+            toolName="Label Maker"
+            purpose="Speed up consumables receiving by deriving production and expiry dates, preparing consistent labels, and exporting a clean inventory record with less manual encoding."
+            steps={[
+              'Import a completed receiving file or add consumables directly.',
+              'Review part numbers, quantities, production dates, and calculated expiry dates.',
+              'Add an unknown part to the master list when required.',
+              'Print the generated expiry labels.',
+              'Download the completed inventory for recordkeeping.',
+            ]}
+            cards={[
+              { title: 'Supported files', description: 'Import Excel or CSV receiving files. Use the downloadable template for the expected columns.' },
+              { title: 'Draft recovery', description: 'Current entries are saved in the browser so unfinished receiving work can be recovered.' },
+            ]}
+          />
           <input
             ref={importRef}
             type="file"

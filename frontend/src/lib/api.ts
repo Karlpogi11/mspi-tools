@@ -2,10 +2,36 @@ import type { InventoryRow } from './consumables';
 
 const BASE = import.meta.env.VITE_API_URL || '/api';
 
+export interface ApiRequestError extends Error {
+  status?: number;
+  retryAfter?: number;
+  data?: unknown;
+}
+
+function retryAfterSeconds(res: Response): number | undefined {
+  const value = res.headers.get('retry-after');
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(1, Math.ceil(seconds));
+  const deadline = Date.parse(value);
+  return Number.isNaN(deadline) ? undefined : Math.max(1, Math.ceil((deadline - Date.now()) / 1000));
+}
+
+function responseError(message: string, res: Response, data?: unknown): ApiRequestError {
+  const error = new Error(message) as ApiRequestError;
+  error.status = res.status;
+  error.retryAfter = retryAfterSeconds(res);
+  error.data = data;
+  return error;
+}
+
 export async function readJson<T>(res: Response): Promise<T> {
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
-    throw new Error('The server is unavailable right now. Please try again in a moment.');
+    if (res.status === 429) {
+      throw responseError('Too many failed login attempts. Please wait before trying again.', res);
+    }
+    throw responseError('The server is unavailable right now. Please try again in a moment.', res);
   }
   return res.json() as Promise<T>;
 }
@@ -31,7 +57,7 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     try {
       data = await readJson<T>(res);
     } catch (err) {
-      if (attempt === 0) {
+      if (attempt === 0 && res.ok) {
         await new Promise(r => setTimeout(r, 800));
         continue;
       }
@@ -39,9 +65,7 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     }
 
     if (!res.ok) {
-      const err = new Error(((data as { error?: string } | null)?.error) || 'An error occurred') as Error & { data?: unknown };
-      err.data = data;
-      throw err;
+      throw responseError(((data as { error?: string } | null)?.error) || 'An error occurred', res, data);
     }
 
     return data;
@@ -191,6 +215,8 @@ export interface ExtractResult {
   renamedFile?: string;
   pageCount?: number;
   deepAnalysis?: boolean;
+  viewUrl?: string;
+  retryUrl?: string;
 }
 
 export interface ExtractDownload {
@@ -455,11 +481,12 @@ export const api = {
       }
       return { results: data.results ?? [], download: data.download ?? null };
     },
-    extractStream: async (files: File[], onProgress: (completed: number, total: number, file: string) => void): Promise<ExtractBatch> => {
+    extractStream: async (files: File[], onProgress: (completed: number, total: number, file: string) => void, signal?: AbortSignal, runId?: string): Promise<ExtractBatch> => {
       const form = new FormData();
       for (const file of files) form.append('files', file);
+      if (runId) form.append('runId', runId);
       const res = await fetch(`${BASE}/pdf-extractor/extract-stream`, {
-        method: 'POST', credentials: 'include', body: form,
+        method: 'POST', credentials: 'include', body: form, signal,
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => null);
@@ -486,7 +513,25 @@ export const api = {
       if (!completedBatch) throw new Error('Processing ended before results were ready');
       return completedBatch;
     },
+    finalizeRun: async (runId: string): Promise<ExtractDownload | null> => {
+      const res = await fetch(`${BASE}/pdf-extractor/finalize-run`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId }),
+      });
+      const data = await readJson<{ download?: ExtractDownload | null; error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || 'Failed to prepare download');
+      return data.download ?? null;
+    },
     downloadUrl: (path: string) => `${BASE}${path.replace(/^\/api/, '')}`,
+    retry: async (url: string): Promise<{ result: ExtractResult; download: ExtractDownload | null }> => {
+      const res = await fetch(`${BASE}${url.replace(/^\/api/, '')}`, {
+        method: 'POST', credentials: 'include',
+      });
+      const data = await readJson<{ result?: ExtractResult; download?: ExtractDownload | null; error?: string }>(res);
+      if (!res.ok || !data.result) throw new Error(data.error || 'Failed to retry file');
+      return { result: data.result, download: data.download ?? null };
+    },
     log: () =>
       request<AwbLogRow[]>('/pdf-extractor/log'),
   },
