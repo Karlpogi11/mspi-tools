@@ -7,6 +7,10 @@ on:
   schedule:
     - cron: "*/5 * * * *"
 
+concurrency:
+  group: tools-mspi-health
+  cancel-in-progress: true
+
 jobs:
   verify-health:
     runs-on: ubuntu-latest
@@ -18,8 +22,14 @@ jobs:
           DOMAIN: ${{ secrets.HOSTINGER_DOMAIN }}
           URL: https://tools.mspi.io
         run: |
+          set -euo pipefail
           API="https://developers.hostinger.com/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs"
           health() { curl --max-time 10 -s -o /dev/null -w "%{http_code}" "$URL/api/health"; }
+          latest_build_state() {
+            curl --max-time 15 --fail-with-body -sS \
+              -H "Authorization: Bearer $TOKEN" "$API/builds" \
+              | jq -r '.data[0].state // "unknown"'
+          }
           wait_for_healthy() {
             local attempts="$1"
             local consecutive=0
@@ -36,8 +46,39 @@ jobs:
             done
             return 1
           }
+          wait_for_active_build() {
+            local attempts="$1"
+            for i in $(seq 1 "$attempts"); do
+              STATE=$(latest_build_state || echo "unknown")
+              CODE=$(health)
+              echo "[$i] build: $STATE; health: $CODE"
+              if [ "$CODE" = "200" ]; then
+                echo "=== Healthy while deployment is finishing ==="
+                return 0
+              fi
+              case "$STATE" in
+                pending|running) sleep 10 ;;
+                completed) return 0 ;;
+                *)
+                  echo "=== Deployment state is $STATE ==="
+                  return 0
+                  ;;
+              esac
+            done
+            echo "=== Deployment did not finish in time ==="
+            return 1
+          }
           echo "=== Waiting for app to become healthy ==="
           if wait_for_healthy 3; then echo "=== Healthy ==="; exit 0; fi
+          STATE=$(latest_build_state || echo "unknown")
+          if [ "$STATE" = "pending" ] || [ "$STATE" = "running" ]; then
+            echo "=== Hostinger deployment is $STATE; waiting before any restart ==="
+            if ! wait_for_active_build 30; then
+              exit 1
+            fi
+            echo "=== Checking the freshly deployed app ==="
+            if wait_for_healthy 12; then echo "=== Healthy after deployment ==="; exit 0; fi
+          fi
           echo "=== App unhealthy, restarting Node.js server ==="
           curl --fail-with-body -sS -w "\nrestart HTTP %{http_code}\n" \
             -X POST -H "Authorization: Bearer $TOKEN" "$API/server/restart"
