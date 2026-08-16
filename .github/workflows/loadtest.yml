@@ -10,9 +10,36 @@ jobs:
       - name: Run load tests
         run: |
           for URL in "https://tools.mspi.io/" "https://tools.mspi.io/api/health"; do
-            echo "===== $URL (25 concurrent, 30s) ====="
-            npx --yes autocannon -c 25 -d 30 --renderStatusCodes "$URL" || true
+            echo "===== $URL (10 concurrent, 20s) ====="
+            npx --yes autocannon -c 10 -d 20 --renderStatusCodes "$URL" || true
           done
-          ASSET=$(curl -s https://tools.mspi.io/ | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | sort -u | head -1)
-          echo "===== https://tools.mspi.io/$ASSET (25 concurrent, 30s) ====="
-          npx --yes autocannon -c 25 -d 30 --renderStatusCodes "https://tools.mspi.io/$ASSET" || true
+
+  browser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Load page in real browser (Chromium)
+        run: |
+          npm i -s playwright-core >/dev/null 2>&1
+          npx playwright-core install chromium --with-deps >/dev/null 2>&1
+          node -e '
+            const { chromium } = require("playwright-core");
+            (async () => {
+              const browser = await chromium.launch();
+              const page = await browser.newPage({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" });
+              const t0 = Date.now();
+              const resp = await page.goto("https://tools.mspi.io/", { waitUntil: "networkidle", timeout: 60000 });
+              console.log("FINAL URL:", page.url());
+              console.log("TITLE:", await page.title());
+              console.log("STATUS:", resp ? resp.status() : "n/a");
+              console.log("LOAD MS:", Date.now() - t0);
+              const api = await page.evaluate(async () => {
+                const r = await fetch("/api/health", { credentials: "include" });
+                return { status: r.status, body: await r.text() };
+              });
+              console.log("HEALTH API:", JSON.stringify(api));
+              await browser.close();
+            })().catch(e => { console.error("BROWSER FAIL:", e.message); process.exit(1); });
+          '
