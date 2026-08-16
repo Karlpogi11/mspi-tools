@@ -1,0 +1,29 @@
+name: Diagnose tools.mspi.io runtime
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read latest Node.js build logs
+        env:
+          TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          USERNAME: ${{ secrets.HOSTINGER_USERNAME }}
+          DOMAIN: ${{ secrets.HOSTINGER_DOMAIN }}
+        run: |
+          set -euo pipefail
+          API="https://developers.hostinger.com/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs"
+          BUILDS=$(curl --fail-with-body -sS -H "Authorization: Bearer $TOKEN" "$API/builds")
+          BUILD_ID=$(printf '%s' "$BUILDS" | jq -r '.. | objects | select(has("uuid")) | .uuid' | head -n 1)
+          if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
+            echo "No Node.js build ID found."
+            exit 1
+          fi
+          echo "Latest Node.js build: $BUILD_ID"
+          curl --fail-with-body -sS -H "Authorization: Bearer $TOKEN" "$API/builds/$BUILD_ID/logs" \
+            | sed -E \
+              -e 's#mysql://[^[:space:]"'\''}]+#mysql://[REDACTED]#g' \
+              -e 's#(JWT_SECRET|DATABASE_URL|HOSTINGER_API_TOKEN)=[^[:space:]]+#\1=[REDACTED]#g' \
+            | tail -n 200
