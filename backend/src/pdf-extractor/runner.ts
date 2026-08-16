@@ -28,7 +28,8 @@ export interface ProcessResult {
 }
 
 export const MAX_PDF_FILES_PER_REQUEST = 50;
-export const PDF_PROCESS_CONCURRENCY = Math.max(1, Math.min(2, Number(process.env.PDF_PROCESS_CONCURRENCY) || 2));
+// Keep memory bounded on shared hosting. Higher values are opt-in through env.
+export const PDF_PROCESS_CONCURRENCY = Math.max(1, Math.min(2, Number(process.env.PDF_PROCESS_CONCURRENCY) || 1));
 
 export const upload = multer({
   dest: INBOX,

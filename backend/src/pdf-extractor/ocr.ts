@@ -1,7 +1,10 @@
 import { createWorker, type Worker } from 'tesseract.js';
 import { groupLines, upperRightRegion, type WordBox } from './pdf.js';
 
-const POOL_SIZE = Math.max(1, Math.min(4, (process.env.CPU_COUNT ? parseInt(process.env.CPU_COUNT) : 0) || 4));
+// Tesseract workers are memory-heavy. Shared hosting stays stable with one
+// worker; raise this explicitly only after increasing the server memory limit.
+const configuredWorkerCount = Number.parseInt(process.env.OCR_WORKER_COUNT ?? '1', 10);
+const POOL_SIZE = Math.max(1, Math.min(2, Number.isFinite(configuredWorkerCount) ? configuredWorkerCount : 1));
 
 export interface OcrPage {
   fullText: string;

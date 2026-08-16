@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { extractTextLayer } from './pdf.js';
-import { renderPdfPages } from './raster.js';
+import { forEachRenderedPdfPage } from './raster.js';
 import { ocrPool } from './ocr.js';
 import { mergeFields, missingFields, parseFields, type ParsedFields } from './parser.js';
 import type { WordBox } from './pdf.js';
@@ -69,32 +69,24 @@ export async function extractFieldsFromFile(pdfPath: string): Promise<ExtractRes
 }
 
 async function ocrPdf(pdfBuf: Buffer, dpi: number, enhance = false): Promise<{ text: string; region: string; words: WordBox[]; pageCount: number }> {
-  const pages = await renderPdfPages(pdfBuf, dpi);
-  const fullParts: string[] = new Array(pages.length);
-  const regionParts: string[] = new Array(pages.length);
-  const pageWords: WordBox[][] = new Array(pages.length);
-  let next = 0;
-  async function worker() {
-    while (next < pages.length) {
-      const index = next++;
-      const page = pages[index];
-      const png = enhance ? await sharp(page.png).grayscale().normalize().sharpen().png().toBuffer() : page.png;
-      const r = await ocrPool.recognize(png, page.width, page.height);
-      fullParts[index] = r.fullText;
-      regionParts[index] = r.regionText;
-      pageWords[index] = r.words;
-    }
-  }
-  const workers = Math.max(1, Math.min(3, pages.length));
-  await Promise.all(Array.from({ length: workers }, () => worker()));
-  const texts = fullParts.filter((t) => t.trim());
+  const fullParts: string[] = [];
+  const regionParts: string[] = [];
+  const allWords: WordBox[] = [];
+  const pageCount = await forEachRenderedPdfPage(pdfBuf, dpi, async (page) => {
+    const png = enhance ? await sharp(page.png).grayscale().normalize().sharpen().png().toBuffer() : page.png;
+    const r = await ocrPool.recognize(png, page.width, page.height);
+    if (r.fullText.trim()) fullParts.push(r.fullText);
+    if (r.regionText) regionParts.push(r.regionText);
+    allWords.push(...r.words);
+  });
+  const texts = fullParts.filter((text) => text.trim());
   if (texts.length === 0) {
     throw new Error('tesseract produced no text');
   }
   return {
     text: texts.join('\n'),
     region: regionParts.filter((t) => t).join('\n'),
-    words: pageWords.flat(),
-    pageCount: pages.length,
+    words: allWords,
+    pageCount,
   };
 }
