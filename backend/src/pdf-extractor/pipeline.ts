@@ -26,8 +26,7 @@ export async function extractFieldsFromBuffer(pdfBuf: Buffer): Promise<ExtractRe
     },
     { label: 'OCR 200dpi', run: async () => ocrPdf(pdfBuf, 200) },
     { label: 'OCR 300dpi', run: async () => ocrPdf(pdfBuf, 300) },
-    { label: 'OCR 400dpi', run: async () => ocrPdf(pdfBuf, 400) },
-    { label: 'enhanced OCR 500dpi', deep: true, run: async () => ocrPdf(pdfBuf, 500, true) },
+    { label: 'enhanced OCR 400dpi', deep: true, run: async () => ocrPdf(pdfBuf, 400, true) },
   ];
 
   const fields: Partial<ParsedFields> = {};
@@ -71,19 +70,31 @@ export async function extractFieldsFromFile(pdfPath: string): Promise<ExtractRes
 
 async function ocrPdf(pdfBuf: Buffer, dpi: number, enhance = false): Promise<{ text: string; region: string; words: WordBox[]; pageCount: number }> {
   const pages = await renderPdfPages(pdfBuf, dpi);
-  const fullParts: string[] = [];
-  const regionParts: string[] = [];
-  const allWords: WordBox[] = [];
-  for (const page of pages) {
-    const png = enhance ? await sharp(page.png).grayscale().normalize().sharpen().png().toBuffer() : page.png;
-    const r = await ocrPool.recognize(png, page.width, page.height);
-    if (!r.fullText.trim()) continue;
-    fullParts.push(r.fullText);
-    regionParts.push(r.regionText);
-    allWords.push(...r.words);
+  const fullParts: string[] = new Array(pages.length);
+  const regionParts: string[] = new Array(pages.length);
+  const pageWords: WordBox[][] = new Array(pages.length);
+  let next = 0;
+  async function worker() {
+    while (next < pages.length) {
+      const index = next++;
+      const page = pages[index];
+      const png = enhance ? await sharp(page.png).grayscale().normalize().sharpen().png().toBuffer() : page.png;
+      const r = await ocrPool.recognize(png, page.width, page.height);
+      fullParts[index] = r.fullText;
+      regionParts[index] = r.regionText;
+      pageWords[index] = r.words;
+    }
   }
-  if (fullParts.length === 0) {
+  const workers = Math.max(1, Math.min(3, pages.length));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  const texts = fullParts.filter((t) => t.trim());
+  if (texts.length === 0) {
     throw new Error('tesseract produced no text');
   }
-  return { text: fullParts.join('\n'), region: regionParts.join('\n'), words: allWords, pageCount: pages.length };
+  return {
+    text: texts.join('\n'),
+    region: regionParts.filter((t) => t).join('\n'),
+    words: pageWords.flat(),
+    pageCount: pages.length,
+  };
 }

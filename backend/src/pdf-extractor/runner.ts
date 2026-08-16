@@ -73,6 +73,9 @@ export async function processPdfFile(
   }
 
   const validInvoiceRef = /^SG\d{6,}$/i.test(fields.InvoiceReference || '');
+  if (!validInvoiceRef && isInvoiceRefFilename(fileName)) {
+    fields.InvoiceReference = path.parse(fileName).name;
+  }
   const structuralReasons: string[] = [];
   if (pageCount < 2) structuralReasons.push('MISSING_PAGE_2');
   if (!validInvoiceRef) structuralReasons.push('INVOICE_REF');

@@ -1,7 +1,7 @@
 import { createWorker, type Worker } from 'tesseract.js';
 import { groupLines, upperRightRegion, type WordBox } from './pdf.js';
 
-const POOL_SIZE = Math.max(1, Math.min(2, (process.env.CPU_COUNT ? parseInt(process.env.CPU_COUNT) : 0) || 2));
+const POOL_SIZE = Math.max(1, Math.min(4, (process.env.CPU_COUNT ? parseInt(process.env.CPU_COUNT) : 0) || 4));
 
 export interface OcrPage {
   fullText: string;

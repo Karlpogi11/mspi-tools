@@ -204,7 +204,10 @@ export function parseFields(text: string, region = '', words: WordBox[] = []): P
     /\$[Gg](0\d{7,})/,
   ], region, text);
   if (!invoiceRef) invoiceRef = ocrSgRef(region, text);
-  if (invoiceRef && !invoiceRef.startsWith('SG')) invoiceRef = 'SG' + invoiceRef;
+  if (invoiceRef) {
+    const digits = invoiceRef.match(/(0\d{7,})/);
+    invoiceRef = digits ? 'SG' + digits[0] : '';
+  }
 
   let amount = find([
     /COMMENT\s*\n?\s*([0-9,]+\.[0-9]{2})/i,
