@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import { authenticateToken, requireAdmin } from '../auth.js';
 import { listAwbLog } from './store.js';
@@ -29,6 +30,35 @@ function recordResultDiagnostics(results: ProcessResult[], runId?: string, batch
       runId,
       batchId,
     });
+  }
+}
+
+function restoreOriginalNames(files: Express.Multer.File[], rawNames: unknown): Express.Multer.File[] {
+  if (rawNames === undefined) return files;
+  const encodedNames = Array.isArray(rawNames) ? rawNames : [rawNames];
+  if (encodedNames.length !== files.length || encodedNames.some((value) => typeof value !== 'string')) {
+    throw new Error('Invalid PDF filename metadata');
+  }
+
+  const names = encodedNames.map((encoded) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error('Invalid PDF filename metadata');
+    const name = Buffer.from(encoded, 'base64url').toString('utf8');
+    if (!name || name.length > 255 || /[\\/\0]/.test(name) || !name.toLowerCase().endsWith('.pdf')) {
+      throw new Error('Invalid PDF filename metadata');
+    }
+    return name;
+  });
+
+  return files.map((file, index) => ({ ...file, originalname: names[index] }));
+}
+
+function removeUploads(files: Express.Multer.File[]) {
+  for (const file of files) {
+    try {
+      fs.rmSync(file.path, { force: true });
+    } catch {
+      // A later inbox cleanup can remove an abandoned temporary upload.
+    }
   }
 }
 
@@ -69,9 +99,17 @@ router.post('/extract-stream', (req: Request, res: Response) => {
       res.status(400).json({ error: (err as Error)?.message || 'Upload failed' });
       return;
     }
-    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    let files = (req.files as Express.Multer.File[] | undefined) ?? [];
     if (files.length === 0) {
       res.status(400).json({ error: 'No PDF files uploaded' });
+      return;
+    }
+
+    try {
+      files = restoreOriginalNames(files, req.body?.originalNames);
+    } catch (metadataError) {
+      removeUploads(files);
+      res.status(400).json({ error: (metadataError as Error).message });
       return;
     }
 

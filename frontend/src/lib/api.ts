@@ -25,6 +25,24 @@ function responseError(message: string, res: Response, data?: unknown): ApiReque
   return error;
 }
 
+function proxySafePdfName(name: string, index: number): string {
+  const stem = name
+    .replace(/\.pdf$/i, '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^[_\s.-]+|[_\s.-]+$/g, '')
+    .slice(0, 120) || 'document';
+  return `${String(index + 1).padStart(2, '0')}-${stem}.pdf`;
+}
+
+function base64UrlUtf8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
 export async function readJson<T>(res: Response): Promise<T> {
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
@@ -503,7 +521,12 @@ export const api = {
       let lastError: unknown = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         const form = new FormData();
-        for (const file of files) form.append('files', file);
+        files.forEach((file, index) => {
+          // Hosting WAF rules parse multipart filenames before Express. Keep
+          // that header conservative and restore the real name in the backend.
+          form.append('files', file, proxySafePdfName(file.name, index));
+          form.append('originalNames', base64UrlUtf8(file.name));
+        });
         if (runId) form.append('runId', runId);
         if (batchId) form.append('batchId', batchId);
         if (batchNumber !== undefined) form.append('batchNumber', String(batchNumber));
