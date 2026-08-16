@@ -18,6 +18,7 @@ import reformatRoutes from './reformat/routes.js';
 import consumablesRoutes from './consumables/routes.js';
 import pdfExtractorRoutes from './pdf-extractor/routes.js';
 import { ensureAwbLogTable } from './pdf-extractor/store.js';
+import { ocrPool } from './pdf-extractor/ocr.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -106,6 +107,9 @@ if (existsSync(frontendIndex)) {
 async function start() {
   server.listen(PORT, () => {
     console.log(`Gateway running on port ${PORT}`);
+    void ocrPool.warmup()
+      .then(() => console.log('PDF Extractor OCR workers ready'))
+      .catch((error) => console.warn('PDF Extractor OCR unavailable until the next server restart', error));
   });
 
   try {

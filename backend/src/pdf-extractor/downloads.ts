@@ -4,7 +4,8 @@ import { randomUUID } from 'crypto';
 import { ZipArchive } from 'archiver';
 import jwt from 'jsonwebtoken';
 import { DATA_DIR, DOWNLOADS } from './paths.js';
-import type { ProcessResult } from './runner.js';
+import { PDF_PROCESS_CONCURRENCY, type ProcessResult } from './runner.js';
+import { mapLimit } from './concurrency.js';
 
 interface DownloadArtifact {
   path: string;
@@ -125,7 +126,7 @@ function cleanExpiredArtifacts() {
 /**
  * Runs a client batch exactly once per file position, even when the browser
  * reconnects after a proxy timeout. Every completed file is atomically saved
- * before the next one starts, and duplicate requests join the same work.
+ * before its progress is reported, and duplicate requests join the same work.
  */
 export async function processResumableBatch(
   runId: string,
@@ -172,6 +173,7 @@ export async function processResumableBatch(
     }
 
     let completed = 0;
+    const unresolved: number[] = [];
     for (let index = 0; index < files.length; index += 1) {
       const saved = batch.results[index];
       if (saved) {
@@ -180,13 +182,19 @@ export async function processResumableBatch(
         onProgress(completed, saved.file);
         continue;
       }
+      unresolved.push(index);
+    }
+
+    await mapLimit(unresolved, PDF_PROCESS_CONCURRENCY, async (index) => {
       const result = await processFile(files[index]);
       batch.results[index] = result;
       batch.updatedAt = Date.now();
       writeBatch(batch);
       completed += 1;
       onProgress(completed, result.file);
-    }
+      return result;
+    });
+
     return batch.results as ProcessResult[];
   })();
   activeBatches.set(key, work);

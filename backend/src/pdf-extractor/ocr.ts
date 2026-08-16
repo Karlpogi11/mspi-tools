@@ -1,10 +1,10 @@
 import { createWorker, type Worker } from 'tesseract.js';
 import { groupLines, upperRightRegion, type WordBox } from './pdf.js';
 
-// Tesseract workers are memory-heavy. Shared hosting stays stable with one
-// worker; raise this explicitly only after increasing the server memory limit.
+// Tesseract workers are memory-heavy. Shared hosting defaults to one worker;
+// larger servers can opt in, up to this defensive ceiling.
 const configuredWorkerCount = Number.parseInt(process.env.OCR_WORKER_COUNT ?? '1', 10);
-const POOL_SIZE = Math.max(1, Math.min(2, Number.isFinite(configuredWorkerCount) ? configuredWorkerCount : 1));
+export const OCR_WORKER_COUNT = Math.max(1, Math.min(4, Number.isFinite(configuredWorkerCount) ? configuredWorkerCount : 1));
 
 export interface OcrPage {
   fullText: string;
@@ -34,7 +34,8 @@ function wordsFromBlocks(data: any): WordBox[] {
 
 class TesseractPool {
   private workers: Worker[] = [];
-  private busy: number[] = [];
+  private availableWorkers: number[] = [];
+  private workerWaiters: Array<(workerIndex: number) => void> = [];
   private initPromise: Promise<void> | null = null;
   private failed = false;
 
@@ -47,36 +48,49 @@ class TesseractPool {
         options.langPath = process.env.TESSERACT_LANG_PATH;
       }
       await Promise.all(
-        Array.from({ length: POOL_SIZE }, async () => {
+        Array.from({ length: OCR_WORKER_COUNT }, async () => {
           try {
             const worker = await createWorker(langs, 1, options);
             this.workers.push(worker);
-            this.busy.push(0);
           } catch (err) {
             console.error('[ocr] worker init failed:', (err as Error)?.message);
           }
         })
       );
-      if (this.workers.length === 0) this.failed = true;
+      if (this.workers.length === 0) {
+        this.failed = true;
+        return;
+      }
+      this.availableWorkers = this.workers.map((_, index) => index);
     })();
     return this.initPromise;
   }
 
-  private pickWorker(): number {
-    let idx = 0;
-    for (let i = 1; i < this.busy.length; i++) {
-      if (this.busy[i] < this.busy[idx]) idx = i;
-    }
-    return idx;
+  private acquireWorker(): Promise<number> {
+    const available = this.availableWorkers.shift();
+    if (available !== undefined) return Promise.resolve(available);
+    return new Promise((resolve) => this.workerWaiters.push(resolve));
   }
 
-  async recognize(png: Buffer, pageWidth: number, pageHeight: number): Promise<OcrPage> {
+  private releaseWorker(workerIndex: number) {
+    const nextWaiter = this.workerWaiters.shift();
+    if (nextWaiter) {
+      nextWaiter(workerIndex);
+    } else {
+      this.availableWorkers.push(workerIndex);
+    }
+  }
+
+  async warmup(): Promise<void> {
     await this.init();
     if (this.failed || this.workers.length === 0) {
       throw new Error('tesseract workers unavailable');
     }
-    const idx = this.pickWorker();
-    this.busy[idx]++;
+  }
+
+  async recognize(png: Buffer, pageWidth: number, pageHeight: number): Promise<OcrPage> {
+    await this.warmup();
+    const idx = await this.acquireWorker();
     try {
       const { data } = await this.workers[idx].recognize(png, {}, { blocks: true });
       const words = wordsFromBlocks(data);
@@ -90,15 +104,17 @@ class TesseractPool {
       console.error('[ocr] recognize failed:', (err as Error)?.message);
       throw err;
     } finally {
-      this.busy[idx]--;
+      this.releaseWorker(idx);
     }
   }
 
   async terminate() {
     await Promise.allSettled(this.workers.map((w) => w.terminate()));
     this.workers = [];
-    this.busy = [];
+    this.availableWorkers = [];
+    this.workerWaiters = [];
     this.initPromise = null;
+    this.failed = false;
   }
 }
 

@@ -14,6 +14,7 @@ const MAX_FILES_PER_RUN = 50;
 // Keep multipart uploads comfortably below shared-hosting proxy limits. The
 // overall run is still 50 files and each group remains resumable and ordered.
 const PROCESSING_BATCH_SIZE = 5;
+const MAX_UPLOAD_GROUP_BYTES = 48 * 1024 * 1024;
 const MAX_FILE_SIZE_BYTES = 60 * 1024 * 1024;
 const BATCH_REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
 
@@ -114,6 +115,18 @@ function exportXlsx(rows: Array<Array<string | number>>, filename: string) {
   XLSX.writeFile(wb, filename);
 }
 
+function nextUploadGroup(files: File[], maxFiles: number): File[] {
+  const group: File[] = [];
+  let totalBytes = 0;
+  for (const file of files) {
+    if (group.length >= maxFiles) break;
+    if (group.length > 0 && totalBytes + file.size > MAX_UPLOAD_GROUP_BYTES) break;
+    group.push(file);
+    totalBytes += file.size;
+  }
+  return group;
+}
+
 interface ResultRow {
   id: string;
   file: string;
@@ -154,6 +167,7 @@ export default function PdfExtractorPage() {
   const [completedFiles, setCompletedFiles] = useState(0);
   const [runTotalFiles, setRunTotalFiles] = useState(0);
   const [runCompletedFiles, setRunCompletedFiles] = useState(0);
+  const [completedGroupCount, setCompletedGroupCount] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [processingStage, setProcessingStage] = useState<'uploading' | 'analyzing' | 'finalizing'>('uploading');
   const [activeFile, setActiveFile] = useState('');
@@ -164,6 +178,7 @@ export default function PdfExtractorPage() {
   const [diagnostics, setDiagnostics] = useState<PdfDiagnostic[]>([]);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
+  const [uploadGroupSize, setUploadGroupSize] = useState(PROCESSING_BATCH_SIZE);
   const importRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const busyRef = useRef(false);
@@ -171,11 +186,13 @@ export default function PdfExtractorPage() {
   const runStartedAtRef = useRef(0);
   const runTotalFilesRef = useRef(0);
   const runCompletedFilesRef = useRef(0);
+  const completedGroupCountRef = useRef(0);
   const runIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
   const activeBatchRef = useRef<File[]>([]);
   const activeBatchIdRef = useRef<string | null>(null);
+  const uploadGroupSizeRef = useRef(PROCESSING_BATCH_SIZE);
   const timedOutRef = useRef(false);
   const runOutcomeRef = useRef<Omit<RunSummary, 'total' | 'completed' | 'elapsedSeconds'>>({
     logged: 0,
@@ -329,17 +346,23 @@ export default function PdfExtractorPage() {
       runStartedAtRef.current = Date.now();
       runTotalFilesRef.current = queueRef.current.length;
       runCompletedFilesRef.current = 0;
+      completedGroupCountRef.current = 0;
       activeBatchIdRef.current = null;
+      uploadGroupSizeRef.current = PROCESSING_BATCH_SIZE;
+      setUploadGroupSize(PROCESSING_BATCH_SIZE);
       runOutcomeRef.current = { logged: 0, duplicate: 0, permit: 0, errors: 0 };
       setRunSummary(null);
       setRunTotalFiles(runTotalFilesRef.current);
       setRunCompletedFiles(0);
+      setCompletedGroupCount(0);
       setElapsedSeconds(0);
     }
     busyRef.current = true;
-    const pdfs = queueRef.current.slice(0, PROCESSING_BATCH_SIZE);
+    const pdfs = nextUploadGroup(queueRef.current, uploadGroupSizeRef.current);
     const batchId = activeBatchIdRef.current ?? crypto.randomUUID();
-    const batchNumber = Math.floor(runCompletedFilesRef.current / PROCESSING_BATCH_SIZE);
+    // Completed-file offsets stay unique and ordered even when a proxy rejection
+    // causes later upload groups to use a smaller adaptive size.
+    const batchNumber = runCompletedFilesRef.current;
     activeBatchIdRef.current = batchId;
     activeBatchRef.current = pdfs;
     setQueuedCount(Math.max(0, queueRef.current.length - pdfs.length));
@@ -364,6 +387,7 @@ export default function PdfExtractorPage() {
         : `Running a batch of ${pdfs.length} file${pdfs.length === 1 ? '' : 's'}.`
     );
     let batchCompleted = false;
+    let retrySmallerGroup = false;
     try {
       const response = await api.pdfExtractor.extractStream(pdfs, (completed, _total, file) => {
         setCompletedFiles(completed);
@@ -410,8 +434,10 @@ export default function PdfExtractorPage() {
       await refreshLogsIfVisible();
       queueRef.current.splice(0, pdfs.length);
       runCompletedFilesRef.current += out.length;
+      completedGroupCountRef.current += 1;
       activeBatchIdRef.current = null;
       setRunCompletedFiles(runCompletedFilesRef.current);
+      setCompletedGroupCount(completedGroupCountRef.current);
       batchCompleted = true;
     } catch (err) {
       if (cancelledRef.current) {
@@ -424,10 +450,20 @@ export default function PdfExtractorPage() {
         setNotice('Analysis was stopped. The current group remains queued and can be resumed safely.');
       } else {
         const status = (err as { status?: number } | null)?.status;
-        setError(status === 403
-          ? 'The hosting proxy rejected this upload group (403). The group remains queued and can be resumed safely.'
-          : err instanceof Error ? err.message : 'Failed to process files');
-        setNotice(`This group was paused safely. The ${pdfs.length} files remain queued; resume to continue without repeating completed files.`);
+        if (status === 403 && pdfs.length > 1) {
+          const smallerSize = Math.max(1, Math.floor(pdfs.length / 2));
+          uploadGroupSizeRef.current = smallerSize;
+          setUploadGroupSize(smallerSize);
+          activeBatchIdRef.current = null;
+          retrySmallerGroup = true;
+          setError('');
+          setNotice(`The hosting proxy rejected ${pdfs.length} files together. Retrying automatically in groups of ${smallerSize}.`);
+        } else {
+          setError(status === 403
+            ? `The hosting proxy rejected ${pdfs[0]?.name ?? 'this PDF'} even as a single-file upload (403). Try signing in again or use a different network.`
+            : err instanceof Error ? err.message : 'Failed to process files');
+          setNotice(`This group was paused safely. The ${pdfs.length} files remain queued; resume to continue without repeating completed files.`);
+        }
         void loadDiagnostics();
       }
     } finally {
@@ -441,7 +477,9 @@ export default function PdfExtractorPage() {
       setEstimatedSeconds(null);
       setQueuedCount(queueRef.current.length);
       activeBatchRef.current = [];
-      if (batchCompleted && queueRef.current.length > 0 && !cancelledRef.current) {
+      if (retrySmallerGroup && !cancelledRef.current) {
+        void processQueue();
+      } else if (batchCompleted && queueRef.current.length > 0 && !cancelledRef.current) {
         void processQueue();
       } else if (batchCompleted && !cancelledRef.current && runIdRef.current) {
         const completedRunId = runIdRef.current;
@@ -555,7 +593,11 @@ export default function PdfExtractorPage() {
     setRunCompletedFiles(0);
     runTotalFilesRef.current = 0;
     runCompletedFilesRef.current = 0;
+    completedGroupCountRef.current = 0;
     activeBatchIdRef.current = null;
+    uploadGroupSizeRef.current = PROCESSING_BATCH_SIZE;
+    setUploadGroupSize(PROCESSING_BATCH_SIZE);
+    setCompletedGroupCount(0);
     runOutcomeRef.current = { logged: 0, duplicate: 0, permit: 0, errors: 0 };
     setRunSummary(null);
   }
@@ -600,8 +642,9 @@ export default function PdfExtractorPage() {
 
   const overallCompleted = Math.min(runTotalFiles, runCompletedFiles + completedFiles);
   const overallPercent = runTotalFiles ? Math.round((overallCompleted / runTotalFiles) * 100) : 0;
-  const batchCount = Math.max(1, Math.ceil(runTotalFiles / PROCESSING_BATCH_SIZE));
-  const activeBatch = Math.min(batchCount, Math.floor(runCompletedFiles / PROCESSING_BATCH_SIZE) + 1);
+  const remainingBatchCount = Math.ceil(Math.max(0, runTotalFiles - runCompletedFiles) / Math.max(1, uploadGroupSize));
+  const activeBatch = completedGroupCount + 1;
+  const batchCount = Math.max(activeBatch, completedGroupCount + remainingBatchCount);
   const stageLabel = processingStage === 'uploading'
     ? 'Preparing protected group'
     : processingStage === 'finalizing'

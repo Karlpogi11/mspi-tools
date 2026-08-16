@@ -81,6 +81,9 @@ router.post('/extract-stream', (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
+    const writeEvent = (event: object) => {
+      if (!res.destroyed && !res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    };
     let streamFinished = false;
     res.once('close', () => {
       if (streamFinished) return;
@@ -93,7 +96,7 @@ router.post('/extract-stream', (req: Request, res: Response) => {
 
     // Keep long OCR requests alive through reverse proxies while workers are busy.
     const heartbeat = setInterval(() => {
-      if (!res.writableEnded) res.write(`${JSON.stringify({ type: 'heartbeat' })}\n`);
+      writeEvent({ type: 'heartbeat' });
     }, 15_000);
     heartbeat.unref();
 
@@ -102,9 +105,9 @@ router.post('/extract-stream', (req: Request, res: Response) => {
       const batchId = typeof req.body?.batchId === 'string' ? req.body.batchId : '';
       const batchNumber = Number(req.body?.batchNumber);
       if (!runId || !batchId || !Number.isInteger(batchNumber) || batchNumber < 0) {
-        res.write(`${JSON.stringify({ type: 'error', error: 'Missing resumable batch details. Please start the extraction again.' })}\n`);
+        writeEvent({ type: 'error', error: 'Missing resumable batch details. Please start the extraction again.' });
         streamFinished = true;
-        res.end();
+        if (!res.destroyed && !res.writableEnded) res.end();
         return;
       }
       const userId = req.user?.userId ?? 0;
@@ -115,14 +118,14 @@ router.post('/extract-stream', (req: Request, res: Response) => {
         userId,
         files,
         (file) => processPdfFileSafely(file.path, file.originalname, userId),
-        (completed, file) => res.write(`${JSON.stringify({ type: 'progress', completed, total: files.length, file })}\n`),
+        (completed, file) => writeEvent({ type: 'progress', completed, total: files.length, file }),
       );
       const resultsWithActions = addErrorActions(results, userId);
       recordResultDiagnostics(resultsWithActions, runId, batchId);
       const download = null;
-      res.write(`${JSON.stringify({ type: 'complete', results: resultsWithActions, download })}\n`);
+      writeEvent({ type: 'complete', results: resultsWithActions, download });
       streamFinished = true;
-      res.end();
+      if (!res.destroyed && !res.writableEnded) res.end();
     } catch (streamErr) {
       console.error('[pdf-extractor] stream extract error:', streamErr);
       recordPdfDiagnostic({
@@ -130,9 +133,9 @@ router.post('/extract-stream', (req: Request, res: Response) => {
         event: 'batch-processing-failed',
         message: (streamErr as Error)?.message || 'Failed to process files',
       });
-      res.write(`${JSON.stringify({ type: 'error', error: (streamErr as Error)?.message || 'Failed to process files' })}\n`);
+      writeEvent({ type: 'error', error: (streamErr as Error)?.message || 'Failed to process files' });
       streamFinished = true;
-      res.end();
+      if (!res.destroyed && !res.writableEnded) res.end();
     } finally {
       clearInterval(heartbeat);
     }

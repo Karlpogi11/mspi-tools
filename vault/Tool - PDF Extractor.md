@@ -14,7 +14,7 @@ Fully Node/TS — no Python, no system OCR dependencies:
 | Page rasterization | `backend/src/pdf-extractor/raster.ts` | `pdfjs-dist` render → `@napi-rs/canvas` PNG |
 | OCR (scans) | `backend/src/pdf-extractor/ocr.ts` | `tesseract.js` WASM worker pool (word boxes + confidence) |
 | Field parsing | `backend/src/pdf-extractor/parser.ts` | regex port of HAWB / SG ref / amount / date / qty extraction, month labels |
-| Stepped pipeline | `backend/src/pdf-extractor/pipeline.ts` | text layer → OCR 200 → 300 → 400 dpi, stops when complete |
+| Stepped pipeline | `backend/src/pdf-extractor/pipeline.ts` | text layer → OCR 220 → enhanced OCR 350 dpi, stops when complete |
 | Filing + uploads | `backend/src/pdf-extractor/runner.ts` | multer → `backend/data/pdf-extractor/{inbox,processed,errors,permits}` |
 | Log storage | `backend/src/pdf-extractor/store.ts` | drizzle inserts into `awb_log` (unique on invoice ref) |
 
@@ -39,7 +39,7 @@ Route: `/pdf-extractor` (registered in the `tools` table, roles PMS/CSO/ENGR/Adm
 - **Export Excel** button → `awb-log.xlsx` from the table on screen (Received Date column remains blank)
 - AWB Log table below shows the last 500 logged rows, with its own Copy / Export buttons
 
-Backend `POST /api/pdf-extractor/extract` (multipart `files[]`, max 20 × 60 MB) processes each file and returns `{ results: [{ file, status: ok|duplicate|error|permit, fields, dest }] }`. Auth: shared `authenticateToken` JWT cookie.
+Backend `POST /api/pdf-extractor/extract` (multipart `files[]`, max 50 × 60 MB) processes each file and returns `{ results: [{ file, status: ok|duplicate|error|permit, fields, dest }] }`. Auth: shared `authenticateToken` JWT cookie.
 
 ### 2. Watcher (local drop folder)
 
@@ -80,6 +80,8 @@ If the DB is unavailable the extractor still works — files are filed, inserts 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PDF_EXTRACTOR_DATA` | `backend/data/pdf-extractor` | runtime data root |
+| `PDF_PROCESS_CONCURRENCY` | `1` | PDFs processed concurrently per request; configurable from 1 to 8 |
+| `OCR_WORKER_COUNT` | `1` | Tesseract WASM workers shared across OCR jobs; configurable from 1 to 4 |
 | `TESSERACT_LANG` | `eng` | OCR language |
 | `TESSERACT_LANG_PATH` | tesseract.js CDN | override to vendor `*.traineddata.gz` offline |
 

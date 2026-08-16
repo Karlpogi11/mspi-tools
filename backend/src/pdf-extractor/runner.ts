@@ -11,6 +11,7 @@ import {
 } from './parser.js';
 import { insertAwbLog } from './store.js';
 import { recordPdfDiagnostic } from './diagnostics.js';
+export { mapLimit } from './concurrency.js';
 
 export type ProcessStatus = 'ok' | 'duplicate' | 'error' | 'permit';
 
@@ -29,8 +30,8 @@ export interface ProcessResult {
 }
 
 export const MAX_PDF_FILES_PER_REQUEST = 50;
-// Keep memory bounded on shared hosting. Higher values are opt-in through env.
-export const PDF_PROCESS_CONCURRENCY = Math.max(1, Math.min(2, Number(process.env.PDF_PROCESS_CONCURRENCY) || 1));
+// Default to one on shared hosting, while allowing larger servers to opt in.
+export const PDF_PROCESS_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PDF_PROCESS_CONCURRENCY) || 1));
 
 export const upload = multer({
   dest: INBOX,
@@ -191,22 +192,4 @@ export async function processPdfFileSafely(
       dest,
     };
   }
-}
-
-export async function mapLimit<T, R>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const idx = next++;
-      results[idx] = await fn(items[idx]);
-    }
-  }
-  const n = Math.max(1, Math.min(concurrency, items.length));
-  await Promise.all(Array.from({ length: n }, () => worker()));
-  return results;
 }
