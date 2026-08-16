@@ -1,62 +1,40 @@
-name: Deploy to tools.mspi.io
+name: Verify tools.mspi.io health
 
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "*/10 * * * *"
 
 jobs:
-  build-and-deploy:
+  verify-health:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Generate .env
+      - name: Wait for app and restart if down
+        env:
+          TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          USERNAME: ${{ secrets.HOSTINGER_USERNAME }}
+          DOMAIN: ${{ secrets.HOSTINGER_DOMAIN }}
+          URL: https://tools.mspi.io
         run: |
-          mkdir -p backend/dist
-          cat > backend/dist/.env << EOF
-          ALLOWED_EMAIL_DOMAINS=mspi.io,mobilecare.com,powermaccenter.com
-          COOKIE_DOMAIN=.mspi.io
-          NODE_ENV=production
-          FRONTEND_URL=https://tools.mspi.io
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-          EOF
-
-      - name: Archive repo for Hostinger
-        run: |
-          zip -r /tmp/deploy.zip . \
-            -x "node_modules/*" \
-            -x "backend/node_modules/*" \
-            -x "frontend/node_modules/*" \
-            -x ".git/*" \
-            -x ".git"
-
-      - name: Deploy to Hostinger
-        run: |
-          echo "=== Uploading archive to Hostinger ==="
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer ${{ secrets.HOSTINGER_API_TOKEN }}" \
-            -F "archive=@/tmp/deploy.zip" \
-            -F "app_type=other" \
-            -F "node_version=22" \
-            "https://developers.hostinger.com/api/hosting/v1/accounts/${{ secrets.HOSTINGER_ACCOUNT_ID }}/websites/${{ secrets.HOSTINGER_DOMAIN }}/nodejs/builds/from-archive"
-          echo ""
-          echo "=== Done ==="
-
-      - name: Verify site is healthy
-        run: |
-          for i in $(seq 1 12); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" https://tools.mspi.io/api/health)
-            echo "Attempt $i: HTTP $CODE"
-            if [ "$CODE" = "200" ]; then
-              echo "=== Site is healthy ==="
-              exit 0
-            fi
+          API="https://developers.hostinger.com/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs"
+          health() { curl -s -o /dev/null -w "%{http_code}" "$URL/api/health"; }
+          echo "=== Waiting for app to become healthy ==="
+          for i in $(seq 1 24); do
+            CODE=$(health)
+            echo "[$i] health: $CODE"
+            [ "$CODE" = "200" ] && echo "=== Healthy ===" && exit 0
             sleep 10
           done
-          echo "=== Site failed to become healthy ==="
+          echo "=== App unhealthy, restarting Node.js server ==="
+          curl -sS -w "\nrestart HTTP %{http_code}\n" \
+            -X POST -H "Authorization: Bearer $TOKEN" "$API/server/restart"
+          echo "=== Waiting after restart ==="
+          for i in $(seq 1 12); do
+            CODE=$(health)
+            echo "[$i] health after restart: $CODE"
+            [ "$CODE" = "200" ] && echo "=== Healthy after restart ===" && exit 0
+            sleep 10
+          done
+          echo "=== Site failed to recover ==="
           exit 1
