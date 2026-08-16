@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { ZipArchive } from 'archiver';
+import jwt from 'jsonwebtoken';
 import { DATA_DIR, DOWNLOADS } from './paths.js';
 import type { ProcessResult } from './runner.js';
 
@@ -9,6 +10,13 @@ interface DownloadArtifact {
   path: string;
   name: string;
   createdAt: number;
+  userId: number;
+  originalName?: string;
+}
+
+interface FileArtifact {
+  path: string;
+  name: string;
   originalName?: string;
 }
 
@@ -189,7 +197,7 @@ export async function processResumableBatch(
   }
 }
 
-export async function createDownloadArtifact(results: ProcessResult[]) {
+export async function createDownloadArtifact(results: ProcessResult[], userId: number) {
   cleanExpiredArtifacts();
   const downloadable = results.filter((result) => result.dest);
   if (downloadable.length === 0) return null;
@@ -198,7 +206,7 @@ export async function createDownloadArtifact(results: ProcessResult[]) {
   if (downloadable.length === 1) {
     const only = downloadable[0];
     const name = only.renamedFile || path.basename(only.dest!);
-    artifacts.set(token, { path: only.dest!, name, createdAt: Date.now() });
+    artifacts.set(token, { path: only.dest!, name, createdAt: Date.now(), userId });
     return { url: `/api/pdf-extractor/download/${token}`, name, count: 1 };
   }
 
@@ -217,14 +225,20 @@ export async function createDownloadArtifact(results: ProcessResult[]) {
     }
     void archive.finalize();
   });
-  artifacts.set(token, { path: zipPath, name: zipName, createdAt: Date.now() });
+  artifacts.set(token, { path: zipPath, name: zipName, createdAt: Date.now(), userId });
   return { url: `/api/pdf-extractor/download/${token}`, name: zipName, count: downloadable.length };
 }
 
-export function createFileArtifact(filePath: string, name: string, originalName?: string) {
-  cleanExpiredArtifacts();
-  const token = randomUUID();
-  artifacts.set(token, { path: filePath, name, originalName, createdAt: Date.now() });
+export function createFileArtifact(filePath: string, name: string, originalName: string | undefined, userId: number) {
+  const relativePath = path.relative(DATA_DIR, filePath);
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error('PDF file is outside the extractor storage');
+  }
+  const token = jwt.sign(
+    { type: 'pdf-file', userId, relativePath, name, originalName },
+    process.env.JWT_SECRET!,
+    { expiresIn: '24h' },
+  );
   return { url: `/api/pdf-extractor/file/${token}`, retryUrl: `/api/pdf-extractor/retry/${token}` };
 }
 
@@ -253,16 +267,36 @@ export async function finalizeProcessingRun(runId: string, userId: number) {
         .sort((a, b) => a.batchNumber - b.batchNumber)
         .flatMap((batch) => batch.results as ProcessResult[]);
       fs.rmSync(runDir, { recursive: true, force: true });
-      return createDownloadArtifact(results);
+      return createDownloadArtifact(results, userId);
     }
   }
   const run = processingRuns.get(runId);
   if (!run || run.userId !== userId) return null;
   processingRuns.delete(runId);
-  return createDownloadArtifact(run.results);
+  return createDownloadArtifact(run.results, userId);
 }
 
-export function getDownloadArtifact(token: string) {
+export function getDownloadArtifact(token: string, userId: number) {
   cleanExpiredArtifacts();
-  return artifacts.get(token) ?? null;
+  const artifact = artifacts.get(token);
+  return artifact?.userId === userId ? artifact : null;
+}
+
+export function getFileArtifact(token: string, userId: number): FileArtifact | null {
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET!);
+    if (typeof payload === 'string' || payload.type !== 'pdf-file' || payload.userId !== userId || typeof payload.relativePath !== 'string') {
+      return null;
+    }
+    const filePath = path.resolve(DATA_DIR, payload.relativePath);
+    const dataRoot = `${path.resolve(DATA_DIR)}${path.sep}`;
+    if (!filePath.startsWith(dataRoot) || !fs.existsSync(filePath)) return null;
+    return {
+      path: filePath,
+      name: typeof payload.name === 'string' ? path.basename(payload.name) : path.basename(filePath),
+      originalName: typeof payload.originalName === 'string' ? path.basename(payload.originalName) : undefined,
+    };
+  } catch {
+    return null;
+  }
 }

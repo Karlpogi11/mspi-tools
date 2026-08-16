@@ -3,17 +3,17 @@ import path from 'path';
 import { authenticateToken, requireAdmin } from '../auth.js';
 import { listAwbLog } from './store.js';
 import { mapLimit, MAX_PDF_FILES_PER_REQUEST, PDF_PROCESS_CONCURRENCY, processPdfFileSafely, upload, type ProcessResult } from './runner.js';
-import { appendProcessingRun, createDownloadArtifact, createFileArtifact, finalizeProcessingRun, getDownloadArtifact, processResumableBatch } from './downloads.js';
+import { appendProcessingRun, createDownloadArtifact, createFileArtifact, finalizeProcessingRun, getDownloadArtifact, getFileArtifact, processResumableBatch } from './downloads.js';
 import { clearPdfDiagnostics, listPdfDiagnostics, recordPdfDiagnostic } from './diagnostics.js';
 
 const router = Router();
 
 router.use(authenticateToken);
 
-function addErrorActions(results: ProcessResult[]) {
+function addErrorActions(results: ProcessResult[], userId: number) {
   return results.map((result) => {
     if (result.status !== 'error' || !result.dest) return result;
-    const action = createFileArtifact(result.dest, path.basename(result.dest), result.file);
+    const action = createFileArtifact(result.dest, path.basename(result.dest), result.file, userId);
     return { ...result, viewUrl: action.url, retryUrl: action.retryUrl };
   });
 }
@@ -49,11 +49,12 @@ router.post('/extract', (req: Request, res: Response) => {
         PDF_PROCESS_CONCURRENCY,
         (f) => processPdfFileSafely(f.path, f.originalname, req.user?.userId ?? null)
       );
-      const resultsWithActions = addErrorActions(results);
+      const userId = req.user?.userId ?? 0;
+      const resultsWithActions = addErrorActions(results, userId);
       const runId = typeof req.body?.runId === 'string' ? req.body.runId : '';
       recordResultDiagnostics(resultsWithActions, runId || undefined);
       if (runId) appendProcessingRun(runId, req.user?.userId ?? 0, resultsWithActions);
-      const download = runId ? null : await createDownloadArtifact(resultsWithActions);
+      const download = runId ? null : await createDownloadArtifact(resultsWithActions, userId);
       res.json({ results: resultsWithActions, download });
     } catch (uploadErr) {
       console.error('[pdf-extractor] extract error:', uploadErr);
@@ -116,7 +117,7 @@ router.post('/extract-stream', (req: Request, res: Response) => {
         (file) => processPdfFileSafely(file.path, file.originalname, userId),
         (completed, file) => res.write(`${JSON.stringify({ type: 'progress', completed, total: files.length, file })}\n`),
       );
-      const resultsWithActions = addErrorActions(results);
+      const resultsWithActions = addErrorActions(results, userId);
       recordResultDiagnostics(resultsWithActions, runId, batchId);
       const download = null;
       res.write(`${JSON.stringify({ type: 'complete', results: resultsWithActions, download })}\n`);
@@ -153,7 +154,7 @@ router.post('/finalize-run', async (req: Request, res: Response) => {
 });
 
 router.get('/download/:token', (req: Request, res: Response) => {
-  const artifact = getDownloadArtifact(req.params.token);
+  const artifact = getDownloadArtifact(req.params.token, req.user?.userId ?? 0);
   if (!artifact) {
     res.status(404).json({ error: 'Download expired or not found' });
     return;
@@ -162,7 +163,7 @@ router.get('/download/:token', (req: Request, res: Response) => {
 });
 
 router.get('/file/:token', (req: Request, res: Response) => {
-  const artifact = getDownloadArtifact(req.params.token);
+  const artifact = getFileArtifact(req.params.token, req.user?.userId ?? 0);
   if (!artifact) {
     res.status(404).json({ error: 'File expired or not found' });
     return;
@@ -173,15 +174,16 @@ router.get('/file/:token', (req: Request, res: Response) => {
 });
 
 router.post('/retry/:token', async (req: Request, res: Response) => {
-  const artifact = getDownloadArtifact(req.params.token);
+  const userId = req.user?.userId ?? 0;
+  const artifact = getFileArtifact(req.params.token, userId);
   if (!artifact || !artifact.originalName) {
     res.status(404).json({ error: 'Retry file expired or not found' });
     return;
   }
   try {
     const result = await processPdfFileSafely(artifact.path, artifact.originalName, req.user?.userId ?? null);
-    const results = addErrorActions([result]);
-    const download = await createDownloadArtifact(results);
+    const results = addErrorActions([result], userId);
+    const download = await createDownloadArtifact(results, userId);
     res.json({ result: results[0], download });
   } catch (err) {
     console.error('[pdf-extractor] retry error:', err);
