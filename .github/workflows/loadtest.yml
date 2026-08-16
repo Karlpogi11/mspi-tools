@@ -30,9 +30,12 @@ jobs:
               const browser = await chromium.launch();
               const page = await browser.newPage({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" });
               const t0 = Date.now();
-              const resp = await page.goto("https://tools.mspi.io/", { waitUntil: "networkidle", timeout: 60000 });
+              const resp = await page.goto("https://tools.mspi.io/", { waitUntil: "domcontentloaded", timeout: 45000 });
+              await page.waitForTimeout(8000);
               console.log("FINAL URL:", page.url());
-              console.log("TITLE:", await page.title());
+              const title = await page.title();
+              console.log("TITLE:", title);
+              console.log("CHALLENGED:", title.includes("Checking your browser"));
               console.log("STATUS:", resp ? resp.status() : "n/a");
               console.log("LOAD MS:", Date.now() - t0);
               const api = await page.evaluate(async () => {
