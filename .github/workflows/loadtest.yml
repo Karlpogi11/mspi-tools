@@ -1,0 +1,18 @@
+name: Load test tools.mspi.io
+
+on:
+  workflow_dispatch:
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run load tests
+        run: |
+          for URL in "https://tools.mspi.io/" "https://tools.mspi.io/api/health"; do
+            echo "===== $URL (25 concurrent, 30s) ====="
+            npx --yes autocannon -c 25 -d 30 --renderStatusCodes "$URL" || true
+          done
+          ASSET=$(curl -s https://tools.mspi.io/ | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | sort -u | head -1)
+          echo "===== https://tools.mspi.io/$ASSET (25 concurrent, 30s) ====="
+          npx --yes autocannon -c 25 -d 30 --renderStatusCodes "https://tools.mspi.io/$ASSET" || true
