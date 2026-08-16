@@ -14,15 +14,6 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install and build application
-        run: |
-          npm ci --ignore-scripts
-          npm --prefix backend ci --include=dev --ignore-scripts
-          npm --prefix backend run build
-          npm --prefix frontend ci --include=dev --ignore-scripts
-          npm --prefix frontend run build
-          node -e "require('fs').cpSync('frontend/dist', 'backend/dist/public', { recursive: true })"
-
       - name: Generate .env
         run: |
           mkdir -p backend/dist
@@ -55,3 +46,17 @@ jobs:
             "https://developers.hostinger.com/api/hosting/v1/accounts/${{ secrets.HOSTINGER_ACCOUNT_ID }}/websites/${{ secrets.HOSTINGER_DOMAIN }}/nodejs/builds/from-archive"
           echo ""
           echo "=== Done ==="
+
+      - name: Verify site is healthy
+        run: |
+          for i in $(seq 1 12); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" https://tools.mspi.io/api/health)
+            echo "Attempt $i: HTTP $CODE"
+            if [ "$CODE" = "200" ]; then
+              echo "=== Site is healthy ==="
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "=== Site failed to become healthy ==="
+          exit 1
