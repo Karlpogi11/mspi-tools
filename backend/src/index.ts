@@ -29,6 +29,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 
+app.set('trust proxy', 1);
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
+
 app.use(compression());
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -56,6 +60,7 @@ for (const tool of tools) {
 app.use('/api/pcount/admin', pcountAdminRouter);
 
 app.get('/api/health', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=30');
   res.json({ status: 'ok', app: 'gateway' });
 });
 
