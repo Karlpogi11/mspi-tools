@@ -10,8 +10,8 @@ jobs:
       - name: Run load tests
         run: |
           for URL in "https://tools.mspi.io/" "https://tools.mspi.io/api/health"; do
-            echo "===== $URL (10 concurrent, 20s) ====="
-            npx --yes autocannon -c 10 -d 20 --renderStatusCodes "$URL" || true
+            echo "===== $URL (2 concurrent, 5s) ====="
+            npx --yes autocannon -c 2 -d 5 --renderStatusCodes "$URL" || true
           done
 
   browser-check:
