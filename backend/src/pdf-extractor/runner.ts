@@ -157,6 +157,31 @@ export async function processPdfFile(
   };
 }
 
+/** Keep one failed file from aborting the rest of a submitted batch. */
+export async function processPdfFileSafely(
+  filePath: string,
+  originalName: string,
+  userId: number | null
+): Promise<ProcessResult> {
+  try {
+    return await processPdfFile(filePath, originalName, userId);
+  } catch (err) {
+    console.error(`[pdf-extractor] unexpected failure for ${originalName}:`, err);
+    const fileName = safeFileName(originalName || path.basename(filePath));
+    let dest: string | undefined;
+    if (fs.existsSync(filePath)) {
+      dest = uniqueDest(ERRORS, `${path.parse(fileName).name}_PROCESSING_ERROR.pdf`);
+      fs.renameSync(filePath, dest);
+    }
+    return {
+      file: fileName,
+      status: 'error',
+      reasons: ['PROCESSING_ERROR'],
+      dest,
+    };
+  }
+}
+
 export async function mapLimit<T, R>(
   items: T[],
   concurrency: number,

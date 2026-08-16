@@ -148,6 +148,7 @@ export default function PdfExtractorPage() {
   const runIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
+  const activeBatchRef = useRef<File[]>([]);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -259,8 +260,9 @@ export default function PdfExtractorPage() {
       cancelledRef.current = false;
     }
     busyRef.current = true;
-    const pdfs = queueRef.current.splice(0, MAX_FILES_PER_RUN);
-    setQueuedCount(queueRef.current.length);
+    const pdfs = queueRef.current.slice(0, MAX_FILES_PER_RUN);
+    activeBatchRef.current = pdfs;
+    setQueuedCount(Math.max(0, queueRef.current.length - pdfs.length));
     setProcessingFiles(pdfs.map((file) => file.name));
     setCompletedFiles(0);
     setActiveFile(pdfs[0]?.name ?? '');
@@ -275,6 +277,7 @@ export default function PdfExtractorPage() {
         ? `Running a batch of ${pdfs.length} files. ${queueRef.current.length} ${queueRef.current.length === 1 ? 'file remains' : 'files remain'} and will start automatically.`
         : `Running a batch of ${pdfs.length} file${pdfs.length === 1 ? '' : 's'}.`
     );
+    let batchCompleted = false;
     try {
       const response = await api.pdfExtractor.extractStream(pdfs, (completed, _total, file) => {
         setCompletedFiles(completed);
@@ -284,6 +287,9 @@ export default function PdfExtractorPage() {
         setEstimatedSeconds(remaining === 0 ? 0 : Math.ceil((elapsedSeconds / completed) * remaining));
       }, abortController.signal, runIdRef.current ?? undefined);
       const out = response.results;
+      if (out.length !== pdfs.length) {
+        throw new Error(`Batch incomplete: received ${out.length} of ${pdfs.length} results. The batch remains queued.`);
+      }
       setResults(
         (current) => [...current, ...out.map((r, index) => ({
           id: `${Date.now()}-${index}-${r.file}`,
@@ -308,11 +314,14 @@ export default function PdfExtractorPage() {
       if (failed > 0) parts.push(`${failed} failed`);
       if (parts.length > 0) setNotice(`Processed ${out.length} file${out.length === 1 ? '' : 's'} — ${parts.join(', ')}.`);
       await refreshLogsIfVisible();
+      queueRef.current.splice(0, pdfs.length);
+      batchCompleted = true;
     } catch (err) {
       if ((err instanceof DOMException && err.name === 'AbortError') || cancelledRef.current) {
         setNotice('Analysis cancelled. The remaining files were removed from the queue.');
       } else {
         setError(err instanceof Error ? err.message : 'Failed to process files');
+        setNotice(`This batch was not completed. The ${pdfs.length} files remain queued; retry to continue.`);
       }
     } finally {
       abortControllerRef.current = null;
@@ -323,9 +332,10 @@ export default function PdfExtractorPage() {
       setActiveFile('');
       setEstimatedSeconds(null);
       setQueuedCount(queueRef.current.length);
-      if (queueRef.current.length > 0 && !cancelledRef.current) {
+      activeBatchRef.current = [];
+      if (batchCompleted && queueRef.current.length > 0 && !cancelledRef.current) {
         void processQueue();
-      } else if (!cancelledRef.current && runIdRef.current) {
+      } else if (batchCompleted && !cancelledRef.current && runIdRef.current) {
         const completedRunId = runIdRef.current;
         runIdRef.current = null;
         setNotice('All batches complete. Preparing one combined ZIP...');
@@ -336,7 +346,7 @@ export default function PdfExtractorPage() {
           setError(err instanceof Error ? err.message : 'Failed to prepare combined download');
         }
       } else {
-        runIdRef.current = null;
+        if (cancelledRef.current) runIdRef.current = null;
       }
     }
   }
@@ -407,6 +417,7 @@ export default function PdfExtractorPage() {
   }
 
   function clearSelection() {
+    if (busyRef.current) return;
     queueRef.current = [];
     setQueuedCount(0);
     setNotice('');

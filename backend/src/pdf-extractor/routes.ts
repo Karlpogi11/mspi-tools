@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import path from 'path';
 import { authenticateToken } from '../auth.js';
 import { listAwbLog } from './store.js';
-import { mapLimit, processPdfFile, upload, type ProcessResult } from './runner.js';
+import { mapLimit, processPdfFileSafely, upload, type ProcessResult } from './runner.js';
 import { appendProcessingRun, createDownloadArtifact, createFileArtifact, finalizeProcessingRun, getDownloadArtifact } from './downloads.js';
 
 const router = Router();
@@ -32,7 +32,7 @@ router.post('/extract', (req: Request, res: Response) => {
       const results: ProcessResult[] = await mapLimit(
         files,
         2,
-        (f) => processPdfFile(f.path, f.originalname, req.user?.userId ?? null)
+        (f) => processPdfFileSafely(f.path, f.originalname, req.user?.userId ?? null)
       );
       const resultsWithActions = addErrorActions(results);
       const runId = typeof req.body?.runId === 'string' ? req.body.runId : '';
@@ -72,7 +72,7 @@ router.post('/extract-stream', (req: Request, res: Response) => {
         while (next < files.length) {
           const index = next++;
           const file = files[index];
-          results[index] = await processPdfFile(file.path, file.originalname, req.user?.userId ?? null);
+          results[index] = await processPdfFileSafely(file.path, file.originalname, req.user?.userId ?? null);
           completed += 1;
           res.write(`${JSON.stringify({ type: 'progress', completed, total: files.length, file: file.originalname })}\n`);
         }
@@ -133,7 +133,7 @@ router.post('/retry/:token', async (req: Request, res: Response) => {
     return;
   }
   try {
-    const result = await processPdfFile(artifact.path, artifact.originalName, req.user?.userId ?? null);
+    const result = await processPdfFileSafely(artifact.path, artifact.originalName, req.user?.userId ?? null);
     const results = addErrorActions([result]);
     const download = await createDownloadArtifact(results);
     res.json({ result: results[0], download });

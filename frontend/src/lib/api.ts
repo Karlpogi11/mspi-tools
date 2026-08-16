@@ -482,12 +482,24 @@ export const api = {
       return { results: data.results ?? [], download: data.download ?? null };
     },
     extractStream: async (files: File[], onProgress: (completed: number, total: number, file: string) => void, signal?: AbortSignal, runId?: string): Promise<ExtractBatch> => {
-      const form = new FormData();
-      for (const file of files) form.append('files', file);
-      if (runId) form.append('runId', runId);
-      const res = await fetch(`${BASE}/pdf-extractor/extract-stream`, {
-        method: 'POST', credentials: 'include', body: form, signal,
-      });
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const form = new FormData();
+        for (const file of files) form.append('files', file);
+        if (runId) form.append('runId', runId);
+        try {
+          res = await fetch(`${BASE}/pdf-extractor/extract-stream`, {
+            method: 'POST', credentials: 'include', body: form, signal,
+          });
+        } catch (err) {
+          if (signal?.aborted || attempt === 2) throw err;
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+          continue;
+        }
+        if (![502, 503, 504].includes(res.status) || attempt === 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
+      if (!res) throw new Error('Failed to connect to the PDF extractor');
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || 'Failed to process files');
