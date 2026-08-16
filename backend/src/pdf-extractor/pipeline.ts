@@ -24,9 +24,10 @@ export async function extractFieldsFromBuffer(pdfBuf: Buffer): Promise<ExtractRe
         return { text: layer.fullText, region: layer.regionText, words: layer.words, pageCount: layer.pageCount };
       },
     },
-    { label: 'OCR 200dpi', run: async () => ocrPdf(pdfBuf, 200) },
-    { label: 'OCR 300dpi', run: async () => ocrPdf(pdfBuf, 300) },
-    { label: 'enhanced OCR 400dpi', deep: true, run: async () => ocrPdf(pdfBuf, 400, true) },
+    // Full-document OCR is expensive. One fast pass handles normal scans;
+    // one enhanced recovery pass preserves accuracy for difficult documents.
+    { label: 'OCR 220dpi', run: async () => ocrPdf(pdfBuf, 220) },
+    { label: 'enhanced OCR 350dpi', deep: true, run: async () => ocrPdf(pdfBuf, 350, true) },
   ];
 
   const fields: Partial<ParsedFields> = {};

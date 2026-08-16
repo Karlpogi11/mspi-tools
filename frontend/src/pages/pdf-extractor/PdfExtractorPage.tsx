@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import * as XLSX from 'xlsx';
-import { api, type AwbLogRow, type ExtractDownload, type ExtractResult, type ExtractStatus } from '../../lib/api';
+import { api, type AwbLogRow, type ExtractDownload, type ExtractResult, type ExtractStatus, type PdfDiagnostic } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import ToolHelp from '../../components/ToolHelp';
 
 const LOG_COLUMNS = ['HAWB', 'InvoiceReference', 'InvoiceTotalAmount', 'DeliveryDate', 'TotalQty', 'ReceivedDate', 'OriginalFilename', 'DateLogged'];
@@ -12,6 +13,7 @@ const primaryBtnCls =
 const MAX_FILES_PER_RUN = 50;
 const PROCESSING_BATCH_SIZE = 10;
 const MAX_FILE_SIZE_BYTES = 60 * 1024 * 1024;
+const BATCH_REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
 
 const iconUpload = (
   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -126,6 +128,7 @@ interface ResultRow {
 }
 
 export default function PdfExtractorPage() {
+  const { user } = useAuth();
   const [results, setResults] = useState<ResultRow[]>([]);
   const [log, setLog] = useState<AwbLogRow[]>([]);
   const [showLogs, setShowLogs] = useState(false);
@@ -145,6 +148,9 @@ export default function PdfExtractorPage() {
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
   const [downloads, setDownloads] = useState<ExtractDownload[]>([]);
   const [resultsCopied, setResultsCopied] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<PdfDiagnostic[]>([]);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const busyRef = useRef(false);
@@ -157,6 +163,7 @@ export default function PdfExtractorPage() {
   const cancelledRef = useRef(false);
   const activeBatchRef = useRef<File[]>([]);
   const activeBatchIdRef = useRef<string | null>(null);
+  const timedOutRef = useRef(false);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -204,6 +211,28 @@ export default function PdfExtractorPage() {
       setLog(await api.pdfExtractor.log());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh AWB history');
+    }
+  }
+
+  async function loadDiagnostics() {
+    if (user?.roleName !== 'Admin') return;
+    setDiagnosticsLoading(true);
+    try {
+      setDiagnostics(await api.pdfExtractor.diagnostics());
+      setShowDiagnostics(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load temporary diagnostics');
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  }
+
+  async function clearDiagnostics() {
+    try {
+      await api.pdfExtractor.clearDiagnostics();
+      setDiagnostics([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear temporary diagnostics');
     }
   }
 
@@ -302,6 +331,11 @@ export default function PdfExtractorPage() {
     setBusy(true);
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    timedOutRef.current = false;
+    const batchTimeout = window.setTimeout(() => {
+      timedOutRef.current = true;
+      abortController.abort();
+    }, BATCH_REQUEST_TIMEOUT_MS);
     const remainingFiles = queueRef.current.length - pdfs.length;
     setNotice(
       remainingFiles > 0
@@ -353,13 +387,21 @@ export default function PdfExtractorPage() {
       setRunCompletedFiles(runCompletedFilesRef.current);
       batchCompleted = true;
     } catch (err) {
-      if ((err instanceof DOMException && err.name === 'AbortError') || cancelledRef.current) {
+      if (cancelledRef.current) {
         setNotice('Analysis cancelled. The remaining files were removed from the queue.');
+      } else if (timedOutRef.current) {
+        setError('This group took longer than 6 minutes. It was paused safely; resume to continue from its saved checkpoint.');
+        setNotice(`This group timed out safely. The ${pdfs.length} files remain queued and completed files will not repeat.`);
+        void loadDiagnostics();
+      } else if (err instanceof DOMException && err.name === 'AbortError') {
+        setNotice('Analysis was stopped. The current group remains queued and can be resumed safely.');
       } else {
         setError(err instanceof Error ? err.message : 'Failed to process files');
         setNotice(`This group was paused safely. The ${pdfs.length} files remain queued; resume to continue without repeating completed files.`);
+        void loadDiagnostics();
       }
     } finally {
+      window.clearTimeout(batchTimeout);
       abortControllerRef.current = null;
       busyRef.current = false;
       setBusy(false);
@@ -546,6 +588,15 @@ export default function PdfExtractorPage() {
             ]}
             note="Keep this page open while processing. Refreshing resets the current browser session."
           />
+          {user?.roleName === 'Admin' && (
+            <button
+              onClick={() => showDiagnostics ? setShowDiagnostics(false) : void loadDiagnostics()}
+              disabled={diagnosticsLoading}
+              className={secondaryBtnCls}
+            >
+              {showDiagnostics ? 'Close error log' : diagnosticsLoading ? 'Loading log…' : 'Temporary error log'}
+            </button>
+          )}
           {(results.length > 0 || downloads.length > 0) && (
             <button onClick={clearCurrentResults} disabled={busy} className={secondaryBtnCls}>
               Reset current batch
@@ -565,6 +616,31 @@ export default function PdfExtractorPage() {
           <span>{notice}</span>
           <button onClick={() => setNotice('')} className="text-[#047857] hover:opacity-70 cursor-pointer text-[15px] leading-none">×</button>
         </div>
+      )}
+
+      {user?.roleName === 'Admin' && showDiagnostics && (
+        <section className="mb-4 overflow-hidden rounded-lg border border-[#3f3f46] bg-[#18181b] text-[#e4e4e7]" aria-label="Temporary PDF extractor diagnostics">
+          <div className="flex items-center justify-between gap-3 border-b border-[#3f3f46] px-3 py-2">
+            <div>
+              <p className="font-mono text-[11px] font-medium">PDF Extractor · temporary diagnostics</p>
+              <p className="mt-0.5 text-[10px] text-[#a1a1aa]">In-memory server events only. Cleared on restart; document text is never shown.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => void loadDiagnostics()} disabled={diagnosticsLoading} className="font-mono text-[10px] text-[#d4d4d8] hover:text-white disabled:opacity-40">Refresh</button>
+              <button onClick={() => void clearDiagnostics()} className="font-mono text-[10px] text-[#fca5a5] hover:text-[#fecaca]">Clear</button>
+            </div>
+          </div>
+          <div className="max-h-64 overflow-auto px-3 py-2 font-mono text-[11px] leading-5">
+            {diagnostics.length === 0 ? (
+              <p className="text-[#a1a1aa]">No temporary errors recorded.</p>
+            ) : diagnostics.map((entry) => (
+              <p key={entry.id} className={entry.level === 'error' ? 'text-[#fca5a5]' : entry.level === 'warn' ? 'text-[#fde68a]' : 'text-[#d4d4d8]'}>
+                <span className="text-[#71717a]">[{new Date(entry.timestamp).toLocaleTimeString()}]</span> {entry.level.toUpperCase()} {entry.event}
+                {entry.file ? ` · ${entry.file}` : ''} — {entry.message}
+              </p>
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="w-full max-w-5xl mx-auto bg-white rounded-xl border border-[#d2d2d7] p-6 mb-6">

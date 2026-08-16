@@ -10,6 +10,7 @@ import {
   type ParsedFields,
 } from './parser.js';
 import { insertAwbLog } from './store.js';
+import { recordPdfDiagnostic } from './diagnostics.js';
 
 export type ProcessStatus = 'ok' | 'duplicate' | 'error' | 'permit';
 
@@ -172,6 +173,12 @@ export async function processPdfFileSafely(
   } catch (err) {
     console.error(`[pdf-extractor] unexpected failure for ${originalName}:`, err);
     const fileName = safeFileName(originalName || path.basename(filePath));
+    recordPdfDiagnostic({
+      level: 'error',
+      event: 'file-processing-error',
+      message: (err as Error)?.message || 'Unexpected processing error',
+      file: fileName,
+    });
     let dest: string | undefined;
     if (fs.existsSync(filePath)) {
       dest = uniqueDest(ERRORS, `${path.parse(fileName).name}_PROCESSING_ERROR.pdf`);

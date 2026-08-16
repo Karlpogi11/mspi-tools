@@ -225,6 +225,17 @@ export interface ExtractDownload {
   count: number;
 }
 
+export interface PdfDiagnostic {
+  id: number;
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  event: string;
+  message: string;
+  file?: string;
+  runId?: string;
+  batchId?: string;
+}
+
 export interface ExtractBatch {
   results: ExtractResult[];
   download: ExtractDownload | null;
@@ -568,6 +579,14 @@ export const api = {
     },
     log: () =>
       request<AwbLogRow[]>('/pdf-extractor/log'),
+    diagnostics: () =>
+      request<PdfDiagnostic[]>('/pdf-extractor/diagnostics'),
+    clearDiagnostics: async () => {
+      const res = await fetch(`${BASE}/pdf-extractor/diagnostics`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to clear temporary diagnostics');
+    },
   },
 };
 
