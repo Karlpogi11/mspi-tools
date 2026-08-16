@@ -5,7 +5,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
 
 jobs:
   verify-health:
@@ -21,7 +21,7 @@ jobs:
           API="https://developers.hostinger.com/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs"
           health() { curl -s -o /dev/null -w "%{http_code}" "$URL/api/health"; }
           echo "=== Waiting for app to become healthy ==="
-          for i in $(seq 1 24); do
+          for i in $(seq 1 3); do
             CODE=$(health)
             echo "[$i] health: $CODE"
             [ "$CODE" = "200" ] && echo "=== Healthy ===" && exit 0
@@ -31,7 +31,7 @@ jobs:
           curl -sS -w "\nrestart HTTP %{http_code}\n" \
             -X POST -H "Authorization: Bearer $TOKEN" "$API/server/restart"
           echo "=== Waiting after restart ==="
-          for i in $(seq 1 12); do
+          for i in $(seq 1 18); do
             CODE=$(health)
             echo "[$i] health after restart: $CODE"
             [ "$CODE" = "200" ] && echo "=== Healthy after restart ===" && exit 0
