@@ -481,12 +481,22 @@ export const api = {
       }
       return { results: data.results ?? [], download: data.download ?? null };
     },
-    extractStream: async (files: File[], onProgress: (completed: number, total: number, file: string) => void, signal?: AbortSignal, runId?: string): Promise<ExtractBatch> => {
-      let res: Response | null = null;
+    extractStream: async (
+      files: File[],
+      onProgress: (completed: number, total: number, file: string) => void,
+      signal?: AbortSignal,
+      runId?: string,
+      batchId?: string,
+      batchNumber?: number,
+    ): Promise<ExtractBatch> => {
+      let lastError: unknown = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         const form = new FormData();
         for (const file of files) form.append('files', file);
         if (runId) form.append('runId', runId);
+        if (batchId) form.append('batchId', batchId);
+        if (batchNumber !== undefined) form.append('batchNumber', String(batchNumber));
+        let res: Response;
         try {
           res = await fetch(`${BASE}/pdf-extractor/extract-stream`, {
             method: 'POST', credentials: 'include', body: form, signal,
@@ -496,34 +506,46 @@ export const api = {
           await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
           continue;
         }
-        if (![502, 503, 504].includes(res.status) || attempt === 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
-      }
-      if (!res) throw new Error('Failed to connect to the PDF extractor');
-      if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || 'Failed to process files');
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let completedBatch: ExtractBatch | null = null;
-      while (true) {
-        const { done, value } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = JSON.parse(line);
-          if (event.type === 'progress') onProgress(event.completed, event.total, event.file);
-          if (event.type === 'error') throw new Error(event.error || 'Failed to process files');
-          if (event.type === 'complete') completedBatch = { results: event.results ?? [], download: event.download ?? null };
+        if (!res.ok || !res.body) {
+          const data = await res.json().catch(() => null);
+          const error = new Error(data?.error || 'Failed to process files');
+          if (![502, 503, 504].includes(res.status) || attempt === 2) throw error;
+          lastError = error;
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+          continue;
         }
-        if (done) break;
+        try {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let completedBatch: ExtractBatch | null = null;
+          while (true) {
+            const { done, value } = await reader.read();
+            buffer += decoder.decode(value, { stream: !done });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              const event = JSON.parse(line);
+              if (event.type === 'progress') onProgress(event.completed, event.total, event.file);
+              if (event.type === 'error') {
+                const error = new Error(event.error || 'Failed to process files') as Error & { retryable?: boolean };
+                error.retryable = false;
+                throw error;
+              }
+              if (event.type === 'complete') completedBatch = { results: event.results ?? [], download: event.download ?? null };
+            }
+            if (done) break;
+          }
+          if (!completedBatch) throw new Error('Processing connection ended before results were ready');
+          return completedBatch;
+        } catch (err) {
+          if (signal?.aborted || (err as { retryable?: boolean }).retryable === false || attempt === 2) throw err;
+          lastError = err;
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        }
       }
-      if (!completedBatch) throw new Error('Processing ended before results were ready');
-      return completedBatch;
+      throw lastError instanceof Error ? lastError : new Error('Failed to connect to the PDF extractor');
     },
     finalizeRun: async (runId: string): Promise<ExtractDownload | null> => {
       const res = await fetch(`${BASE}/pdf-extractor/finalize-run`, {

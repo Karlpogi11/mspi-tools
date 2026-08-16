@@ -156,6 +156,7 @@ export default function PdfExtractorPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
   const activeBatchRef = useRef<File[]>([]);
+  const activeBatchIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -280,12 +281,16 @@ export default function PdfExtractorPage() {
       runStartedAtRef.current = Date.now();
       runTotalFilesRef.current = queueRef.current.length;
       runCompletedFilesRef.current = 0;
+      activeBatchIdRef.current = null;
       setRunTotalFiles(runTotalFilesRef.current);
       setRunCompletedFiles(0);
       setElapsedSeconds(0);
     }
     busyRef.current = true;
     const pdfs = queueRef.current.slice(0, PROCESSING_BATCH_SIZE);
+    const batchId = activeBatchIdRef.current ?? crypto.randomUUID();
+    const batchNumber = Math.floor(runCompletedFilesRef.current / PROCESSING_BATCH_SIZE);
+    activeBatchIdRef.current = batchId;
     activeBatchRef.current = pdfs;
     setQueuedCount(Math.max(0, queueRef.current.length - pdfs.length));
     setProcessingFiles(pdfs.map((file) => file.name));
@@ -313,7 +318,7 @@ export default function PdfExtractorPage() {
         const remaining = Math.max(0, runTotalFilesRef.current - overallCompleted);
         const elapsed = (Date.now() - runStartedAtRef.current) / 1000;
         setEstimatedSeconds(overallCompleted === 0 ? null : Math.ceil((elapsed / overallCompleted) * remaining));
-      }, abortController.signal, runIdRef.current ?? undefined);
+      }, abortController.signal, runIdRef.current ?? undefined, batchId, batchNumber);
       const out = response.results;
       if (out.length !== pdfs.length) {
         throw new Error(`Batch incomplete: received ${out.length} of ${pdfs.length} results. The batch remains queued.`);
@@ -344,6 +349,7 @@ export default function PdfExtractorPage() {
       await refreshLogsIfVisible();
       queueRef.current.splice(0, pdfs.length);
       runCompletedFilesRef.current += out.length;
+      activeBatchIdRef.current = null;
       setRunCompletedFiles(runCompletedFilesRef.current);
       batchCompleted = true;
     } catch (err) {
@@ -351,7 +357,7 @@ export default function PdfExtractorPage() {
         setNotice('Analysis cancelled. The remaining files were removed from the queue.');
       } else {
         setError(err instanceof Error ? err.message : 'Failed to process files');
-        setNotice(`This batch was not completed. The ${pdfs.length} files remain queued; retry to continue.`);
+        setNotice(`This group was paused safely. The ${pdfs.length} files remain queued; resume to continue without repeating completed files.`);
       }
     } finally {
       abortControllerRef.current = null;
@@ -378,7 +384,10 @@ export default function PdfExtractorPage() {
         }
         setProcessingStage('uploading');
       } else {
-        if (cancelledRef.current) runIdRef.current = null;
+        if (cancelledRef.current) {
+          runIdRef.current = null;
+          activeBatchIdRef.current = null;
+        }
         setProcessingStage('uploading');
       }
     }
@@ -388,6 +397,7 @@ export default function PdfExtractorPage() {
     if (!busyRef.current) return;
     if (!window.confirm('Cancel analysis? The current file will stop when possible, and remaining files will be removed from the queue.')) return;
     cancelledRef.current = true;
+    activeBatchIdRef.current = null;
     queueRef.current = [];
     setQueuedCount(0);
     abortControllerRef.current?.abort();
@@ -452,6 +462,7 @@ export default function PdfExtractorPage() {
   function clearSelection() {
     if (busyRef.current) return;
     queueRef.current = [];
+    activeBatchIdRef.current = null;
     setQueuedCount(0);
     setNotice('');
     setError('');
@@ -466,6 +477,7 @@ export default function PdfExtractorPage() {
     setRunCompletedFiles(0);
     runTotalFilesRef.current = 0;
     runCompletedFilesRef.current = 0;
+    activeBatchIdRef.current = null;
   }
 
   function retryResult(result: ResultRow) {

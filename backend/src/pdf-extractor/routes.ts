@@ -3,7 +3,7 @@ import path from 'path';
 import { authenticateToken } from '../auth.js';
 import { listAwbLog } from './store.js';
 import { mapLimit, MAX_PDF_FILES_PER_REQUEST, PDF_PROCESS_CONCURRENCY, processPdfFileSafely, upload, type ProcessResult } from './runner.js';
-import { appendProcessingRun, createDownloadArtifact, createFileArtifact, finalizeProcessingRun, getDownloadArtifact } from './downloads.js';
+import { appendProcessingRun, createDownloadArtifact, createFileArtifact, finalizeProcessingRun, getDownloadArtifact, processResumableBatch } from './downloads.js';
 
 const router = Router();
 
@@ -72,23 +72,26 @@ router.post('/extract-stream', (req: Request, res: Response) => {
     heartbeat.unref();
 
     try {
-      const results: ProcessResult[] = new Array(files.length);
-      let next = 0;
-      let completed = 0;
-      async function worker() {
-        while (next < files.length) {
-          const index = next++;
-          const file = files[index];
-          results[index] = await processPdfFileSafely(file.path, file.originalname, req.user?.userId ?? null);
-          completed += 1;
-          res.write(`${JSON.stringify({ type: 'progress', completed, total: files.length, file: file.originalname })}\n`);
-        }
-      }
-      await Promise.all(Array.from({ length: Math.min(PDF_PROCESS_CONCURRENCY, files.length) }, () => worker()));
-      const resultsWithActions = addErrorActions(results);
       const runId = typeof req.body?.runId === 'string' ? req.body.runId : '';
-      if (runId) appendProcessingRun(runId, req.user?.userId ?? 0, resultsWithActions);
-      const download = runId ? null : await createDownloadArtifact(resultsWithActions);
+      const batchId = typeof req.body?.batchId === 'string' ? req.body.batchId : '';
+      const batchNumber = Number(req.body?.batchNumber);
+      if (!runId || !batchId || !Number.isInteger(batchNumber) || batchNumber < 0) {
+        res.write(`${JSON.stringify({ type: 'error', error: 'Missing resumable batch details. Please start the extraction again.' })}\n`);
+        res.end();
+        return;
+      }
+      const userId = req.user?.userId ?? 0;
+      const results = await processResumableBatch(
+        runId,
+        batchId,
+        batchNumber,
+        userId,
+        files,
+        (file) => processPdfFileSafely(file.path, file.originalname, userId),
+        (completed, file) => res.write(`${JSON.stringify({ type: 'progress', completed, total: files.length, file })}\n`),
+      );
+      const resultsWithActions = addErrorActions(results);
+      const download = null;
       res.write(`${JSON.stringify({ type: 'complete', results: resultsWithActions, download })}\n`);
       res.end();
     } catch (streamErr) {
