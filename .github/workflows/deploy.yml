@@ -21,6 +21,7 @@ jobs:
           USERNAME: ${{ secrets.HOSTINGER_USERNAME }}
           DOMAIN: ${{ secrets.HOSTINGER_DOMAIN }}
           URL: https://tools.mspi.io
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           API="https://developers.hostinger.com/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs"
@@ -68,6 +69,12 @@ jobs:
             echo "=== Deployment did not finish in time ==="
             return 1
           }
+          if [ "$EVENT_NAME" = "push" ]; then
+            # Hostinger starts Git builds shortly after the GitHub push event.
+            # Do not mark the old app healthy before that deployment is visible.
+            echo "=== Allowing the Hostinger deployment to start ==="
+            sleep 30
+          fi
           echo "=== Waiting for app to become healthy ==="
           if wait_for_healthy 3; then echo "=== Healthy ==="; exit 0; fi
           STATE=$(latest_build_state || echo "unknown")
