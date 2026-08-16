@@ -137,6 +137,10 @@ export default function PdfExtractorPage() {
   const [queuedCount, setQueuedCount] = useState(0);
   const [processingFiles, setProcessingFiles] = useState<string[]>([]);
   const [completedFiles, setCompletedFiles] = useState(0);
+  const [runTotalFiles, setRunTotalFiles] = useState(0);
+  const [runCompletedFiles, setRunCompletedFiles] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [processingStage, setProcessingStage] = useState<'uploading' | 'analyzing' | 'finalizing'>('uploading');
   const [activeFile, setActiveFile] = useState('');
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
   const [downloads, setDownloads] = useState<ExtractDownload[]>([]);
@@ -145,7 +149,9 @@ export default function PdfExtractorPage() {
   const dragDepthRef = useRef(0);
   const busyRef = useRef(false);
   const queueRef = useRef<File[]>([]);
-  const processingStartedAtRef = useRef(0);
+  const runStartedAtRef = useRef(0);
+  const runTotalFilesRef = useRef(0);
+  const runCompletedFilesRef = useRef(0);
   const runIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
@@ -153,6 +159,14 @@ export default function PdfExtractorPage() {
 
   useEffect(() => {
     busyRef.current = busy;
+  }, [busy]);
+
+  useEffect(() => {
+    if (!busy || !runStartedAtRef.current) return;
+    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - runStartedAtRef.current) / 1000));
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
   }, [busy]);
 
   useEffect(() => {
@@ -263,6 +277,12 @@ export default function PdfExtractorPage() {
     if (!runIdRef.current) {
       runIdRef.current = crypto.randomUUID();
       cancelledRef.current = false;
+      runStartedAtRef.current = Date.now();
+      runTotalFilesRef.current = queueRef.current.length;
+      runCompletedFilesRef.current = 0;
+      setRunTotalFiles(runTotalFilesRef.current);
+      setRunCompletedFiles(0);
+      setElapsedSeconds(0);
     }
     busyRef.current = true;
     const pdfs = queueRef.current.slice(0, PROCESSING_BATCH_SIZE);
@@ -272,7 +292,7 @@ export default function PdfExtractorPage() {
     setCompletedFiles(0);
     setActiveFile(pdfs[0]?.name ?? '');
     setEstimatedSeconds(null);
-    processingStartedAtRef.current = Date.now();
+    setProcessingStage('uploading');
     setError('');
     setBusy(true);
     const abortController = new AbortController();
@@ -288,9 +308,11 @@ export default function PdfExtractorPage() {
       const response = await api.pdfExtractor.extractStream(pdfs, (completed, _total, file) => {
         setCompletedFiles(completed);
         setActiveFile(file);
-        const elapsedSeconds = (Date.now() - processingStartedAtRef.current) / 1000;
-        const remaining = Math.max(0, pdfs.length - completed);
-        setEstimatedSeconds(remaining === 0 ? 0 : Math.ceil((elapsedSeconds / completed) * remaining));
+        setProcessingStage('analyzing');
+        const overallCompleted = runCompletedFilesRef.current + completed;
+        const remaining = Math.max(0, runTotalFilesRef.current - overallCompleted);
+        const elapsed = (Date.now() - runStartedAtRef.current) / 1000;
+        setEstimatedSeconds(overallCompleted === 0 ? null : Math.ceil((elapsed / overallCompleted) * remaining));
       }, abortController.signal, runIdRef.current ?? undefined);
       const out = response.results;
       if (out.length !== pdfs.length) {
@@ -321,6 +343,8 @@ export default function PdfExtractorPage() {
       if (parts.length > 0) setNotice(`Processed ${out.length} file${out.length === 1 ? '' : 's'} — ${parts.join(', ')}.`);
       await refreshLogsIfVisible();
       queueRef.current.splice(0, pdfs.length);
+      runCompletedFilesRef.current += out.length;
+      setRunCompletedFiles(runCompletedFilesRef.current);
       batchCompleted = true;
     } catch (err) {
       if ((err instanceof DOMException && err.name === 'AbortError') || cancelledRef.current) {
@@ -344,6 +368,7 @@ export default function PdfExtractorPage() {
       } else if (batchCompleted && !cancelledRef.current && runIdRef.current) {
         const completedRunId = runIdRef.current;
         runIdRef.current = null;
+        setProcessingStage('finalizing');
         setNotice('All batches complete. Preparing one combined ZIP...');
         try {
           const download = await api.pdfExtractor.finalizeRun(completedRunId);
@@ -351,8 +376,10 @@ export default function PdfExtractorPage() {
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to prepare combined download');
         }
+        setProcessingStage('uploading');
       } else {
         if (cancelledRef.current) runIdRef.current = null;
+        setProcessingStage('uploading');
       }
     }
   }
@@ -435,6 +462,10 @@ export default function PdfExtractorPage() {
     setDownloads([]);
     setNotice('');
     setError('');
+    setRunTotalFiles(0);
+    setRunCompletedFiles(0);
+    runTotalFilesRef.current = 0;
+    runCompletedFilesRef.current = 0;
   }
 
   function retryResult(result: ResultRow) {
@@ -466,6 +497,16 @@ export default function PdfExtractorPage() {
       setResults((current) => [...current, result]);
     });
   }
+
+  const overallCompleted = Math.min(runTotalFiles, runCompletedFiles + completedFiles);
+  const overallPercent = runTotalFiles ? Math.round((overallCompleted / runTotalFiles) * 100) : 0;
+  const batchCount = Math.max(1, Math.ceil(runTotalFiles / PROCESSING_BATCH_SIZE));
+  const activeBatch = Math.min(batchCount, Math.floor(runCompletedFiles / PROCESSING_BATCH_SIZE) + 1);
+  const stageLabel = processingStage === 'uploading'
+    ? 'Preparing protected group'
+    : processingStage === 'finalizing'
+      ? 'Preparing your download'
+      : 'Reading and extracting PDFs';
 
   return (
     <div>
@@ -538,39 +579,68 @@ export default function PdfExtractorPage() {
             )}
           </div>
           {busy ? (
-            <div className="w-full max-w-lg mt-4 rounded-xl border border-[#e5e7eb] bg-white px-4 py-4 text-left shadow-sm" role="status" aria-live="polite">
+            <div className="w-full max-w-xl mt-4 rounded-xl border border-[#d2d2d7] bg-white px-5 py-5 text-left shadow-sm" role="status" aria-live="polite">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-[15px] font-semibold text-[#1d1d1f]">Analyzing files</p>
-                  <p className="text-[12px] text-[#6e6e73] mt-0.5 tabular-nums">{completedFiles} of {processingFiles.length} complete</p>
+                  <p className="text-[15px] font-semibold text-[#1d1d1f]">{stageLabel}</p>
+                  <p className="text-[12px] text-[#6e6e73] mt-0.5 tabular-nums">
+                    {processingStage === 'finalizing'
+                      ? `${runTotalFiles} files processed; preparing your combined download`
+                      : `Group ${activeBatch} of ${batchCount} · ${completedFiles} of ${processingFiles.length} files complete`}
+                  </p>
                 </div>
-                {queuedCount > 0 && (
-                  <span className="shrink-0 inline-flex items-center rounded-full bg-[#eff6ff] px-2.5 py-1 text-[11px] font-medium text-[#2563eb]">
-                    {queuedCount} queued
-                  </span>
-                )}
+                <span className="shrink-0 inline-flex items-center rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[11px] font-medium text-[#515154]">
+                  {overallCompleted} / {runTotalFiles} complete
+                </span>
               </div>
-              <p className="text-[12px] text-[#6e6e73] mt-3 truncate" title={activeFile}>
-                {completedFiles < processingFiles.length ? activeFile : 'Preparing your download...'}
-              </p>
-              <div className="mt-3 flex items-center gap-3">
-                <div className="h-2 flex-1 rounded-full bg-[#e5e7eb] overflow-hidden" aria-hidden="true">
+              <div className="mt-4 rounded-lg border border-[#e5e7eb] bg-[#fafafa] px-3 py-2.5">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-[#86868b]">Current document</p>
+                <p className="mt-0.5 text-[12px] text-[#1d1d1f] truncate" title={activeFile}>
+                  {processingStage === 'finalizing' ? 'Combining completed files into your download' : activeFile || 'Starting secure upload...'}
+                </p>
+              </div>
+              <div className="mt-4">
+                <div className="flex items-center justify-between text-[11px] text-[#6e6e73]">
+                  <span>Overall progress</span>
+                  <span className="tabular-nums font-medium text-[#1d1d1f]">{overallPercent}%</span>
+                </div>
+                <div className="mt-1.5 h-2 rounded-full bg-[#e5e7eb] overflow-hidden" aria-hidden="true">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#2563eb] to-[#60a5fa] transition-[width] duration-500 ease-out"
+                    className="h-full rounded-full bg-[#2563eb] transition-[width] duration-500 ease-out"
+                    style={{ width: `${overallPercent}%` }}
+                  />
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[11px] text-[#6e6e73]">
+                  <span>Current group</span>
+                  <span className="tabular-nums">{processingFiles.length ? Math.round((completedFiles / processingFiles.length) * 100) : 0}%</span>
+                </div>
+                <div className="mt-1.5 h-1.5 rounded-full bg-[#e5e7eb] overflow-hidden" aria-hidden="true">
+                  <div
+                    className="h-full rounded-full bg-[#9ca3af] transition-[width] duration-500 ease-out"
                     style={{ width: `${processingFiles.length ? Math.round((completedFiles / processingFiles.length) * 100) : 0}%` }}
                   />
                 </div>
-                <span className="w-9 text-right text-[11px] tabular-nums font-medium text-[#2563eb]">
-                  {processingFiles.length ? Math.round((completedFiles / processingFiles.length) * 100) : 0}%
-                </span>
               </div>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <span className="text-[11px] text-[#86868b] tabular-nums">
-                  {estimatedSeconds === null ? 'Estimating time...' : estimatedSeconds === 0 ? 'Finishing up...' : formatEta(estimatedSeconds)}
-                </span>
-                <button onClick={cancelAnalysis} className={`${secondaryBtnCls} px-3 py-1 text-[11px]`}>Cancel</button>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-[11px]">
+                <div className="rounded-md bg-[#f5f5f7] px-2.5 py-2">
+                  <p className="text-[#86868b]">Elapsed</p>
+                  <p className="mt-0.5 font-medium tabular-nums text-[#1d1d1f]">{formatElapsed(elapsedSeconds)}</p>
+                </div>
+                <div className="rounded-md bg-[#f5f5f7] px-2.5 py-2">
+                  <p className="text-[#86868b]">Remaining</p>
+                  <p className="mt-0.5 font-medium tabular-nums text-[#1d1d1f]">{estimatedSeconds === null ? 'Estimating' : estimatedSeconds === 0 ? 'Finishing' : formatEta(estimatedSeconds)}</p>
+                </div>
+                <div className="rounded-md bg-[#f5f5f7] px-2.5 py-2">
+                  <p className="text-[#86868b]">Waiting</p>
+                  <p className="mt-0.5 font-medium tabular-nums text-[#1d1d1f]">{queuedCount} files</p>
+                </div>
               </div>
-              {queuedCount > 0 && <p className="text-[10px] text-[#9ca3af] mt-2">Queued files continue automatically after this batch.</p>}
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <p className="text-[11px] text-[#6e6e73]">Keep this page open. The next group starts only after this one finishes.</p>
+                <button onClick={cancelAnalysis} className={`${secondaryBtnCls} shrink-0 px-3 py-1 text-[11px]`}>Cancel</button>
+              </div>
             </div>
           ) : queuedCount > 0 ? (
             <div className="w-full max-w-md">
@@ -823,4 +893,10 @@ function formatEta(seconds: number): string {
   if (seconds < 60) return `About ${seconds} seconds remaining`;
   const minutes = Math.ceil(seconds / 60);
   return `About ${minutes} minute${minutes === 1 ? '' : 's'} remaining`;
+}
+
+function formatElapsed(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return minutes > 0 ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`;
 }
