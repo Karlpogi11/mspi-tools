@@ -259,34 +259,64 @@ export default function PcountSessionPage() {
 
     try {
       const XLSX = await import('xlsx');
-      const headers = ['Product Code', 'System Quantity', 'Actual Quantity', 'Is Match'];
-      const rows = [...products]
-        .sort((a, b) => a.product_code.localeCompare(b.product_code))
-        .map(product => {
-          const brand = Object.entries(product.extra || {})
-            .find(([key]) => key.trim().toLowerCase() === 'brand')?.[1] || '';
-          const normalizedBrand = brand.trim().toLowerCase().replace(/[\s_]+/g, '-');
-          const sheet = normalizedBrand === 'apple' || normalizedBrand === 'apple-parts' ? 'Apple' : '3PP';
-          return {
-            sheet,
-            values: [
-              product.product_code,
-              product.system_qty,
-              product.counted_qty,
-              product.counted_qty === product.system_qty,
-            ],
-          };
-        });
+      // The final pcount output is the two paper summaries (Apple and 3PP),
+      // rather than the row-level import used during scanning.
+      const headers = ['Category', 'SOH', 'Actual Qty', 'Stock Issued', 'Variance', 'Remarks'];
+      const valueFor = (product: Product, names: string[]) => {
+        const wanted = names.map(name => name.toLowerCase());
+        return Object.entries(product.extra || {}).find(([key]) => wanted.includes(key.trim().toLowerCase()))?.[1] || '';
+      };
+      const numericExtra = (product: Product, names: string[]) => {
+        const value = valueFor(product, names).replace(/,/g, '').trim();
+        return value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
+      };
+      const summaries = new Map<string, {
+        sheet: 'Apple' | '3PP'; category: string; soh: number; actual: number;
+        issued: number | null; remarks: Set<string>;
+      }>();
+
+      for (const product of products) {
+        const brand = valueFor(product, ['brand']).trim().toLowerCase();
+        const sheet: 'Apple' | '3PP' = brand.includes('apple') || product.category.toLowerCase() === 'apple' ? 'Apple' : '3PP';
+        const category = valueFor(product, ['category', 'group']) || (sheet === 'Apple' ? 'Apple' : '3PP');
+        const key = `${sheet}:${category.trim().toLowerCase()}`;
+        const summary = summaries.get(key) || { sheet, category, soh: 0, actual: 0, issued: null, remarks: new Set<string>() };
+        summary.soh += product.system_qty;
+        summary.actual += product.counted_qty;
+        const issued = numericExtra(product, ['stock issued', 'stock_issued', 'issued qty', 'issued quantity']);
+        if (issued !== null) summary.issued = (summary.issued || 0) + issued;
+
+        const note = product.notes?.trim() || valueFor(product, ['remarks', 'remark', 'notes']).trim();
+        if (note) summary.remarks.add(note);
+        if (product.counted_qty > product.system_qty) summary.remarks.add('Excess');
+        else if (product.status === 'missing' || product.counted_qty < product.system_qty) summary.remarks.add('Missing');
+        else if (product.status === 'pending') summary.remarks.add('Pending count');
+        summaries.set(key, summary);
+      }
+
+      const rows = [...summaries.values()].map(summary => ({
+        sheet: summary.sheet,
+        values: [
+          summary.category,
+          summary.soh,
+          summary.actual,
+          summary.issued === null ? 'N/A' : summary.issued,
+          summary.soh - summary.actual,
+          summary.remarks.size ? [...summary.remarks].join('; ') : 'N/A',
+        ],
+      }));
 
       const workbook = XLSX.utils.book_new();
       for (const sheetName of ['Apple', '3PP'] as const) {
         const sheetRows = rows.filter(row => row.sheet === sheetName).map(row => row.values);
         const worksheet = XLSX.utils.aoa_to_sheet([headers, ...sheetRows]);
         worksheet['!cols'] = [
-          { wch: 24 },
-          { wch: 17 },
-          { wch: 17 },
+          { wch: 28 },
           { wch: 12 },
+          { wch: 14 },
+          { wch: 15 },
+          { wch: 12 },
+          { wch: 42 },
         ];
         XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
       }

@@ -1,3 +1,5 @@
+import type { WordBox } from './pdf.js';
+
 export interface ParsedFields {
   HAWB: string;
   InvoiceReference: string;
@@ -116,7 +118,75 @@ function findDeliveryDate(...texts: string[]): string {
   return '';
 }
 
-export function parseFields(text: string, region = ''): ParsedFields {
+function isPositiveQuantity(value: string): boolean {
+  const quantity = Number(value.replace(/,/g, '').trim());
+  return Number.isInteger(quantity) && quantity > 0;
+}
+
+function findPackingListQuantity(words: WordBox[]): string {
+  const qtyHeaders = words.filter((word) => /^qty$/i.test(word.text));
+  const totals = words.filter((word) => /^total$/i.test(word.text));
+  let bestTotal = 0;
+
+  for (const header of qtyHeaders) {
+    const boxHeader = words
+      .filter((word) => word.x0 > header.x0 && Math.abs(word.y0 - header.y0) < 45 && /^box#?$/i.test(word.text))
+      .sort((a, b) => a.x0 - b.x0)[0];
+    if (!boxHeader) continue;
+
+    const columnRight = (header.x0 + boxHeader.x0) / 2;
+    const totalY = totals
+      .filter((word) => word.y0 > header.y1)
+      .sort((a, b) => a.y0 - b.y0)[0]?.y0 ?? Number.POSITIVE_INFINITY;
+    const rowQuantities = words.filter((word) => {
+      if (word.y0 <= header.y1 + 15 || word.y0 >= totalY) return false;
+      if (word.x0 < header.x0 - 25 || word.x1 > columnRight) return false;
+      return /^\d+$/.test(word.text.trim()) && isPositiveQuantity(word.text);
+    });
+    const total = rowQuantities.reduce((sum, word) => sum + Number(word.text), 0);
+    bestTotal = Math.max(bestTotal, total);
+  }
+
+  return bestTotal > 0 ? String(bestTotal) : '';
+}
+
+/**
+ * OCR can read the quantity column as 0 while the real value is the adjacent
+ * number on the same row (for example: "Total Quantity 0 12"). Never return
+ * zero; scan the small label-adjacent window for the first positive integer.
+ */
+function findTotalQuantity(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const label = /total\s+(?:quantity|qty)\b/i;
+  const reversedLabel = /(?:quantity|qty)\s+total\b/i;
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const match = label.exec(line);
+    const reversedMatch = reversedLabel.exec(line);
+    if (!match && !reversedMatch) continue;
+
+    if (reversedMatch && !match) {
+      const beforeLabel = line.slice(0, reversedMatch.index);
+      const candidates = beforeLabel.match(/(?<![\d.,])\d+(?![\d.,])/g) ?? [];
+      const quantity = candidates.reverse().find((candidate) => isPositiveQuantity(candidate));
+      if (quantity) return quantity;
+      continue;
+    }
+
+    const nearbyText = [
+      line.slice(match!.index + match![0].length),
+      lines[index + 1] ?? '',
+    ].join(' ');
+    const candidates = nearbyText.match(/(?<![\d.,])\d+(?![\d.,])/g) ?? [];
+    const quantity = candidates.find((candidate) => isPositiveQuantity(candidate));
+    if (quantity) return quantity;
+  }
+
+  return '';
+}
+
+export function parseFields(text: string, region = '', words: WordBox[] = []): ParsedFields {
   let hawb = find([
     /\bHAWBS?\b\s*(?:NO\.?|NUMBER|#)?\s*[:;#-]?\s*\n?\s*([0-9][0-9\s-]{5,20})/i,
     /\bH[A4]WB[S5]?\b\s*(?:N[O0]\.?|#)?\s*[:;#-]?\s*\n?\s*([0-9][0-9\s-]{5,20})/i,
@@ -151,10 +221,8 @@ export function parseFields(text: string, region = ''): ParsedFields {
 
   const deliveryDate = findDeliveryDate(text, region);
 
-  let totalQty = find([
-    /Total\s+Quantity[:\s]+(\d+)/i,
-    /Total\s+Qty[:\s]+(\d+)/i,
-  ], text);
+  let totalQty = findTotalQuantity(text);
+  if (!isPositiveQuantity(totalQty)) totalQty = findPackingListQuantity(words);
   if (!totalQty) {
     const itemLines = text.match(/^\S.*\d+\.\d{2}\s*$/gm) ?? [];
     if (itemLines.length > 0) totalQty = String(itemLines.length);
@@ -179,7 +247,7 @@ export function mergeFields(...dicts: Array<Partial<ParsedFields>>): ParsedField
   };
   for (const key of ['HAWB', 'InvoiceReference', 'InvoiceTotalAmount', 'DeliveryDate', 'TotalQty']) {
     for (const d of dicts) {
-      if (d[key]) {
+      if (d[key] && (key !== 'TotalQty' || isPositiveQuantity(d[key]!))) {
         out[key] = d[key]!;
         break;
       }
@@ -189,7 +257,7 @@ export function mergeFields(...dicts: Array<Partial<ParsedFields>>): ParsedField
 }
 
 export function missingFields(fields: Partial<ParsedFields>): string[] {
-  return REQUIRED_FIELDS.filter((k) => !fields[k]);
+  return REQUIRED_FIELDS.filter((k) => !fields[k] || (k === 'TotalQty' && !isPositiveQuantity(fields[k]!)));
 }
 
 // ── Month labels ─────────────────────────────────────────────────────────────

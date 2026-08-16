@@ -34,6 +34,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
   const [error, setError] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [excludedPartNumbers, setExcludedPartNumbers] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const workbookRef = useRef<WorkBook | null>(null);
   const xlsxRef = useRef<typeof import('xlsx') | null>(null);
@@ -137,6 +138,12 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
         headers.forEach((h, i) => { obj[h] = String(row[i] || ''); });
         return obj;
       });
+      const excluded = new Set(
+        excludedPartNumbers
+          .split(/[\s,;]+/)
+          .map(code => code.trim().toUpperCase())
+          .filter(Boolean),
+      );
       const products = json.map(row => {
         const extra: Record<string, string> = {};
         for (const [k, v] of Object.entries(row)) {
@@ -150,7 +157,10 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
           system_qty: parseInt(row[mapping.quantity]) || 0,
           extra,
         };
-      });
+      }).filter(product => product.product_code.trim() && !excluded.has(product.product_code.trim().toUpperCase()));
+      if (products.length === 0) {
+        throw new Error('All imported rows were excluded. Keep at least one product.');
+      }
       const qs = replace ? '?replace=true' : '';
       const res = await fetch(`/api/pcount/sessions/${sessionId}/import-system${qs}`, {
         method: 'POST',
@@ -374,6 +384,22 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
                       </label>
                     ))}
                   </div>
+                </div>
+
+                <div className="mb-4 rounded-lg border border-[#d2d2d7] bg-[#fafafa] p-3">
+                  <label className="text-[12px] font-medium text-[#6e6e73] block mb-1">
+                    Exclude whole-unit part numbers
+                  </label>
+                  <p className="text-[12px] text-[#6e6e73] mb-2">
+                    These codes will not be imported, so they cannot remain pending or appear in the final count.
+                  </p>
+                  <textarea
+                    value={excludedPartNumbers}
+                    onChange={e => setExcludedPartNumbers(e.target.value)}
+                    placeholder="One code per line, or separate codes with commas"
+                    rows={2}
+                    className="w-full resize-y rounded-lg border border-[#d2d2d7] bg-white px-3 py-2 text-[13px] font-mono outline-none focus:border-[#2563eb]"
+                  />
                 </div>
 
                 <div className="mb-4">
