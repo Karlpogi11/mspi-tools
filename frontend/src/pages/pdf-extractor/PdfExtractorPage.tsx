@@ -9,7 +9,8 @@ const secondaryBtnCls =
   'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#d2d2d7] bg-white text-[12px] font-medium text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
 const primaryBtnCls =
   'inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#2563eb] text-white text-[12px] font-semibold hover:bg-[#1d4ed8] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer';
-const MAX_FILES_PER_RUN = 20;
+const MAX_FILES_PER_RUN = 50;
+const PROCESSING_BATCH_SIZE = 10;
 const MAX_FILE_SIZE_BYTES = 60 * 1024 * 1024;
 
 const iconUpload = (
@@ -248,6 +249,10 @@ export default function PdfExtractorPage() {
       setError(`${oversized.map((file) => file.name).join(', ')} exceeds the 60 MB per-file limit.`);
       return;
     }
+    if (queueRef.current.length + pdfs.length > MAX_FILES_PER_RUN) {
+      setError(`A run can contain up to ${MAX_FILES_PER_RUN} PDFs. Please start the current run before adding more files.`);
+      return;
+    }
     queueRef.current.push(...pdfs);
     setQueuedCount(queueRef.current.length);
     setNotice(`${queueRef.current.length} PDF${queueRef.current.length === 1 ? '' : 's'} ready to run.`);
@@ -260,7 +265,7 @@ export default function PdfExtractorPage() {
       cancelledRef.current = false;
     }
     busyRef.current = true;
-    const pdfs = queueRef.current.slice(0, MAX_FILES_PER_RUN);
+    const pdfs = queueRef.current.slice(0, PROCESSING_BATCH_SIZE);
     activeBatchRef.current = pdfs;
     setQueuedCount(Math.max(0, queueRef.current.length - pdfs.length));
     setProcessingFiles(pdfs.map((file) => file.name));
@@ -272,9 +277,10 @@ export default function PdfExtractorPage() {
     setBusy(true);
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    const remainingFiles = queueRef.current.length - pdfs.length;
     setNotice(
-      queueRef.current.length > 0
-        ? `Running a batch of ${pdfs.length} files. ${queueRef.current.length} ${queueRef.current.length === 1 ? 'file remains' : 'files remain'} and will start automatically.`
+      remainingFiles > 0
+        ? `Running ${pdfs.length} files. ${remainingFiles} ${remainingFiles === 1 ? 'file remains' : 'files remain'} and will start automatically.`
         : `Running a batch of ${pdfs.length} file${pdfs.length === 1 ? '' : 's'}.`
     );
     let batchCompleted = false;
@@ -482,7 +488,7 @@ export default function PdfExtractorPage() {
               'Completed batches are combined into one ordered download.',
             ]}
             cards={[
-              { title: 'File limits', description: '20 PDFs per batch and 60 MB per file. Additional files continue automatically.' },
+              { title: 'File limits', description: 'Up to 50 PDFs per run and 60 MB per file. Processing is safely grouped to keep the service responsive.' },
               { title: 'Needs attention', description: 'Review failed files with the eye button, then use Retry after confirming the document data.' },
             ]}
             note="Keep this page open while processing. Refreshing resets the current browser session."
@@ -512,7 +518,7 @@ export default function PdfExtractorPage() {
         <input ref={importRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleImport} />
         <h2 className="text-[16px] font-semibold text-[#1d1d1f] mb-1">Drop your PDFs</h2>
         <p className="text-[13px] text-[#6e6e73] mb-5">
-          PDF files only. Up to {MAX_FILES_PER_RUN} files per run, with a 60 MB limit per file. Select one or more files, review the count, then run the extraction.
+          PDF files only. Up to {MAX_FILES_PER_RUN} files per run, with a 60 MB limit per file. Files are processed in protected groups for reliability.
         </p>
         <div
           onClick={() => !busy && queuedCount === 0 && importRef.current?.click()}

@@ -27,9 +27,12 @@ export interface ProcessResult {
   deepAnalysis?: boolean;
 }
 
+export const MAX_PDF_FILES_PER_REQUEST = 50;
+export const PDF_PROCESS_CONCURRENCY = Math.max(1, Math.min(2, Number(process.env.PDF_PROCESS_CONCURRENCY) || 2));
+
 export const upload = multer({
   dest: INBOX,
-  limits: { fileSize: 60 * 1024 * 1024, files: 20 },
+  limits: { fileSize: 60 * 1024 * 1024, files: MAX_PDF_FILES_PER_REQUEST },
 });
 
 function uniqueDest(dir: string, baseName: string): string {

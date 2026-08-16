@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import path from 'path';
 import { authenticateToken } from '../auth.js';
 import { listAwbLog } from './store.js';
-import { mapLimit, processPdfFileSafely, upload, type ProcessResult } from './runner.js';
+import { mapLimit, MAX_PDF_FILES_PER_REQUEST, PDF_PROCESS_CONCURRENCY, processPdfFileSafely, upload, type ProcessResult } from './runner.js';
 import { appendProcessingRun, createDownloadArtifact, createFileArtifact, finalizeProcessingRun, getDownloadArtifact } from './downloads.js';
 
 const router = Router();
@@ -18,7 +18,7 @@ function addErrorActions(results: ProcessResult[]) {
 }
 
 router.post('/extract', (req: Request, res: Response) => {
-  upload.array('files', 20)(req, res, async (err: unknown) => {
+  upload.array('files', MAX_PDF_FILES_PER_REQUEST)(req, res, async (err: unknown) => {
     if (err) {
       res.status(400).json({ error: (err as Error)?.message || 'Upload failed' });
       return;
@@ -31,7 +31,7 @@ router.post('/extract', (req: Request, res: Response) => {
     try {
       const results: ProcessResult[] = await mapLimit(
         files,
-        2,
+        PDF_PROCESS_CONCURRENCY,
         (f) => processPdfFileSafely(f.path, f.originalname, req.user?.userId ?? null)
       );
       const resultsWithActions = addErrorActions(results);
@@ -47,7 +47,7 @@ router.post('/extract', (req: Request, res: Response) => {
 });
 
 router.post('/extract-stream', (req: Request, res: Response) => {
-  upload.array('files', 20)(req, res, async (err: unknown) => {
+  upload.array('files', MAX_PDF_FILES_PER_REQUEST)(req, res, async (err: unknown) => {
     if (err) {
       res.status(400).json({ error: (err as Error)?.message || 'Upload failed' });
       return;
@@ -62,7 +62,14 @@ router.post('/extract-stream', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
+
+    // Keep long OCR requests alive through reverse proxies while workers are busy.
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(`${JSON.stringify({ type: 'heartbeat' })}\n`);
+    }, 15_000);
+    heartbeat.unref();
 
     try {
       const results: ProcessResult[] = new Array(files.length);
@@ -77,7 +84,7 @@ router.post('/extract-stream', (req: Request, res: Response) => {
           res.write(`${JSON.stringify({ type: 'progress', completed, total: files.length, file: file.originalname })}\n`);
         }
       }
-      await Promise.all(Array.from({ length: Math.min(2, files.length) }, () => worker()));
+      await Promise.all(Array.from({ length: Math.min(PDF_PROCESS_CONCURRENCY, files.length) }, () => worker()));
       const resultsWithActions = addErrorActions(results);
       const runId = typeof req.body?.runId === 'string' ? req.body.runId : '';
       if (runId) appendProcessingRun(runId, req.user?.userId ?? 0, resultsWithActions);
@@ -88,6 +95,8 @@ router.post('/extract-stream', (req: Request, res: Response) => {
       console.error('[pdf-extractor] stream extract error:', streamErr);
       res.write(`${JSON.stringify({ type: 'error', error: (streamErr as Error)?.message || 'Failed to process files' })}\n`);
       res.end();
+    } finally {
+      clearInterval(heartbeat);
     }
   });
 });
