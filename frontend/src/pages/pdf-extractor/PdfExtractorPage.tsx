@@ -11,7 +11,9 @@ const secondaryBtnCls =
 const primaryBtnCls =
   'inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#2563eb] text-white text-[12px] font-semibold hover:bg-[#1d4ed8] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer';
 const MAX_FILES_PER_RUN = 50;
-const PROCESSING_BATCH_SIZE = 10;
+// Keep multipart uploads comfortably below shared-hosting proxy limits. The
+// overall run is still 50 files and each group remains resumable and ordered.
+const PROCESSING_BATCH_SIZE = 5;
 const MAX_FILE_SIZE_BYTES = 60 * 1024 * 1024;
 const BATCH_REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
 
@@ -127,6 +129,16 @@ interface ResultRow {
   retryUrl?: string;
 }
 
+interface RunSummary {
+  total: number;
+  completed: number;
+  logged: number;
+  duplicate: number;
+  permit: number;
+  errors: number;
+  elapsedSeconds: number;
+}
+
 export default function PdfExtractorPage() {
   const { user } = useAuth();
   const [results, setResults] = useState<ResultRow[]>([]);
@@ -151,6 +163,7 @@ export default function PdfExtractorPage() {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnostics, setDiagnostics] = useState<PdfDiagnostic[]>([]);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const busyRef = useRef(false);
@@ -164,6 +177,12 @@ export default function PdfExtractorPage() {
   const activeBatchRef = useRef<File[]>([]);
   const activeBatchIdRef = useRef<string | null>(null);
   const timedOutRef = useRef(false);
+  const runOutcomeRef = useRef<Omit<RunSummary, 'total' | 'completed' | 'elapsedSeconds'>>({
+    logged: 0,
+    duplicate: 0,
+    permit: 0,
+    errors: 0,
+  });
 
   useEffect(() => {
     busyRef.current = busy;
@@ -311,6 +330,8 @@ export default function PdfExtractorPage() {
       runTotalFilesRef.current = queueRef.current.length;
       runCompletedFilesRef.current = 0;
       activeBatchIdRef.current = null;
+      runOutcomeRef.current = { logged: 0, duplicate: 0, permit: 0, errors: 0 };
+      setRunSummary(null);
       setRunTotalFiles(runTotalFilesRef.current);
       setRunCompletedFiles(0);
       setElapsedSeconds(0);
@@ -375,7 +396,13 @@ export default function PdfExtractorPage() {
       );
       if (response.download) setDownloads((current) => [...current, response.download!]);
       const logged = out.filter((r) => r.status === 'ok').length;
+      const duplicates = out.filter((r) => r.status === 'duplicate').length;
+      const permits = out.filter((r) => r.status === 'permit').length;
       const failed = out.filter((r) => r.status === 'error').length;
+      runOutcomeRef.current.logged += logged;
+      runOutcomeRef.current.duplicate += duplicates;
+      runOutcomeRef.current.permit += permits;
+      runOutcomeRef.current.errors += failed;
       const parts: string[] = [];
       if (logged > 0) parts.push(`${logged} invoice${logged === 1 ? '' : 's'} logged`);
       if (failed > 0) parts.push(`${failed} failed`);
@@ -396,7 +423,10 @@ export default function PdfExtractorPage() {
       } else if (err instanceof DOMException && err.name === 'AbortError') {
         setNotice('Analysis was stopped. The current group remains queued and can be resumed safely.');
       } else {
-        setError(err instanceof Error ? err.message : 'Failed to process files');
+        const status = (err as { status?: number } | null)?.status;
+        setError(status === 403
+          ? 'The hosting proxy rejected this upload group (403). The group remains queued and can be resumed safely.'
+          : err instanceof Error ? err.message : 'Failed to process files');
         setNotice(`This group was paused safely. The ${pdfs.length} files remain queued; resume to continue without repeating completed files.`);
         void loadDiagnostics();
       }
@@ -424,6 +454,12 @@ export default function PdfExtractorPage() {
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to prepare combined download');
         }
+        setRunSummary({
+          total: runTotalFilesRef.current,
+          completed: runCompletedFilesRef.current,
+          elapsedSeconds: Math.max(0, Math.ceil((Date.now() - runStartedAtRef.current) / 1000)),
+          ...runOutcomeRef.current,
+        });
         setProcessingStage('uploading');
       } else {
         if (cancelledRef.current) {
@@ -520,6 +556,16 @@ export default function PdfExtractorPage() {
     runTotalFilesRef.current = 0;
     runCompletedFilesRef.current = 0;
     activeBatchIdRef.current = null;
+    runOutcomeRef.current = { logged: 0, duplicate: 0, permit: 0, errors: 0 };
+    setRunSummary(null);
+  }
+
+  function extractAnotherFiles() {
+    if (busyRef.current) return;
+    clearCurrentResults();
+    queueRef.current = [];
+    setQueuedCount(0);
+    window.setTimeout(() => importRef.current?.click(), 0);
   }
 
   function retryResult(result: ResultRow) {
@@ -643,6 +689,31 @@ export default function PdfExtractorPage() {
         </section>
       )}
 
+      {runSummary ? (
+        <section className="w-full max-w-5xl mx-auto rounded-xl border border-[#bfdbfe] bg-[#f8fbff] p-6 mb-6 text-center">
+          <div className="mx-auto flex max-w-xl flex-col items-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#eff6ff] text-[#2563eb]">
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </div>
+            <h2 className="mt-3 text-[16px] font-semibold text-[#1d1d1f]">Extraction complete</h2>
+            <p className="mt-1 text-[13px] text-[#6e6e73]">
+              {runSummary.completed} of {runSummary.total} PDFs completed in {formatElapsed(runSummary.elapsedSeconds)}.
+            </p>
+            <div className="mt-5 grid w-full grid-cols-2 gap-2 sm:grid-cols-4 text-left text-[11px]">
+              <div className="rounded-lg border border-[#dbeafe] bg-white px-3 py-2"><p className="text-[#86868b]">Logged</p><p className="mt-0.5 font-semibold text-[#1d1d1f]">{runSummary.logged}</p></div>
+              <div className="rounded-lg border border-[#dbeafe] bg-white px-3 py-2"><p className="text-[#86868b]">Already logged</p><p className="mt-0.5 font-semibold text-[#1d1d1f]">{runSummary.duplicate}</p></div>
+              <div className="rounded-lg border border-[#dbeafe] bg-white px-3 py-2"><p className="text-[#86868b]">With permit</p><p className="mt-0.5 font-semibold text-[#1d1d1f]">{runSummary.permit}</p></div>
+              <div className="rounded-lg border border-[#dbeafe] bg-white px-3 py-2"><p className="text-[#86868b]">Needs attention</p><p className="mt-0.5 font-semibold text-[#1d1d1f]">{runSummary.errors}</p></div>
+            </div>
+            <button onClick={extractAnotherFiles} className={`${primaryBtnCls} mt-5 min-w-[190px] justify-center px-5 py-2`}>
+              {iconUpload}
+              Extract another files
+            </button>
+          </div>
+        </section>
+      ) : (
       <div className="w-full max-w-5xl mx-auto bg-white rounded-xl border border-[#d2d2d7] p-6 mb-6">
         <input ref={importRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleImport} />
         <h2 className="text-[16px] font-semibold text-[#1d1d1f] mb-1">Drop your PDFs</h2>
@@ -749,6 +820,7 @@ export default function PdfExtractorPage() {
           )}
         </div>
       </div>
+      )}
 
       {downloads.length > 0 && (
         <div className="bg-[#eff6ff] rounded-xl border border-[#bfdbfe] px-5 py-6 mb-6 text-center">

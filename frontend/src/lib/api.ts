@@ -519,7 +519,7 @@ export const api = {
         }
         if (!res.ok || !res.body) {
           const data = await res.json().catch(() => null);
-          const error = new Error(data?.error || 'Failed to process files');
+          const error = responseError(data?.error || 'Failed to process files', res, data);
           if (![502, 503, 504].includes(res.status) || attempt === 2) throw error;
           lastError = error;
           await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
