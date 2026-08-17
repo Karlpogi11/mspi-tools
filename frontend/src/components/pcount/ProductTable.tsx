@@ -9,14 +9,24 @@ interface Props {
   onUpdate: (product: Product) => void;
   onSelect?: (product: Product) => void;
   selectedCode?: string | null;
-  overscanCode?: string | null;
   readOnly?: boolean;
   scrollToCode?: string | null;
+  scanSequence?: number;
   editMode?: boolean;
   onCountChange?: (code: string, count: number) => void | boolean | Promise<void | boolean>;
+  visibleColumns?: string[];
+  onVisibleColumnsChange?: (columns: string[]) => void;
+  showStatusSelection?: boolean;
+  selectableStatus?: 'pending' | 'missing' | 'excluded';
+  selectedStatusCodes?: string[];
+  onToggleStatus?: (code: string) => void;
+  onToggleAllStatus?: () => void;
+  onExcludeSelectedStatus?: () => void;
+  selectionAction?: 'exclude' | 'restore';
+  excludingPending?: boolean;
 }
 
-const ALL_COLUMNS = [
+export const ALL_COLUMNS = [
   { key: 'Product Code', label: 'Product Code', core: true },
   { key: 'Description', label: 'Description', core: true },
   { key: 'System Qty', label: 'System Qty', core: true },
@@ -40,6 +50,7 @@ const STORAGE_KEY = 'pcount.tableColumns.v2';
 
 const statusStyles: Record<string, { bg: string; dot: string; label: string }> = {
   pending:  { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#6e6e73]', label: 'Pending' },
+  excluded: { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#9a9aa0]', label: 'Excluded' },
   matched:  { bg: 'bg-[#f0fdf4]',        dot: 'bg-[#16a34a]', label: 'Matched' },
   missing:  { bg: 'bg-[#fffbeb]',        dot: 'bg-[#d97706]', label: 'Missing' },
 };
@@ -70,13 +81,33 @@ function resolveColumns(defaultColumns: string[]): string[] {
   return loadSaved();
 }
 
-export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, overscanCode, readOnly, scrollToCode, editMode = false, onCountChange }: Props) {
+export function ColumnPicker({ columns, onChange }: { columns: string[]; onChange: (columns: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  return <div className="relative" ref={ref}>
+    <button onClick={() => setOpen(value => !value)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#d2d2d7] bg-white px-3 py-1.5 text-[13px] font-medium text-[#1d1d1f] hover:bg-[#f5f5f7]">
+      Display columns <span className="text-[#6e6e73]">{columns.length}/{ALL_COLUMNS.length}</span>
+    </button>
+    {open && <div className="absolute right-0 top-full z-30 mt-1.5 w-64 rounded-xl border border-[#d2d2d7] bg-white p-2 shadow-lg">
+      <div className="flex items-center justify-between border-b border-[#d2d2d7]/60 px-2 pb-2 pt-1"><span className="text-[12px] font-semibold">Display these columns</span><button onClick={() => onChange(columns.length === ALL_COLUMNS.length ? [] : ALL_COLUMNS.map(column => column.key))} className="text-[12px] font-medium text-[#2563eb]">{columns.length === ALL_COLUMNS.length ? 'Clear all' : 'Select all'}</button></div>
+      <div className="max-h-64 overflow-y-auto py-1">{ALL_COLUMNS.map(column => <label key={column.key} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] hover:bg-[#f5f5f7]"><input type="checkbox" checked={columns.includes(column.key)} onChange={() => onChange(columns.includes(column.key) ? columns.filter(key => key !== column.key) : [...columns, column.key])} className="h-4 w-4 accent-[#2563eb]" />{column.label}</label>)}</div>
+    </div>}
+  </div>;
+}
+
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false }: Props) {
   const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
-  const [showPicker, setShowPicker] = useState(false);
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [savingCode, setSavingCode] = useState<string | null>(null);
-  const pickerRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const countInputRefs = useRef(new Map<string, HTMLInputElement>());
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
@@ -85,13 +116,17 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
   useEffect(() => {
     if (defaultColumns.length > 0 && JSON.stringify(lastDefaultRef.current) !== JSON.stringify(defaultColumns)) {
       lastDefaultRef.current = defaultColumns;
-      setVisible(resolveColumns(defaultColumns));
+      if (!visibleColumns) setVisible(resolveColumns(defaultColumns));
     }
   }, [defaultColumns]);
 
   useEffect(() => {
     if (!editMode) setEditingCode(null);
   }, [editMode]);
+
+  useEffect(() => {
+    if (scanSequence > 0) setEditingCode(null);
+  }, [scanSequence]);
 
   useEffect(() => {
     if (!editingCode) return;
@@ -112,22 +147,13 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
       const containerRect = container.getBoundingClientRect();
       const rowTop = rowRect.top - containerRect.top + container.scrollTop;
       const targetTop = rowTop - (container.clientHeight - rowRect.height) / 2;
-      container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+      container.scrollTo({ top: Math.max(0, targetTop), behavior: 'auto' });
     });
   }, [scrollToCode, products]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(visible));
-  }, [visible]);
-
-  useEffect(() => {
-    if (!showPicker) return;
-    function onDocClick(e: MouseEvent) {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowPicker(false);
-    }
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [showPicker]);
+    if (!visibleColumns) localStorage.setItem(STORAGE_KEY, JSON.stringify(visible));
+  }, [visible, visibleColumns]);
 
   if (products.length === 0) {
     return (
@@ -146,7 +172,12 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
     sortDesc ? b.product_code.localeCompare(a.product_code) : a.product_code.localeCompare(b.product_code)
   );
 
-  const shown = ALL_COLUMNS.filter(c => visible.includes(c.key) || (editMode && c.key === 'Is Match'));
+  const shown = ALL_COLUMNS.filter(c => (visibleColumns ?? visible).includes(c.key) || (editMode && c.key === 'Is Match'));
+  const selectableProducts = products.filter(product => product.status === selectableStatus);
+  const selectedStatusSet = new Set(selectedStatusCodes);
+  const allStatusSelected = selectableProducts.length > 0 && selectableProducts.every(product => selectedStatusSet.has(product.product_code));
+  const selectableLabel = selectableStatus === 'missing' ? 'missing' : selectableStatus === 'excluded' ? 'excluded' : 'pending';
+  const actionLabel = selectionAction === 'restore' ? 'Re-include selected' : 'Exclude selected';
 
   function beginEdit(product: Product) {
     if (!editMode || readOnly || savingCode) return;
@@ -156,7 +187,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
 
   async function saveEdit(product: Product, nextProduct?: Product) {
     const count = Number(editingValue);
-    if (!Number.isInteger(count) || count < 0 || !onCountChange) return;
+    if (!Number.isInteger(count) || count < 0 || !onCountChange || savingCode) return;
 
     setSavingCode(product.product_code);
     const result = await onCountChange(product.product_code, count);
@@ -184,7 +215,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
   }
 
   return (
-    <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden">
+    <div className="pcount-table flex h-full min-h-0 flex-col">
       <style>{`
         @keyframes overscan-shake {
           0%, 100% { transform: translateX(0); }
@@ -192,61 +223,21 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
           30%, 70% { transform: translateX(4px); }
         }
       `}</style>
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#d2d2d7] bg-[#fafafa]">
-        <span className="text-[12px] font-medium text-[#6e6e73] uppercase tracking-wider">Display these columns</span>
-        <div className="relative" ref={pickerRef}>
-          <button
-            onClick={() => setShowPicker(!showPicker)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#d2d2d7] bg-white text-[13px] font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] transition-colors cursor-pointer"
-          >
-            <svg className="w-3.5 h-3.5 text-[#6e6e73]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
-            </svg>
-            {visible.length === 0 ? 'None' : `${visible.length}/${ALL_COLUMNS.length} selected`}
-            <svg className="w-3.5 h-3.5 text-[#6e6e73]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
+      {showStatusSelection && selectableProducts.length > 0 && (
+        <div className="flex items-center justify-between gap-3 border-b border-[#d2d2d7]/60 bg-[#fbfbfd] px-4 py-3">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] font-medium text-[#1d1d1f]">
+            <input type="checkbox" checked={allStatusSelected} onChange={onToggleAllStatus} disabled={excludingPending} className="h-4 w-4 accent-[#2563eb]" />
+            Select all {selectableLabel}
+          </label>
+          <button type="button" onClick={onExcludeSelectedStatus} disabled={selectedStatusCodes.length === 0 || excludingPending} className="rounded-lg border border-[#d2d2d7] bg-white px-3 py-1.5 text-[12px] font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] disabled:cursor-not-allowed disabled:opacity-50">
+            {excludingPending ? (selectionAction === 'restore' ? 'Re-including…' : 'Excluding…') : `${actionLabel}${selectedStatusCodes.length ? ` (${selectedStatusCodes.length})` : ''}`}
           </button>
-          {showPicker && (
-            <div className="absolute right-0 top-full mt-1.5 w-64 bg-white rounded-xl border border-[#d2d2d7] shadow-lg p-2 z-20">
-              <div className="flex items-center justify-between px-2 pt-1 pb-2 border-b border-[#d2d2d7]/60">
-                <span className="text-[12px] font-semibold text-[#1d1d1f]">Display these columns</span>
-                <button
-                  onClick={() => setVisible(visible.length === ALL_COLUMNS.length ? [] : ALL_COLUMNS.map(c => c.key))}
-                  className="text-[12px] font-medium text-[#2563eb] hover:text-[#1d4ed8] hover:underline transition-colors cursor-pointer"
-                >
-                  {visible.length === ALL_COLUMNS.length ? 'Clear all' : 'Select all'}
-                </button>
-              </div>
-              <div className="max-h-64 overflow-y-auto py-1">
-                {ALL_COLUMNS.map(col => (
-                  <label
-                    key={col.key}
-                    className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[#f5f5f7] cursor-pointer select-none"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={visible.includes(col.key)}
-                      onChange={() => {
-                        setVisible(prev =>
-                          prev.includes(col.key) ? prev.filter(k => k !== col.key) : [...prev, col.key]
-                        );
-                      }}
-                      className="w-4 h-4 rounded accent-[#2563eb] cursor-pointer"
-                    />
-                    <span className="text-[13px] text-[#1d1d1f]">{col.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
-      </div>
-      <div ref={tableScrollRef} className="overflow-x-auto max-h-[65vh]">
+      )}
+      <div ref={tableScrollRef} className="pcount-product-table-scroll min-h-0 flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="bg-[#f5f5f7] border-b border-[#d2d2d7] sticky top-0 z-10">
+            <tr className="pcount-table-head sticky top-0 z-10">
               {shown.map(col => (
                 <th
                   key={col.key}
@@ -283,7 +274,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                   className={`border-b border-[#d2d2d7]/60 hover:bg-[#fafafa] cursor-pointer ${
                     isSelected ? 'bg-[#eff6ff] ring-2 ring-inset ring-[#2563eb]' : ''
                   } ${
-                    overscanCode === p.product_code ? 'animate-[overscan-shake_0.4s_ease-in-out] bg-[#fef2f2]' : ''
+                    p.status === 'excluded' ? 'opacity-50 bg-[#fafafa]' : ''
                   }`}
                 >
                   {shown.map(col => {
@@ -291,6 +282,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                       return (
                         <td key={col.key} className="px-4 py-3">
                           <div className="flex items-center gap-2 min-w-0">
+                            {showStatusSelection && p.status === selectableStatus && <input type="checkbox" checked={selectedStatusSet.has(p.product_code)} onChange={() => onToggleStatus?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={excludingPending} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} for exclusion`} />}
                             <span className={`w-2 h-2 rounded-full ${st.dot} flex-shrink-0`} />
                             <span className="font-mono text-[12px] text-[#1d1d1f] font-medium">{p.product_code}</span>
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${st.bg} ${
@@ -339,6 +331,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                                 disabled={savingCode === p.product_code}
                                 onChange={(e) => setEditingValue(e.target.value)}
                                 onClick={(e) => e.stopPropagation()}
+                                onBlur={() => { void saveEdit(p); }}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Escape') {
                                     e.preventDefault();

@@ -8,11 +8,12 @@ interface Props {
   onComplete: (code: string) => void;
   onCountChange: (code: string, count: number) => void;
   onStatusChange: (code: string, status: string) => void;
+  onNotesChange: (code: string, notes: string) => void;
   stats: { total: number; checked: number; matched: number; missing: number; pending: number };
   progress: number;
 }
 
-export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, onComplete, onCountChange, onStatusChange, stats, progress }: Props) {
+export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, onComplete, onCountChange, onStatusChange, onNotesChange, stats, progress }: Props) {
   const [editingCount, setEditingCount] = useState(false);
   const [countValue, setCountValue] = useState('0');
 
@@ -29,8 +30,8 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
   }
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
+    <div className="flex h-full w-full min-w-0 flex-col space-y-4">
+      <div className="pcount-card p-5">
         <h3 className="text-[12px] font-semibold text-[#6e6e73] uppercase tracking-wider mb-1">Progress</h3>
         <div className="flex items-center gap-4">
           <div className="relative w-16 h-16">
@@ -56,7 +57,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
       </div>
 
       {lastScan ? (
-        <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
+        <div className="pcount-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-[12px] font-semibold text-[#6e6e73] uppercase tracking-wider">
               {detailSource === 'selection' ? 'Selected Product' : 'Last Scanned'}
@@ -88,7 +89,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
                 <div className="flex items-center justify-center gap-1.5 mb-1">
                   <p className="text-[11px] text-[#6e6e73] uppercase tracking-wider">Actual Qty</p>
                   {!editingCount && (
-                    <button onClick={() => setEditingCount(true)} className="text-[10px] font-medium text-[#2563eb] hover:underline cursor-pointer">Edit</button>
+                  <button onClick={() => setEditingCount(true)} className="pcount-inline-action">Edit</button>
                   )}
                 </div>
                 {editingCount ? (
@@ -115,14 +116,14 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
             <div className="flex flex-wrap gap-2">
               {editingCount && (
                 <>
-                  <button onClick={saveCount} className="px-4 py-2 bg-[#2563eb] text-white text-[13px] rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer">Save count</button>
-                  <button onClick={() => setEditingCount(false)} className="px-4 py-2 border border-[#d2d2d7] text-[13px] rounded-lg hover:bg-[#f5f5f7] transition-colors cursor-pointer">Cancel</button>
+                  <button onClick={saveCount} className="pcount-primary-button">Save count</button>
+                  <button onClick={() => setEditingCount(false)} className="pcount-secondary-button">Cancel</button>
                 </>
               )}
               <select
                 value={lastScan.status}
                 onChange={e => onStatusChange(lastScan.product_code, e.target.value)}
-                className="flex-1 px-3 py-2 border border-[#d2d2d7] rounded-lg text-[13px] bg-white cursor-pointer"
+                className="pcount-select flex-1"
               >
                 <option value="pending">Pending</option>
                 <option value="matched">Matched</option>
@@ -130,7 +131,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
               </select>
               <button
                 onClick={() => onRecount(lastScan.product_code)}
-                className="px-4 py-2 border border-[#d2d2d7] text-[13px] rounded-lg hover:bg-[#f5f5f7] transition-colors flex items-center gap-1.5 cursor-pointer"
+                className="pcount-secondary-button flex items-center gap-1.5"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
@@ -140,15 +141,29 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
               <button
                 onClick={() => onComplete(lastScan.product_code)}
                 disabled={lastScan.counted_qty >= lastScan.system_qty && lastScan.status === 'matched'}
-                className="px-4 py-2 bg-[#15803d] text-white text-[13px] rounded-lg hover:bg-[#166534] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 cursor-pointer"
+                className="pcount-success-button flex items-center gap-1.5"
               >
                 Complete count
               </button>
             </div>
+            {lastScan.status === 'missing' && (
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-[#6e6e73] mb-1.5">Remarks</label>
+                <textarea
+                  defaultValue={lastScan.notes || ''}
+                  key={`${lastScan.product_code}:${lastScan.notes || ''}`}
+                  onBlur={e => onNotesChange(lastScan.product_code, e.target.value)}
+                  placeholder="e.g. stolen, damaged"
+                  rows={2}
+                  className="w-full resize-y rounded-lg border border-[#d2d2d7] bg-white px-3 py-2 text-[13px] text-[#1d1d1f] outline-none focus:border-[#2563eb]"
+                />
+                <p className="mt-1 text-[11px] text-[#6e6e73]">Provide a remark for missing items (e.g. "stolen").</p>
+              </div>
+            )}
           </div>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-[#d2d2d7] p-5">
+        <div className="pcount-card">
           <div className="flex flex-col items-center justify-center py-6 text-center">
             <svg className="w-10 h-10 text-[#d2d2d7] mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />

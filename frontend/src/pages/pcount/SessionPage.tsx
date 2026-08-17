@@ -2,15 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api, type Session, type Product, type ScanResult, readJson } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import ProgressCircle from '../../components/pcount/ProgressCircle';
 import ImportSystem from '../../components/pcount/ImportSystem';
 import ImportCount from '../../components/pcount/ImportCount';
-import ProductTable from '../../components/pcount/ProductTable';
+import ProductTable, { ALL_COLUMNS, ColumnPicker } from '../../components/pcount/ProductTable';
 import ScanPanel from '../../components/pcount/ScanPanel';
 import ScanBar from '../../components/pcount/ScanBar';
 import ToolHelp from '../../components/ToolHelp';
+import PcountReportPreview from '../../components/pcount/PcountReportPreview';
 
-type Stage = 'setup' | 'count' | 'verify';
+type Stage = 'setup' | 'count' | 'verify' | 'report';
 
 export default function PcountSessionPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,20 +23,25 @@ export default function PcountSessionPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [reviewMode, setReviewMode] = useState(false);
   const [sortDesc, setSortDesc] = useState(true);
   const [loading, setLoading] = useState(true);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [detailSource, setDetailSource] = useState<'scan' | 'selection'>('scan');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [overscanCode, setOverscanCode] = useState<string | null>(null);
+  const [selectedStatusCodes, setSelectedStatusCodes] = useState<string[]>([]);
+  const [excludingPending, setExcludingPending] = useState(false);
+  const [pendingExclusionError, setPendingExclusionError] = useState('');
   const [scannerCount, setScannerCount] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
+  const [scanSequence, setScanSequence] = useState(0);
+  const [verifyPanelHeight, setVerifyPanelHeight] = useState<number | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const verifyPanelRef = useRef<HTMLDivElement>(null);
   
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [tableColumns, setTableColumns] = useState<string[]>(ALL_COLUMNS.map(column => column.key));
   const scanBarRef = useRef<HTMLInputElement>(null);
   const scannerId = useRef<string>(crypto.randomUUID());
   const hasBeenInVerify = useRef(false);
@@ -47,10 +52,32 @@ export default function PcountSessionPage() {
     productsRef.current = products;
   }, [products]);
 
+  useEffect(() => {
+    setSelectedStatusCodes([]);
+    setPendingExclusionError('');
+  }, [statusFilter]);
+
+  useEffect(() => {
+    const panel = verifyPanelRef.current;
+    if (!panel) return;
+    const updateHeight = () => {
+      setVerifyPanelHeight(window.matchMedia('(min-width: 1024px)').matches ? panel.getBoundingClientRect().height : null);
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(panel);
+    window.addEventListener('resize', updateHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [stage, lastScan?.product_code, lastScan?.description, lastScan?.status]);
+
   const loadSession = useCallback(async () => {
     try {
       const s = await api.sessions.get(sessionId);
       setSession(s);
+      setTableColumns(s.display_columns?.length ? s.display_columns : ALL_COLUMNS.map(column => column.key));
 
       const prods = await api.products.list(sessionId, {
         sort: sortDesc ? 'desc' : 'asc',
@@ -141,13 +168,9 @@ export default function PcountSessionPage() {
     productsRef.current = nextProducts;
     setProducts(nextProducts);
     setLastScan(next);
+    setScanSequence(sequence => sequence + 1);
     setDetailSource('scan');
     setSelectedProduct(null);
-
-    if (next.system_qty > 0 && next.counted_qty > next.system_qty) {
-      setOverscanCode(code);
-      setTimeout(() => setOverscanCode(null), 800);
-    }
   }, [getOptimisticScan]);
 
   const handleScanFailed = useCallback((code: string) => {
@@ -163,13 +186,10 @@ export default function PcountSessionPage() {
     }
     pendingScansRef.current.delete(result.product_code);
     setLastScan(result);
+    setScanSequence(sequence => sequence + 1);
     setDetailSource('scan');
     setSelectedProduct(null);
 
-    if (result.system_qty > 0 && result.counted_qty > result.system_qty) {
-      setOverscanCode(result.product_code);
-      setTimeout(() => setOverscanCode(null), 800);
-    }
       setProducts(prev => {
         const updated = prev.map(p =>
           p.product_code === result.product_code ? { ...p, ...result } : p
@@ -193,6 +213,59 @@ export default function PcountSessionPage() {
     ));
     loadSession();
   }, [loadSession]);
+
+  const toggleStatusSelection = useCallback((code: string) => {
+    setPendingExclusionError('');
+    setSelectedStatusCodes(previous => previous.includes(code)
+      ? previous.filter(value => value !== code)
+      : [...previous, code]);
+  }, []);
+
+  const toggleAllStatusSelection = useCallback(() => {
+    setPendingExclusionError('');
+    const selectableCodes = products.filter(product => product.status === statusFilter).map(product => product.product_code);
+    setSelectedStatusCodes(previous => previous.length === selectableCodes.length ? [] : selectableCodes);
+  }, [products, statusFilter]);
+
+  const excludeSelectedStatus = useCallback(async () => {
+    const selected = new Set(selectedStatusCodes);
+    const targets = products.filter(product => product.status === statusFilter && selected.has(product.product_code));
+    if (targets.length === 0) return;
+    const nextStatus = statusFilter === 'excluded' ? 'pending' : 'excluded';
+
+    setExcludingPending(true);
+    setPendingExclusionError('');
+    const results = await Promise.allSettled(targets.map(product => fetch(
+      `/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(product.product_code)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: nextStatus, ...(nextStatus === 'pending' ? { counted_qty: 0 } : {}) }),
+      },
+    )));
+    const succeeded = new Set(targets.filter((_, index) => {
+      const result = results[index];
+      return result.status === 'fulfilled' && result.value.ok;
+    }).map(product => product.product_code));
+
+    if (succeeded.size > 0) {
+      setProducts(previous => {
+        const updated = previous.map(product => succeeded.has(product.product_code)
+          ? { ...product, status: nextStatus, ...(nextStatus === 'pending' ? { counted_qty: 0 } : {}) }
+          : product);
+        productsRef.current = updated;
+        const checked = updated.filter(product => product.status !== 'pending').length;
+        setSession(current => current ? { ...current, checked, progress: updated.length > 0 ? Math.round((checked / updated.length) * 100) : 0 } : current);
+        return updated;
+      });
+      setSelectedStatusCodes(previous => previous.filter(code => !succeeded.has(code)));
+    }
+    if (succeeded.size < targets.length) {
+      setPendingExclusionError(`${targets.length - succeeded.size} item${targets.length - succeeded.size === 1 ? '' : 's'} could not be excluded. Please try again.`);
+    }
+    setExcludingPending(false);
+  }, [products, selectedStatusCodes, sessionId, statusFilter]);
 
   const handleCompleteCount = useCallback(async (code: string) => {
     const product = productsRef.current.find((item) => item.product_code === code);
@@ -252,72 +325,71 @@ export default function PcountSessionPage() {
     setStage('verify');
   }, []);
 
+  async function openReportPreview() {
+    await loadSession();
+    setStage('report');
+  }
+
   async function handleExport() {
     if (!session || products.length === 0 || exporting) return;
     setExporting(true);
     setExportError('');
 
     try {
-      const XLSX = await import('xlsx');
-      // The final pcount output is the two paper summaries (Apple and 3PP),
-      // rather than the row-level import used during scanning.
-      const headers = ['Category', 'SOH', 'Actual Qty', 'Stock Issued', 'Variance', 'Remarks'];
+      const XLSX = await import('xlsx-js-style');
+      // Excel is the detailed product export. The report preview owns the summary output.
+      // Keep the match flag in the final column for quick row-by-row verification.
+      const exportColumns = [
+        { key: 'Product Code', label: 'Product Code' },
+        { key: 'System Qty', label: 'System Qty' },
+        { key: 'Actual Qty', label: 'Actual Qty' },
+        { key: 'Is Match', label: 'Status' },
+      ];
+      const headers = exportColumns.map(column => column.label);
       const valueFor = (product: Product, names: string[]) => {
         const wanted = names.map(name => name.toLowerCase());
         return Object.entries(product.extra || {}).find(([key]) => wanted.includes(key.trim().toLowerCase()))?.[1] || '';
       };
-      const numericExtra = (product: Product, names: string[]) => {
-        const value = valueFor(product, names).replace(/,/g, '').trim();
-        return value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
-      };
-      const summaries = new Map<string, {
-        sheet: 'Apple' | '3PP'; category: string; soh: number; actual: number;
-        issued: number | null; remarks: Set<string>;
-      }>();
 
-      for (const product of products) {
-        const brand = valueFor(product, ['brand']).trim().toLowerCase();
-        const sheet: 'Apple' | '3PP' = brand.includes('apple') || product.category.toLowerCase() === 'apple' ? 'Apple' : '3PP';
-        const category = valueFor(product, ['category', 'group']) || (sheet === 'Apple' ? 'Apple' : '3PP');
-        const key = `${sheet}:${category.trim().toLowerCase()}`;
-        const summary = summaries.get(key) || { sheet, category, soh: 0, actual: 0, issued: null, remarks: new Set<string>() };
-        summary.soh += product.system_qty;
-        summary.actual += product.counted_qty;
-        const issued = numericExtra(product, ['stock issued', 'stock_issued', 'issued qty', 'issued quantity']);
-        if (issued !== null) summary.issued = (summary.issued || 0) + issued;
-
-        const note = product.notes?.trim() || valueFor(product, ['remarks', 'remark', 'notes']).trim();
-        if (note) summary.remarks.add(note);
-        if (product.counted_qty > product.system_qty) summary.remarks.add('Excess');
-        else if (product.status === 'missing' || product.counted_qty < product.system_qty) summary.remarks.add('Missing');
-        else if (product.status === 'pending') summary.remarks.add('Pending count');
-        summaries.set(key, summary);
-      }
-
-      const rows = [...summaries.values()].map(summary => ({
-        sheet: summary.sheet,
-        values: [
-          summary.category,
-          summary.soh,
-          summary.actual,
-          summary.issued === null ? 'N/A' : summary.issued,
-          summary.soh - summary.actual,
-          summary.remarks.size ? [...summary.remarks].join('; ') : 'N/A',
-        ],
-      }));
+      const rows = [...products]
+        .filter(product => product.status !== 'excluded')
+        .sort((a, b) => a.product_code.localeCompare(b.product_code, undefined, { sensitivity: 'base', numeric: true }))
+        .map(product => {
+          const brand = valueFor(product, ['brand']).trim().toLowerCase();
+          const sheet: 'Apple' | '3PP' = brand.includes('apple') || product.category.toLowerCase() === 'apple' ? 'Apple' : '3PP';
+          const values = exportColumns.map(column => {
+            switch (column.key) {
+              case 'Product Code': return product.product_code;
+              case 'System Qty': return product.system_qty;
+              case 'Actual Qty': return product.counted_qty;
+              case 'Is Match': return product.counted_qty === product.system_qty;
+              default: return product.extra?.[column.key] ?? '';
+            }
+          });
+          return {
+            sheet,
+            values,
+            isMissing: product.status === 'missing',
+          };
+        });
 
       const workbook = XLSX.utils.book_new();
       for (const sheetName of ['Apple', '3PP'] as const) {
-        const sheetRows = rows.filter(row => row.sheet === sheetName).map(row => row.values);
-        const worksheet = XLSX.utils.aoa_to_sheet([headers, ...sheetRows]);
-        worksheet['!cols'] = [
-          { wch: 28 },
-          { wch: 12 },
-          { wch: 14 },
-          { wch: 15 },
-          { wch: 12 },
-          { wch: 42 },
-        ];
+        const sheetRows = rows.filter(row => row.sheet === sheetName);
+        const worksheet = XLSX.utils.aoa_to_sheet([headers, ...sheetRows.map(row => row.values)]);
+        sheetRows.forEach((row, index) => {
+          if (row.isMissing) {
+            for (let columnIndex = 0; columnIndex < headers.length; columnIndex += 1) {
+              const cell = worksheet[XLSX.utils.encode_cell({ r: index + 1, c: columnIndex })];
+              if (cell) {
+                cell.s = { font: { color: { rgb: 'FFDC2626' } } };
+              }
+            }
+          }
+        });
+        worksheet['!cols'] = exportColumns.map(column => ({
+          wch: column.key === 'Description' ? 42 : column.key === 'Product Code' ? 20 : 16,
+        }));
         XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
       }
 
@@ -353,14 +425,8 @@ export default function PcountSessionPage() {
     pending: products.filter(p => p.status === 'pending').length,
     matched: products.filter(p => p.status === 'matched').length,
     missing: products.filter(p => p.status === 'missing').length,
+    excluded: products.filter(p => p.status === 'excluded').length,
   };
-
-  useEffect(() => {
-    if (reviewMode && statusCounts.missing === 0) {
-      setReviewMode(false);
-      setStatusFilter('all');
-    }
-  }, [reviewMode, statusCounts.missing]);
 
   const categoryCounts = {
     all: products.length,
@@ -378,25 +444,9 @@ export default function PcountSessionPage() {
 
   return (
     <div className="space-y-4 pb-12">
-      <div className="relative overflow-hidden bg-[#0c0f18]/90 backdrop-blur-2xl rounded-xl border border-white/10 p-5">
-        <div className="pointer-events-none absolute inset-0 rounded-xl overflow-hidden">
-          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#172554]/85 via-[#1e3a8a]/45 to-transparent" />
-          <div
-            className="absolute inset-0 opacity-[0.38] mix-blend-overlay"
-            style={{
-              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-            }}
-          />
-        <div
-          className="absolute inset-0 opacity-[0.32] mix-blend-overlay"
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n2'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.6' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n2)'/%3E%3C/svg%3E")`,
-          }}
-        />
-        </div>
-        <div className="relative flex items-center justify-between">
-          <div>
+      <div className="pcount-session-header">
+        <div className="pcount-header-main">
+          <div className="pcount-session-identity">
             <div className="flex items-center gap-2 group">
               <input
                 ref={nameInputRef}
@@ -409,12 +459,12 @@ export default function PcountSessionPage() {
                 }}
                 
                 title="Click to rename session"
-                className="text-[18px] font-semibold text-white bg-transparent border-none outline-none focus:border-b focus:border-white/70 pb-0.5 cursor-text placeholder:text-white/50"
+                className="text-[18px] font-semibold text-[#1d1d1f] bg-transparent border-none outline-none focus:border-b focus:border-[#1d1d1f] pb-0.5 cursor-text placeholder:text-[#9a9aa0]"
               />
               <button
                 onClick={() => nameInputRef.current?.focus()}
                 title="Rename session"
-                className="text-white/60 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
+                className="text-[#6e6e73] hover:text-[#1d1d1f] transition-colors p-1 rounded-lg hover:bg-[#f5f5f7] cursor-pointer shrink-0"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9" />
@@ -422,9 +472,15 @@ export default function PcountSessionPage() {
                 </svg>
               </button>
             </div>
-            <p className="text-[12px] text-white/90 mt-0.5">
-              {session.status} &middot; Created {new Date(session.created_at).toLocaleDateString()}
-            </p>
+            <div className="pcount-session-meta">
+              <span>Created {new Date(session.created_at).toLocaleDateString()}</span>
+              {stage === 'verify' && products.length > 0 && scannerCount > 0 && (
+                <span className="pcount-live-status">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#86efac] animate-pulse" />
+                  {scannerCount} active {scannerCount === 1 ? 'scanner' : 'scanners'}
+                </span>
+              )}
+            </div>
             {session.is_owner && session.join_code && (
               <div className="mt-2 inline-flex items-center gap-2">
                 <span className="text-[12px] text-white/90">Join code</span>
@@ -452,69 +508,57 @@ export default function PcountSessionPage() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-4">
-            <ToolHelp
-              toolName="PCount session"
-              purpose="Import inventory, count products collaboratively, identify quantity differences, and prepare a verified physical-count result."
-              steps={[
-                'Import the system inventory in System Import.',
-                'Import an existing count when available, or continue directly to scanning.',
-                'Share the join code with authorized counters.',
-                'Scan and review matched, missing, and excess quantities.',
-                'Correct exceptions and export the completed result.',
-              ]}
-              cards={[
-                { title: 'Live updates', description: 'Connected counters receive product and progress changes in real time.' },
-                { title: 'Scanning', description: 'Keep the scan field focused and verify visual feedback after each product code.' },
-              ]}
-            />
-            {stage === 'verify' && (
-              <button
-                onClick={handleExport}
-                disabled={products.length === 0 || exporting}
-                title="Export Excel"
-                aria-label="Export Excel"
-                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-white/30 text-[#bbf7d0] transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {exporting ? (
-                  <span className="text-[11px] text-white/80">&hellip;</span>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M4 3h10l4 4v7H4z" fill="currentColor" opacity=".16" />
-                    <path d="M4 3h10l4 4v7H4zM14 3v4h4" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                    <path d="m7 7 3 4m0-4-3 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                    <path d="M14 15v5m0 0-2-2m2 2 2-2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-                <span className="sr-only">Export Excel</span>
-              </button>
-            )}
-            {stage === 'verify' && products.length > 0 && scannerCount > 0 && (
-              <div className="flex items-center gap-1.5 text-[12px] text-white bg-white/20 rounded-full px-3 py-1.5 backdrop-blur-sm">
-                <span className="w-2 h-2 rounded-full bg-[#4ade80] animate-pulse" />
-                {scannerCount}
-              </div>
-            )}
-            <ProgressCircle progress={progress} size={56} strokeWidth={4} color="#bfdbfe" trackColor="rgba(255,255,255,0.25)" />
+          <div className="pcount-header-utility">
+            <div className="pcount-header-actions">
+              <ToolHelp
+                toolName="PCount session"
+                purpose="Import inventory, count products collaboratively, identify quantity differences, and prepare a verified physical-count result."
+                steps={[
+                  'Import the system inventory in System Import.',
+                  'Import an existing count when available, or continue directly to scanning.',
+                  'Share the join code with authorized counters.',
+                  'Scan and review matched, missing, and excess quantities.',
+                  'Correct exceptions and export the completed result.',
+                ]}
+                cards={[
+                  { title: 'Live updates', description: 'Connected counters receive product and progress changes in real time.' },
+                  { title: 'Scanning', description: 'Keep the scan field focused and verify visual feedback after each product code.' },
+                ]}
+              />
+              {stage === 'verify' && (
+                <button
+                  onClick={handleExport}
+                  disabled={products.length === 0 || exporting}
+                  title="Export Excel"
+                  aria-label="Export Excel"
+                  className="pcount-header-button"
+                >
+                  {exporting ? <span className="text-[11px] text-white/80">&hellip;</span> : <span aria-hidden="true">Export Excel</span>}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {exportError && <p className="mt-3 text-[12px] text-[#fca5a5]">{exportError}</p>}
 
-        <nav className="relative flex items-center gap-2 mt-4 text-[12px]">
+        <nav className="pcount-stage-nav" aria-label="PCount workflow">
           {[
             { key: 'setup', label: '1. System Import' },
             { key: 'count', label: '2. Count Import' },
             { key: 'verify', label: '3. Scan & Verify' },
+            { key: 'report', label: '4. Report' },
           ].map((item, i) => (
-            <span key={item.key} className="flex items-center gap-2">
-              {i > 0 && <span className="text-white/40 text-[12px]">/</span>}
+            <span key={item.key} className="pcount-stage-item">
+              {i > 0 && <span className="pcount-stage-divider" aria-hidden="true" />}
               <button
-                onClick={() => setStage(item.key as 'setup' | 'count' | 'verify')}
-                className={`transition-colors cursor-pointer pb-0.5 underline underline-offset-4 ${
+                onClick={() => item.key === 'report' ? void openReportPreview() : setStage(item.key as Stage)}
+                disabled={item.key === 'report' && products.length === 0}
+                aria-current={stage === item.key ? 'step' : undefined}
+                className={`pcount-stage-link ${
                   stage === item.key
-                    ? 'text-white font-medium'
-                    : 'text-white/80 hover:text-white'
+                    ? 'is-active'
+                    : ''
                 }`}
               >
                 {item.label}
@@ -556,14 +600,14 @@ export default function PcountSessionPage() {
 
       {stage === 'verify' && products.length > 0 && (
         <>
-          <div className="bg-white rounded-xl border border-[#d2d2d7] p-3">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="inline-flex rounded-lg overflow-hidden border border-[#d2d2d7] divide-x divide-[#d2d2d7]">
+          <div className="pcount-toolbar">
+            <div className="pcount-toolbar-row">
+              <div className="pcount-filter-group" aria-label="Filter by status">
                 {Object.entries(statusCounts).map(([key, count]) => (
                   <button
                     key={key}
-                    onClick={() => { setStatusFilter(key); setReviewMode(false); }}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
+                    onClick={() => setStatusFilter(key)}
+                    className={`pcount-filter-button ${
                       statusFilter === key
                         ? 'bg-[#2563eb] text-white'
                         : 'bg-white text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]'
@@ -578,12 +622,12 @@ export default function PcountSessionPage() {
                   </button>
                 ))}
               </div>
-              <div className="inline-flex rounded-lg overflow-hidden border border-[#d2d2d7] divide-x divide-[#d2d2d7]">
+              <div className="pcount-filter-group" aria-label="Filter by category">
                 {Object.entries(categoryCounts).map(([key, count]) => (
                   <button
                     key={key}
-                    onClick={() => { setCategoryFilter(categoryFilter === key ? 'all' : key); setReviewMode(false); }}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
+                    onClick={() => setCategoryFilter(categoryFilter === key ? 'all' : key)}
+                    className={`pcount-filter-button ${
                       categoryFilter === key
                         ? 'bg-[#2563eb] text-white'
                         : 'bg-white text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]'
@@ -598,35 +642,19 @@ export default function PcountSessionPage() {
                   </button>
                 ))}
               </div>
-              {statusCounts.missing > 0 && (
-                <button
-                  onClick={() => {
-                    if (reviewMode) {
-                      setReviewMode(false);
-                      setStatusFilter('all');
-                    } else {
-                      setReviewMode(true);
-                      setStatusFilter('missing');
-                      setCategoryFilter('all');
-                      setSearchQuery('');
-                      setLastScan(null);
-                      setSelectedProduct(null);
-                    }
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
-                    reviewMode
-                      ? 'border-[#2563eb] bg-[#eff6ff] text-[#1d4ed8]'
-                      : 'border-[#fde68a] bg-[#fffbeb] text-[#a16207] hover:bg-[#fef3c7]'
-                  }`}
-                >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                    <path d="M4 5h16M7 12h10M10 19h4" strokeLinecap="round" />
-                  </svg>
-                  {reviewMode ? 'Exit review' : 'Review differences'}
-                  <span className="rounded-full bg-white/70 px-1.5 py-px text-[10px]">{statusCounts.missing}</span>
-                </button>
-              )}
-              <div className="flex-1" />
+              <div className="pcount-toolbar-spacer" />
+              <ColumnPicker
+                columns={tableColumns}
+                onChange={async (columns) => {
+                  setTableColumns(columns);
+                  setSession(current => current ? { ...current, display_columns: columns } : current);
+                  try {
+                    await fetch(`/api/pcount/sessions/${sessionId}/display-columns`, {
+                      method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ columns }),
+                    });
+                  } catch {}
+                }}
+              />
               <div className="relative">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#9a9aa0] pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="11" cy="11" r="8" />
@@ -635,13 +663,14 @@ export default function PcountSessionPage() {
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={e => { setSearchQuery(e.target.value); setReviewMode(false); }}
+                  onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Search by code or description..."
-                  className="pl-9 pr-3 py-1.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb] w-[220px] placeholder:text-[#9a9aa0]"
+                  className="pcount-search-input"
                 />
               </div>
             </div>
           </div>
+          {pendingExclusionError && <p className="mt-2 text-[12px] text-[#b45309]">{pendingExclusionError}</p>}
 
           <ScanBar
             ref={scanBarRef}
@@ -651,18 +680,12 @@ export default function PcountSessionPage() {
             onScanFailed={handleScanFailed}
           />
 
-          {reviewMode && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] px-3.5 py-2.5 text-[12px] text-[#1e40af]">
-              <span><strong>Review mode:</strong> only mismatched rows are shown. Edit the physical count directly in the Qty column.</span>
-              <span className="whitespace-nowrap text-[#3b82f6]">Enter or Tab saves &middot; Esc cancels</span>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2">
+          <div className="pcount-verify-grid grid grid-cols-1 items-stretch gap-4 lg:grid-cols-3">
+            <div className="pcount-verify-table-column h-full min-h-0 min-w-0 lg:col-span-2" style={verifyPanelHeight ? { height: verifyPanelHeight } : undefined}>
               <ProductTable
                 products={filteredProducts}
                 defaultColumns={session.display_columns || []}
+                visibleColumns={tableColumns}
                 sortDesc={sortDesc}
                 onToggleSort={() => setSortDesc(!sortDesc)}
                 onUpdate={handleProductUpdate}
@@ -672,13 +695,21 @@ export default function PcountSessionPage() {
                   setDetailSource('selection');
                 }}
                 selectedCode={selectedProduct?.product_code || lastScan?.product_code}
-                overscanCode={overscanCode}
-                scrollToCode={lastScan?.product_code || selectedProduct?.product_code}
-                editMode={reviewMode}
+                scrollToCode={detailSource === 'scan' ? lastScan?.product_code : null}
+                scanSequence={scanSequence}
+                editMode
                 onCountChange={handleCountChange}
+                showStatusSelection={statusFilter === 'pending' || statusFilter === 'missing' || statusFilter === 'excluded'}
+                selectableStatus={statusFilter === 'missing' ? 'missing' : statusFilter === 'excluded' ? 'excluded' : 'pending'}
+                selectedStatusCodes={selectedStatusCodes}
+                onToggleStatus={toggleStatusSelection}
+                onToggleAllStatus={toggleAllStatusSelection}
+                onExcludeSelectedStatus={() => void excludeSelectedStatus()}
+                selectionAction={statusFilter === 'excluded' ? 'restore' : 'exclude'}
+                excludingPending={excludingPending}
               />
             </div>
-            <div className="lg:col-span-1">
+            <div ref={verifyPanelRef} className="self-start min-h-0 min-w-0 lg:col-span-1">
               <ScanPanel
                 lastScan={lastScan}
                 detailSource={detailSource}
@@ -716,6 +747,19 @@ export default function PcountSessionPage() {
                     }
                   } catch {}
                 }}
+                onNotesChange={async (code, notes) => {
+                  try {
+                    const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {
+                      method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ notes }),
+                    });
+                    const data = await readJson<Partial<Product>>(res);
+                    if (res.ok) {
+                      setProducts(prev => prev.map(p => p.product_code === code ? { ...p, ...data } : p));
+                      productsRef.current = productsRef.current.map(p => p.product_code === code ? { ...p, ...data } : p);
+                      if (lastScan?.product_code === code) setLastScan(prev => prev ? { ...prev, ...data } as ScanResult : null);
+                    }
+                  } catch {}
+                }}
                 stats={{
                   total: statusCounts.all,
                   checked: statusCounts.all - statusCounts.pending,
@@ -740,6 +784,13 @@ export default function PcountSessionPage() {
             Import System Export
           </button>
         </div>
+      )}
+      {stage === 'report' && session && (
+        <PcountReportPreview
+          session={session}
+          products={products}
+          onClose={() => setStage('verify')}
+        />
       )}
     </div>
   );

@@ -13,10 +13,17 @@ export default function ProgressCircle({ progress, size = 48, strokeWidth = 4, c
 
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        className="-rotate-90"
+        shapeRendering="geometricPrecision"
+        aria-hidden="true"
+      >
         <circle
           cx={size / 2} cy={size / 2} r={r}
-          fill="none" stroke={trackColor} strokeWidth={strokeWidth}
+          fill="none" stroke={trackColor} strokeWidth={strokeWidth} strokeLinecap="round"
         />
         <circle
           cx={size / 2} cy={size / 2} r={r}
