@@ -14,7 +14,7 @@ const iconMap: Record<string, string> = {
 function ToolIcon({ icon, active }: { icon: string; active: boolean }) {
   const path = iconMap[icon] || iconMap.default;
   return (
-    <div className={`w-10 h-10 flex items-center justify-center rounded-xl transition-colors ${active ? 'bg-[#2563eb] text-white' : 'bg-[#f5f5f7] text-[#2563eb]'}`}>
+    <div className={`flex h-5 w-5 items-center justify-center transition-colors ${active ? 'text-[#1d1d1f]' : 'text-[#1d1d1f]'}`}>
       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d={path} />
       </svg>
@@ -33,6 +33,8 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const visibleTools = tools.filter(tool => tool.name.trim().toLowerCase() !== 'site monitor');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -42,15 +44,15 @@ export default function DashboardPage() {
   }
 
   return (
-    <div>
-      <div className="mb-10">
-        <h1 className="text-[28px] font-semibold text-[#1d1d1f] tracking-tight">Tools</h1>
-        <p className="text-[14px] text-[#6e6e73] mt-1.5">
+    <div className="flex min-h-[calc(100vh-128px)] w-full flex-col bg-[#F4F3F6]">
+      <div className="mb-8">
+        <h1 className="text-[28px] font-semibold leading-[1.1] tracking-[-0.022em] text-[#1d1d1f]">Tools</h1>
+        <p className="mt-1.5 text-[14px] leading-[1.4] tracking-[-0.005em] text-[#6e6e73]">
           Welcome back, {user?.fullName || user?.email}
         </p>
       </div>
 
-      {tools.length === 0 ? (
+      {visibleTools.length === 0 ? (
         <div className="bg-white rounded-xl border border-[#d2d2d7] p-10 text-center">
           <div className="w-10 h-10 mx-auto mb-4 flex items-center justify-center rounded-xl bg-[#f5f5f7] text-[#2563eb]">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -63,20 +65,25 @@ export default function DashboardPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {tools.map((tool) => (
+        <div className="mx-auto my-auto grid w-full max-w-[1120px] -translate-y-[clamp(16px,4vh,40px)] auto-rows-fr grid-cols-1 justify-center gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {visibleTools.map((tool) => (
             <a
               key={tool.id}
               href={tool.url}
-              className="group bg-white rounded-xl border border-[#d2d2d7] p-5 hover:border-[#2563eb] transition-all no-underline"
+              className="group relative flex h-full min-h-[clamp(150px,18vw,190px)] w-full flex-col rounded-[14px] border border-black/[0.06] bg-[#FFFFFF] p-4 no-underline shadow-[0_1px_2px_rgba(0,0,0,0.02),0_3px_10px_rgba(0,0,0,0.025)] transition-all duration-200 hover:-translate-y-0.5 hover:border-black/[0.1] hover:shadow-[0_2px_4px_rgba(0,0,0,0.04),0_8px_18px_rgba(0,0,0,0.07)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 focus-visible:ring-offset-2"
             >
               <ToolIcon icon={tool.icon} active={false} />
-              <h3 className="text-[15px] font-semibold text-[#1d1d1f] mt-4 group-hover:text-[#2563eb] transition-colors">
+              <h3 className="mt-3 text-[19px] font-medium leading-[1.1] tracking-[-0.014em] text-[#1d1d1f]">
                 {tool.name}
               </h3>
-              <p className="text-[13px] text-[#6e6e73] mt-1.5 leading-relaxed">
+              <p className="mt-1.5 max-w-[18rem] flex-1 pr-4 text-[12px] leading-[1.35] tracking-[-0.002em] text-[#1d1d1f]">
                 {tool.description}
               </p>
+              <span aria-hidden="true" className="absolute bottom-3.5 right-3.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#1d1d1f] text-white transition-transform duration-200 group-hover:translate-x-0.5">
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </span>
             </a>
           ))}
         </div>

@@ -57,9 +57,9 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7]">
+    <div className="min-h-screen bg-[#F4F3F6]">
       <header className="bg-white/80 backdrop-blur-xl border-b border-black/10 sticky top-0 z-50 print:hidden">
-        <div className="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between">
+        <div className="mx-auto flex h-12 max-w-[1200px] items-center justify-between px-6">
           <div className="flex items-center gap-7">
             <Link to="/" className="flex items-center gap-2 text-[14px] font-semibold text-[#1d1d1f] tracking-tight hover:opacity-70 transition-opacity">
               <span className="w-6 h-6 rounded-[7px] bg-[#1d1d1f] text-white flex items-center justify-center text-[10px] font-bold">M</span>
@@ -145,7 +145,7 @@ export default function Layout() {
           </div>
         </div>
       )}
-      <main className="max-w-5xl mx-auto px-6 py-10">
+      <main className="mx-auto w-full max-w-[1200px] px-6 py-10">
         {isToolPage && (
           <Link to={isPcountSessionPage ? '/pcount' : '/'} className="print:hidden inline-flex items-center gap-1.5 mb-5 text-[12px] font-medium text-[#6e6e73] hover:text-[#2563eb] transition-colors">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
