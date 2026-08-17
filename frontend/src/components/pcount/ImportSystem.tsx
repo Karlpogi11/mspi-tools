@@ -215,7 +215,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
       ? ['Description', ...selectedColumns.filter(column => column !== 'Description')]
       : displayColumnOptions;
     return (
-      <div className="bg-white rounded-xl border border-[#d2d2d7] p-6">
+      <div className="pcount-card p-6">
         {disabled && (
           <div className="mb-4 px-4 py-3 rounded-lg bg-[#fef2f2] border border-[#fecaca] text-[13px] text-[#dc2626] flex items-center gap-2">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
@@ -301,7 +301,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
 
   if (hasProducts && showUpload && confirmReplace) {
     return (
-      <div className="bg-white rounded-xl border border-[#d2d2d7] p-6">
+      <div className="pcount-card p-6">
         <h2 className="text-[16px] font-semibold text-[#1d1d1f] mb-4">Replace System Export</h2>
         <p className="text-[13px] text-[#dc2626] mb-4">
           This will replace all {productCount} existing products with the new file. This cannot be undone.
@@ -450,11 +450,11 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
 
             <div className="flex gap-3">
               <button onClick={() => { if (confirmReplace) { setShowUpload(false); setConfirmReplace(false); } else { setFile(null); setHeaders([]); setPreview([]); setRawRows([]); workbookRef.current = null; } }}
-                className="px-4 py-2 border border-[#d2d2d7] text-[13px] rounded-lg hover:bg-[#f5f5f7] transition-colors cursor-pointer">
+                className="pcount-secondary-button">
                 Cancel
               </button>
               <button onClick={() => importWithFullData(confirmReplace)} disabled={importing || disabled || !mapping.productCode || headers.length === 0}
-                className="px-4 py-2 bg-[#2563eb] text-white text-[13px] rounded-lg hover:bg-[#1d4ed8] disabled:opacity-50 transition-colors cursor-pointer">
+                className="pcount-primary-button">
                 {importing ? 'Importing...' : confirmReplace ? `Replace with ${rawRows.length} Products` : `Import ${rawRows.length} Products`}
               </button>
             </div>

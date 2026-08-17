@@ -192,7 +192,7 @@ const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId
   }, []);
 
   return (
-    <div className={`bg-white rounded-xl border shadow-sm p-3 transition-colors duration-200 ${
+    <div className={`pcount-scanbar transition-colors duration-200 ${
       overscan ? 'border-[#dc2626] ring-2 ring-[#dc2626]/30' : 'border-[#d2d2d7]'
     }`}>
       <form onSubmit={handleSubmit} className="flex items-center gap-3">
@@ -205,7 +205,7 @@ const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder="Scan or type barcode..."
-            className="w-full px-3 py-2 border border-[#d2d2d7] rounded-lg text-[14px] font-mono bg-[#f5f5f7] focus:outline-none focus:border-[#2563eb] focus:ring-1 focus:ring-[#2563eb] focus:bg-white transition-colors"
+            className="pcount-scan-input"
             autoComplete="off"
             autoFocus
           />
@@ -217,7 +217,7 @@ const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId
         <button
           type="submit"
           disabled={!value.trim()}
-          className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors cursor-pointer"
+          className="pcount-primary-button"
         >
           Enter
         </button>

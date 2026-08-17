@@ -685,7 +685,7 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
          ELSE COALESCE(counted_qty, 0)
        END,
        status = CASE
-         WHEN status IN ('pending', 'missing', 'matched') AND counted_qty >= system_qty THEN 'matched'
+         WHEN status IN ('pending', 'missing', 'matched') AND COALESCE(counted_qty, 0) + 1 >= system_qty THEN 'matched'
          WHEN status IN ('pending', 'missing', 'matched') THEN 'missing'
          ELSE status
        END

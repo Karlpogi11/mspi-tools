@@ -226,7 +226,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
   const blankRows = alignedProducts.filter(product => product.counted_qty === null).length;
 
   return (
-    <div className="bg-white rounded-xl border border-[#d2d2d7] p-6">
+    <div className="pcount-card p-6">
       <h2 className="text-[16px] font-semibold text-[#1d1d1f] mb-4">Import Actual Count</h2>
       <p className="text-[13px] text-[#6e6e73] mb-4">
         Upload the Apple and 3PP count workbook. Rows are pivoted, sorted Z\u2013A, and aligned to the system import by product code.
@@ -237,7 +237,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
           <div className="flex items-center gap-3">
             <button
               onClick={() => inputRef.current?.click()}
-              className="px-3 py-1.5 border border-[#d2d2d7] text-[13px] font-medium rounded-lg hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+              className="pcount-secondary-button"
             >
               Select count Excel file
             </button>
@@ -245,7 +245,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
             <button
               onClick={handleDownloadTemplate}
               disabled={downloadingTemplate}
-              className="text-[12px] text-[#2563eb] hover:text-[#1d4ed8] disabled:opacity-50 cursor-pointer"
+              className="pcount-inline-action disabled:opacity-50"
             >
               {downloadingTemplate ? 'Preparing template\u2026' : 'Download count template'}
             </button>
@@ -321,14 +321,14 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
               <div className="flex gap-3 mt-4">
                 <button
                   onClick={() => { setFile(null); setTabs([]); workbookRef.current = null; }}
-                  className="px-4 py-2 border border-[#d2d2d7] text-[13px] rounded-lg hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+                  className="pcount-secondary-button"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleImport}
                   disabled={importing || (systemProducts.length > 0 ? alignedProducts.every(product => product.counted_qty === null) : pivotedProducts.length === 0)}
-                  className="px-4 py-2 bg-[#2563eb] text-white text-[13px] rounded-lg hover:bg-[#1d4ed8] disabled:opacity-50 transition-colors cursor-pointer"
+                  className="pcount-primary-button"
                 >
                   {importing ? 'Importing\u2026' : `Import ${systemProducts.length > 0 ? alignedProducts.filter(product => product.counted_qty !== null).length : totalProducts} Products`}
                 </button>
