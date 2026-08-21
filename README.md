@@ -1,153 +1,114 @@
-# MSPI Internal Tools — Monorepo
+# MSPI Tools
 
-Centralized internal tools launcher with role-based access and subdomain SSO
-via shared JWT cookies. Built as a Turborepo monorepo.
+Internal operations platform for `tools.mspi.io`, built for secure, role-based access to MSPI workflows.
+
+## What it provides
+
+- **Launcher** — role-aware access to internal tools
+- **PCount** — collaborative product counting with live WebSocket updates
+- **ReFormat** — Excel/CSV column mapping and export
+- **Consumables** — consumable master data and label workflows
+- **PDF Extractor** — PDF upload, OCR extraction, validation, filing, and AWB logging
+- **Site Monitor** — RFPU deployment and health monitoring
+- **Admin** — users, roles, tool access, password resets, and audit events
 
 ## Architecture
 
-- **Monorepo:** Turborepo + npm workspaces
-- **Launcher (tools.mspi.io):** React + Vite frontend, Express backend
-- **RFPU (rfpu.mspi.io):** Already live — placeholder in monorepo with shared auth
-- **Shared packages:** `@mspi/shared-db` (Drizzle schema + connection), `@mspi/shared-auth` (JWT middleware)
-- **Database:** MySQL, one shared DB across all apps
-- **Auth:** Custom JWT httpOnly cookie at root domain (`.mspi.io`) for cross-subdomain SSO
+- React + Vite frontend
+- Express + TypeScript backend
+- MySQL with Drizzle ORM
+- JWT authentication in secure HTTP-only cookies
+- Token-version revocation for password changes and resets
+- Helmet security headers, request throttling, structured logging, and audit logging
+- PDF magic-byte validation before processing
+- Shared API cache with stale-while-revalidate behavior for fast navigation
 
-## Prerequisites
+## Requirements
 
 - Node.js 18+
-- MySQL database
-- Turborepo (`npx turbo` or `npm install -g turbo`)
+- MySQL 8+
+- npm 10+
 
-## Environment Variables
+## Local development
 
-### Launcher Backend (`apps/launcher/backend/.env`)
-
-```
-DATABASE_URL=mysql://user:password@host:port/mspi_tools
-JWT_SECRET=your-secret-key-change-in-production
-ALLOWED_EMAIL_DOMAIN=mspi.io
-COOKIE_DOMAIN=.mspi.io
-PORT=3000
-NODE_ENV=development
-FRONTEND_URL=http://localhost:5173
-```
-
-### RFPU Backend (`apps/rfpu/backend/.env`)
-
-```
-PORT=3001
-JWT_SECRET=your-secret-key-change-in-production
-COOKIE_DOMAIN=.mspi.io
-NODE_ENV=development
-FRONTEND_URL=http://localhost:5180
-```
-
-## Setup
+Install dependencies:
 
 ```bash
-# Install all dependencies (root)
 npm install
+cd backend && npm install
+cd ../frontend && npm install
+cd ..
+```
 
-# Push DB schema and seed initial data
-npm run db:push
-npm run seed
+Configure `backend/.env`:
 
-# Start all dev servers
+```env
+DATABASE_URL=mysql://user:password@host:port/database
+JWT_SECRET=replace-with-a-long-random-secret
+PORT=3001
+NODE_ENV=development
+FRONTEND_URL=http://localhost:5173
+COOKIE_DOMAIN=
+```
+
+Start the frontend and backend:
+
+```bash
 npm run dev
 ```
 
-This starts:
-- Launcher backend on `:3000`
-- Launcher frontend on `:5173`
-- RFPU backend on `:3001`
-- RFPU frontend on `:5180`
-
-To run a single app's dev server:
-```bash
-npm run dev -w @mspi/launcher-backend
-npm run dev -w @mspi/launcher-frontend
-```
-
-## Default Admin Account (after seeding)
-
-- Email: `admin@mspi.io`
-- Password: `admin123`
-
-## Adding New Tools
-
-1. Log in as Admin on the launcher
-2. Go to **Tools** in the nav
-3. Click **Add tool**, fill in the URL and details
-4. Assign the tool to appropriate roles
-
-New tools appear on the launcher dashboard for users with matching roles.
-
-## Adding a New App to the Monorepo
-
-1. Create `apps/your-app/backend/` and `apps/your-app/frontend/`
-2. In the backend, add `@mspi/shared-auth` as a dependency
-3. Use `authenticateToken` middleware from `@mspi/shared-auth` for protected routes
-4. Use connection/schema from `@mspi/shared-db` if DB access is needed
-5. Register the app's URL in the launcher's tools table via the admin panel
-
-## Cookie-Based SSO
-
-The JWT token is set as an httpOnly cookie with `Domain=.mspi.io`. Any subdomain
-reads the same session cookie, enabling seamless redirects between tools without
-re-authentication.
-
-The `authenticateToken` middleware in `packages/shared-auth/src/index.ts` works
-in any Express backend with zero modification — just install `@mspi/shared-auth`
-and use it.
-
-## Deployment
-
-Each app deploys independently to its own subdomain:
+Run validation builds:
 
 ```bash
-# Build everything
-npm run build
-
-# Deploy each app's dist/ to its respective host
-# Backend: host the backend/src with Node on Hostinger
-# Frontend: host dist/ as static files
+cd backend && npm run build
+cd ../frontend && npm run build
 ```
 
-## Available Tools
+Apply the reviewed database migration:
 
-- **Site Monitor** (`/rfpu`) — real-time RFPU deployment monitoring
-- **PCount** (`/pcount`) — product counting sessions
-- **ReFormat** (`/reformat`) — Excel/CSV column remapping
-- **Label Maker** (`/consumables`) — consumables expiry labels
-- **PDF Extractor** (`/pdf-extractor`) — drag-and-drop AWB/invoice PDFs; extracts invoice ref, HAWB, amount, delivery date and qty via OCR (tesseract.js), files them by month, logs to the `awb_log` table (Received Date is blank by design). Copy or export the results as Excel. A local inbox watcher is available via `npm run watch:pdf-extractor -w backend`. See `vault/Tool - PDF Extractor.md`.
-
-## Project Structure
-
+```bash
+npx drizzle-kit migrate --config=./backend/drizzle.config.ts
 ```
+
+## Project structure
+
+```text
 mspi-tools/
-├── turbo.json
-├── package.json              # Workspace root
-├── apps/
-│   ├── launcher/
-│   │   ├── backend/          # Express server (tools.mspi.io)
-│   │   │   ├── src/
-│   │   │   │   ├── routes/   # auth, tools, admin
-│   │   │   │   ├── seed.ts
-│   │   │   │   └── index.ts
-│   │   │   └── drizzle.config.ts
-│   │   └── frontend/         # React + Vite
-│   │       ├── src/
-│   │       │   ├── components/
-│   │       │   ├── lib/
-│   │       │   ├── pages/
-│   │       │   └── App.tsx
-│   │       └── vite.config.ts
-│   └── rfpu/
-│       ├── backend/          # Express server (rfpu.mspi.io)
-│       └── frontend/         # Placeholder React app
-├── packages/
-│   ├── shared-auth/          # authenticateToken middleware
-│   ├── shared-db/            # Drizzle schema + connection
-│   └── shared-config/        # Shared tsconfig base
-└── README.md
+├── backend/
+│   ├── src/
+│   │   ├── auth.ts
+│   │   ├── db/
+│   │   ├── pdf-extractor/
+│   │   ├── pcount/
+│   │   └── routes/
+│   └── drizzle/
+├── frontend/
+│   └── src/
+│       ├── components/
+│       ├── lib/
+│       └── pages/
+├── .github/
+│   ├── dependabot.yml
+│   └── workflows/
+└── vault/
+```
+
+## Security and deployment
+
+- Production builds and deployments are scoped to `tools.mspi.io`.
+- Do not commit `.env` files, credentials, JWT secrets, or customer data.
+- PDF uploads are checked by file signature, not only filename extension.
+- Authentication changes invalidate previously issued tokens when required.
+- CI runs TypeScript/build validation and high-severity dependency auditing.
+- Dependabot monitors npm dependencies.
+
+## Adding a tool
+
+Prefer adding a focused domain module to the existing backend and frontend rather than creating a separate application. New tools should use the shared authentication, database access, audit logging, API cache, and restrained visual system.
+
+Before opening a pull request, verify:
+
+```bash
+cd backend && npm run build
+cd ../frontend && npm run build
 ```
