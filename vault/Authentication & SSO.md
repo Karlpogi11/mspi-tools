@@ -87,6 +87,23 @@ function getSessionAuth(request: IncomingMessage): { userId: number } | null {
 
 ---
 
+## 🔁 Password Flows
+
+### Self-service change
+`POST /api/auth/change-password` (authenticated, rate-limited) — requires the user to know their **current** password. Clears the session cookie on success. Password rules: 12–128 characters with uppercase, lowercase, number, and special character.
+
+### Admin reset (forgotten password)
+`PATCH /api/admin/users/:id/password` (admin-only) — sets a new password for any user directly:
+
+- Reuses the same validation rules as self-service change (`passwordValidationError` in `backend/src/routes/auth.ts`).
+- Admins **cannot** reset their own account — another admin must do it.
+- The user signs in with the new password; the admin hands it over in person or via a secure channel (no email/SMTP involved).
+- Existing JWTs stay valid until expiry (8h) since sessions are cookie-based with no server-side store.
+
+UI: **Admin → Users → Reset password** button opens a modal to enter the new password.
+
+---
+
 ## 🔗 Related Notes
 - [[Architecture Overview]]
 - [[Database Schema]]

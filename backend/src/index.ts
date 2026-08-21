@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import path from 'path';
 import http from 'http';
 import { fileURLToPath } from 'url';
@@ -19,6 +20,7 @@ import consumablesRoutes from './consumables/routes.js';
 import pdfExtractorRoutes from './pdf-extractor/routes.js';
 import { ensureAwbLogTable } from './pdf-extractor/store.js';
 import { ocrPool } from './pdf-extractor/ocr.js';
+import { httpLogger, logger } from './logger.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -35,11 +37,13 @@ server.keepAliveTimeout = 65_000;
 server.headersTimeout = 66_000;
 
 app.use(compression());
+app.use(helmet());
+app.use(httpLogger);
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 
 app.use('/api/auth', authRoutes);
@@ -106,23 +110,23 @@ if (existsSync(frontendIndex)) {
 
 async function start() {
   server.listen(PORT, () => {
-    console.log(`Gateway running on port ${PORT}`);
+    logger.info({ port: PORT }, 'Gateway running');
     void ocrPool.warmup()
-      .then(() => console.log('PDF Extractor OCR workers ready'))
-      .catch((error) => console.warn('PDF Extractor OCR unavailable until the next server restart', error));
+      .then(() => logger.info('PDF Extractor OCR workers ready'))
+      .catch((error) => logger.warn({ err: error }, 'PDF Extractor OCR unavailable until the next server restart'));
   });
 
   try {
     await initDb();
-    console.log('Database connected');
+    logger.info('Database connected');
     await ensureAwbLogTable();
-    console.log('PDF Extractor log table ready');
+    logger.info('PDF Extractor log table ready');
     await syncBuiltinToolCatalog();
-    console.log('Built-in tool catalog synchronized');
+    logger.info('Built-in tool catalog synchronized');
   } catch (error) {
-    console.warn('Database unavailable — API routes requiring DB will return errors');
-    console.warn('Update DATABASE_URL in backend/.env and restart');
-    console.warn(error);
+    logger.warn('Database unavailable — API routes requiring DB will return errors');
+    logger.warn('Update DATABASE_URL in backend/.env and restart');
+    logger.warn({ err: error }, 'Database initialization failed');
   }
 
   for (const tool of tools) {

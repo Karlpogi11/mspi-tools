@@ -19,12 +19,15 @@ graph TD
     B_Src --> B_PCount[pcount/]
     B_Src --> B_Reformat[reformat/]
     B_Src --> B_RFPU[rfpu/]
+    B_Src --> B_Consumables[consumables/]
+    B_Src --> B_PdfExtractor[pdf-extractor/]
     B_Src --> B_Routes[routes/ - Auth/Admin/Tools]
     
     Frontend --> F_Src[src/]
     F_Src --> F_Components[components/]
     F_Src --> F_Pages[pages/]
     F_Src --> F_Lib[lib/]
+    F_Src --> F_Hooks[hooks/]
 ```
 
 ### 1. Inlined Shared Libraries
@@ -38,18 +41,22 @@ The backend [backend/src/index.ts](file:///Users/karlgarcia/Desktop/Dev/mspi-too
 - Registers core middleware: CORS (supporting custom allowed origins), body parser, cookie parser, compression.
 - Mounts shared routes: Auth (`/api/auth`), Admin (`/api/admin`), and Tools management (`/api`).
 - Dynamically imports and mounts tool-specific sub-routers and startup initializers:
-  - `/api/pcount` (Physical Count)
+  - `/api/pcount` (Physical Count) + `/api/pcount/admin` (admin-only session export)
   - `/api/rfpu` (RFPU Tool)
   - `/api/reformat` (Excel Reformatting)
+  - `/api/consumables` (Label Maker)
+  - `/api/pdf-extractor` (PDF Extractor)
 - Serves the frontend static bundle in production (from `backend/src/public`).
 
 ### 3. Shared React Frontend
 The frontend [frontend/src/App.tsx](file:///Users/karlgarcia/Desktop/Dev/mspi-tools/frontend/src/App.tsx) is a React Single Page Application (SPA) powered by Vite. It:
-- Integrates all pages for different tools (PCount, RFPU, Reformat) under one React Router config.
+- Integrates all pages for different tools (PCount, RFPU, Reformat, Consumables, PDF Extractor) under one React Router config.
 - Employs React lazy-loading (`Suspense` + `lazy`) to split bundles for optimal load times.
 - Uses a unified authorization context provider (`AuthProvider` in `frontend/src/lib/auth.tsx`) to guard private routes.
 - Interacts with backend API routes via a central `/api` proxy configured in `vite.config.ts`.
-- Implements visual layouts (e.g. `Layout.tsx` navbar dashboard wrapper).
+- Implements visual layouts (`Layout.tsx` navbar, dashboard launcher grid) with per-tool pages under `pages/<tool>/`.
+
+At startup the backend runs `syncBuiltinToolCatalog()` ([backend/src/db/tool-catalog.ts](file:///Users/karlgarcia/Desktop/Dev/mspi-tools/backend/src/db/tool-catalog.ts)) which registers missing built-in tools (Site Monitor, PCount, ReFormat, Label Maker, PDF Extractor) in the `tools` table and grants role access, without overwriting Admin-configured entries.
 
 ---
 
@@ -58,3 +65,5 @@ The frontend [frontend/src/App.tsx](file:///Users/karlgarcia/Desktop/Dev/mspi-to
 - [[Database Schema]]
 - [[Tool - PCount]]
 - [[Tool - Reformat]]
+- [[Tool - Consumables]]
+- [[Tool - PDF Extractor]]

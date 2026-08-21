@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
 import { api, type Tool } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useCachedQuery } from '../lib/queryCache';
 
 const iconMap: Record<string, string> = {
   monitor: 'M3 8.5V5a2 2 0 012-2h14a2 2 0 012 2v3.5M3 8.5v6a2 2 0 002 2h14a2 2 0 002-2v-6M3 8.5h18M8 16l-1 4m4-4l-1 4m4-4l-1 4',
@@ -24,14 +24,7 @@ function ToolIcon({ icon, active }: { icon: string; active: boolean }) {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api.myTools()
-      .then(setTools)
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: tools = [], loading } = useCachedQuery<Tool[]>('my-tools', api.myTools);
 
   const visibleTools = tools.filter(tool => tool.name.trim().toLowerCase() !== 'site monitor');
 

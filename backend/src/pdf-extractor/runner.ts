@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
+import { fileTypeFromBuffer } from 'file-type';
 import { ERRORS, INBOX, PERMITS, PROCESSED, safeFileName } from './paths.js';
 import { extractFieldsFromFile } from './pipeline.js';
 import {
@@ -11,6 +12,7 @@ import {
 } from './parser.js';
 import { insertAwbLog } from './store.js';
 import { recordPdfDiagnostic } from './diagnostics.js';
+import { writeAuditLog } from '../db/audit.js';
 export { mapLimit } from './concurrency.js';
 
 export type ProcessStatus = 'ok' | 'duplicate' | 'error' | 'permit';
@@ -37,6 +39,19 @@ export const upload = multer({
   dest: INBOX,
   limits: { fileSize: 60 * 1024 * 1024, files: MAX_PDF_FILES_PER_REQUEST },
 });
+
+/** Validate the uploaded file contents instead of trusting its filename. */
+export async function isPdfFile(filePath: string): Promise<boolean> {
+  const handle = await fs.promises.open(filePath, 'r');
+  try {
+    const header = Buffer.alloc(4100);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    const detected = await fileTypeFromBuffer(header.subarray(0, bytesRead));
+    return detected?.mime === 'application/pdf';
+  } finally {
+    await handle.close();
+  }
+}
 
 function uniqueDest(dir: string, baseName: string): string {
   const dest = path.join(dir, baseName);
@@ -149,6 +164,13 @@ export async function processPdfFile(
     },
     userId
   );
+  void writeAuditLog({
+    actorUserId: userId,
+    action: inserted ? 'pdf.awb_logged' : 'pdf.awb_duplicate',
+    resourceType: 'awb_log',
+    resourceId: fields.InvoiceReference,
+    metadata: { originalFilename: fileName, status: inserted ? 'ok' : 'duplicate' },
+  });
 
   return {
     file: fileName,

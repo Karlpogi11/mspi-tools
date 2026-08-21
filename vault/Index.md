@@ -14,6 +14,8 @@ Welcome to the Obsidian Vault for the MSPI Internal Tools project. This workspac
 - [[Tool - PCount]]: **Physical Count Utility** featuring a real-time WebSocket sync and high-performance caching layer.
 - [[Tool - Reformat]]: **Excel/CSV Reformat Utility** allowing users to create mapping templates, import, parse, rearrange columns, and download reformatted spreadsheets.
 - [[Tool - RFPU]]: **Request For Price Utility** standalone route integration.
+- [[Tool - PDF Extractor]]: **AWB/Invoice PDF Extractor** — text-layer + OCR pipeline that files PDFs by month and logs every invoice.
+- [[Tool - Consumables]]: **Label Maker** — log received consumables, derive production/expiry from the 9D code, and print labels.
 
 ---
 

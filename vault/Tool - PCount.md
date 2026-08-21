@@ -57,7 +57,7 @@ A core strength of the PCount backend is its cache-aside database driver in [bac
   - Form to create new sessions.
   - Code entry modal to join a session via 4-digit `join_code`.
 - **[SessionPage.tsx](file:///Users/karlgarcia/Desktop/Dev/mspi-tools/frontend/src/pages/pcount/SessionPage.tsx)**:
-  - Core scanning dashboard.
+  - Core scanning dashboard, organized as a 4-stage wizard: **1. Setup** → **2. Count** → **3. Verify** → **4. Report**.
   - Real-time list of products, showing discrepancies between System Qty and Counted Qty.
   - WebSockets status connection indicator.
   - Actions: Import System sheet, Import Counts sheet, download report (uses `xlsx` bundle).
@@ -68,9 +68,14 @@ A core strength of the PCount backend is its cache-aside database driver in [bac
 - **`ImportSystem` / `ImportCount`**: Mappings drag-and-drop file readers parsing spreadsheets.
 - **`ProductTable`**: Virtualized/paginated data grid displaying counts, categories, notes, and discrepancies.
 - **`ProgressCircle`**: Radial svg indicator displaying overall count completion percentage.
+- **`PcountReportPreview`**: Full-screen A4 report preview for the Report stage — editable summary blocks per category (System vs Counted totals), per-product remark fields, **Export PDF** (canvas-rendered pages) and **Print A4** buttons.
+
+### Admin (located in `frontend/src/pages/admin/`)
+- **`AdminPcountPage.tsx`**: Admin-only session overview backed by `/api/pcount/admin` — lists all sessions, views products, and exports a session's detailed product report as Excel.
 
 ---
 
 ## 🔗 Related Notes
 - [[Architecture Overview]]
 - [[Database Schema]]
+- [[Index]]

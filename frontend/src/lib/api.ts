@@ -1,6 +1,9 @@
 import type { InventoryRow } from './consumables';
 
 const BASE = import.meta.env.VITE_API_URL || '/api';
+const GET_CACHE_TTL = 30_000;
+const getCache = new Map<string, { data: unknown; updatedAt: number }>();
+const getInFlight = new Map<string, Promise<unknown>>();
 
 export interface ApiRequestError extends Error {
   status?: number;
@@ -92,7 +95,37 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  return fetchJson<T>(path, options);
+  const method = (options?.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    getCache.clear();
+    return fetchJson<T>(path, options);
+  }
+
+  const cached = getCache.get(path);
+  if (cached) {
+    if (Date.now() - cached.updatedAt >= GET_CACHE_TTL && !getInFlight.has(path)) {
+      const refresh = fetchJson<T>(path, options)
+        .then((data) => {
+          getCache.set(path, { data, updatedAt: Date.now() });
+          return data;
+        })
+        .finally(() => getInFlight.delete(path));
+      getInFlight.set(path, refresh);
+    }
+    return cached.data as T;
+  }
+
+  const pending = getInFlight.get(path) as Promise<T> | undefined;
+  if (pending) return pending;
+
+  const requestPromise = fetchJson<T>(path, options)
+    .then((data) => {
+      getCache.set(path, { data, updatedAt: Date.now() });
+      return data;
+    })
+    .finally(() => getInFlight.delete(path));
+  getInFlight.set(path, requestPromise);
+  return requestPromise;
 }
 
 export interface User {
@@ -308,6 +341,11 @@ export const api = {
       request<{ message: string }>(`/admin/users/${userId}/role`, {
         method: 'PATCH',
         body: JSON.stringify({ roleId }),
+      }),
+    resetPassword: (userId: number, newPassword: string) =>
+      request<{ message: string }>(`/admin/users/${userId}/password`, {
+        method: 'PATCH',
+        body: JSON.stringify({ newPassword }),
       }),
     deleteUser: (userId: number) =>
       request<{ message: string }>(`/admin/users/${userId}`, {

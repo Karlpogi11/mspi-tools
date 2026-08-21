@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { authenticateToken, requireAdmin } from '../auth.js';
 import { listAwbLog } from './store.js';
-import { mapLimit, MAX_PDF_FILES_PER_REQUEST, PDF_PROCESS_CONCURRENCY, processPdfFileSafely, upload, type ProcessResult } from './runner.js';
+import { isPdfFile, mapLimit, MAX_PDF_FILES_PER_REQUEST, PDF_PROCESS_CONCURRENCY, processPdfFileSafely, upload, type ProcessResult } from './runner.js';
 import { appendProcessingRun, createDownloadArtifact, createFileArtifact, finalizeProcessingRun, getDownloadArtifact, getFileArtifact, processResumableBatch } from './downloads.js';
 import { clearPdfDiagnostics, listPdfDiagnostics, recordPdfDiagnostic } from './diagnostics.js';
 
@@ -62,6 +62,15 @@ function removeUploads(files: Express.Multer.File[]) {
   }
 }
 
+async function rejectNonPdfUploads(files: Express.Multer.File[]): Promise<string | null> {
+  for (const file of files) {
+    if (!(await isPdfFile(file.path))) {
+      return file.originalname || 'uploaded file';
+    }
+  }
+  return null;
+}
+
 router.post('/extract', (req: Request, res: Response) => {
   upload.array('files', MAX_PDF_FILES_PER_REQUEST)(req, res, async (err: unknown) => {
     if (err) {
@@ -74,6 +83,12 @@ router.post('/extract', (req: Request, res: Response) => {
       return;
     }
     try {
+      const invalidFile = await rejectNonPdfUploads(files);
+      if (invalidFile) {
+        removeUploads(files);
+        res.status(400).json({ error: `File is not a valid PDF: ${invalidFile}` });
+        return;
+      }
       const results: ProcessResult[] = await mapLimit(
         files,
         PDF_PROCESS_CONCURRENCY,
@@ -106,6 +121,12 @@ router.post('/extract-stream', (req: Request, res: Response) => {
     }
 
     try {
+      const invalidFile = await rejectNonPdfUploads(files);
+      if (invalidFile) {
+        removeUploads(files);
+        res.status(400).json({ error: `File is not a valid PDF: ${invalidFile}` });
+        return;
+      }
       files = restoreOriginalNames(files, req.body?.originalNames);
     } catch (metadataError) {
       removeUploads(files);

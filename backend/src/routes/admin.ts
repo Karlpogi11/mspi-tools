@@ -1,8 +1,11 @@
 import { Router, Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
 import { eq, isNull, asc } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
 import { users, roles, tools, roleToolAccess } from '../db/schema.js';
 import { authenticateToken, requireAdmin } from '../auth.js';
+import { passwordValidationError } from './auth.js';
+import { writeAuditLog } from '../db/audit.js';
 
 const router = Router();
 
@@ -43,6 +46,7 @@ router.patch('/users/:id/role', async (req: Request, res: Response) => {
 
     const db = getDb();
     await db.update(users).set({ role_id: roleId }).where(eq(users.id, Number(id)));
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'admin.user_role_changed', resourceType: 'user', resourceId: id, metadata: { roleId } });
 
     res.json({ message: 'Role updated' });
   } catch (error) {
@@ -51,10 +55,62 @@ router.patch('/users/:id/role', async (req: Request, res: Response) => {
   }
 });
 
+router.patch('/users/:id/password', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id || !Number.isInteger(id)) {
+      res.status(400).json({ error: 'Invalid user id' });
+      return;
+    }
+
+    if (id === req.user!.userId) {
+      res.status(400).json({ error: 'You cannot reset your own password here. Ask another admin to reset it for you.' });
+      return;
+    }
+
+    const validationError = passwordValidationError(req.body?.newPassword);
+    if (validationError) {
+      res.status(400).json({ error: validationError });
+      return;
+    }
+
+    const db = getDb();
+    const result = await db
+      .select({ id: users.id, tokenVersion: users.token_version })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    if (result.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(req.body.newPassword, 12);
+    await db.update(users)
+      .set({ password_hash: passwordHash, token_version: result[0].tokenVersion + 1 })
+      .where(eq(users.id, id));
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'admin.user_password_reset', resourceType: 'user', resourceId: id });
+    res.json({ message: 'Password reset. The user can now sign in with the new password.' });
+  } catch (error) {
+    console.error('admin reset password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.delete('/users/:id', async (req: Request, res: Response) => {
   try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid user id' });
+      return;
+    }
+    if (id === req.user!.userId) {
+      res.status(403).json({ error: 'Cannot delete your own account' });
+      return;
+    }
     const db = getDb();
-    await db.delete(users).where(eq(users.id, Number(req.params.id)));
+    await db.delete(users).where(eq(users.id, id));
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'admin.user_deleted', resourceType: 'user', resourceId: id });
     res.json({ message: 'User deleted' });
   } catch (error) {
     console.error('admin delete user error:', error);

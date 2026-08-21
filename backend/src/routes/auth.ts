@@ -2,10 +2,12 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import slowDown from 'express-slow-down';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
 import { users, roles } from '../db/schema.js';
 import { authenticateToken } from '../auth.js';
+import { writeAuditLog } from '../db/audit.js';
 
 const router = Router();
 
@@ -57,7 +59,15 @@ const passwordChangeLimiter = rateLimit({
   message: { error: 'Too many password change attempts. Please try again later.' },
 });
 
-function passwordValidationError(password: unknown): string | null {
+const authSlowDown = slowDown({
+  windowMs: 15 * 60 * 1000,
+  delayAfter: 2,
+  delayMs: (used) => Math.min((used - 2) * 250, 2000),
+  maxDelayMs: 2000,
+  validate: { delayMs: false },
+});
+
+export function passwordValidationError(password: unknown): string | null {
   if (typeof password !== 'string') return 'A new password is required';
   if (password.length < 12) return 'New password must be at least 12 characters';
   if (password.length > 128) return 'New password must be 128 characters or fewer';
@@ -67,7 +77,7 @@ function passwordValidationError(password: unknown): string | null {
   return null;
 }
 
-router.post('/signup', signupLimiter, async (req: Request, res: Response) => {
+router.post('/signup', signupLimiter, authSlowDown, async (req: Request, res: Response) => {
   try {
     const { email, password, fullName } = req.body;
 
@@ -101,10 +111,17 @@ router.post('/signup', signupLimiter, async (req: Request, res: Response) => {
       .$returningId();
 
     const token = jwt.sign(
-      { userId: newUser.id, email, roleId: null, roleName: null },
+      { userId: newUser.id, email, roleId: null, roleName: null, tokenVersion: 0 },
       process.env.JWT_SECRET!,
       { expiresIn: '8h' }
     );
+
+    void writeAuditLog({
+      action: 'auth.signup',
+      resourceType: 'user',
+      resourceId: newUser.id,
+      metadata: { email },
+    });
 
     res.cookie('token', token, {
       httpOnly: true,
@@ -125,7 +142,7 @@ router.post('/signup', signupLimiter, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/login', loginLimiter, async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, authSlowDown, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -165,6 +182,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
+      void writeAuditLog({ action: 'auth.login_failed', resourceType: 'user', metadata: { email } });
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }
@@ -175,10 +193,13 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         email: user.email,
         roleId: user.role_id,
         roleName: roleName ?? null,
+        tokenVersion: user.token_version,
       },
       process.env.JWT_SECRET!,
       { expiresIn: '8h' }
     );
+
+    void writeAuditLog({ actorUserId: user.id, action: 'auth.login', resourceType: 'user', resourceId: user.id });
 
     res.cookie('token', token, {
       httpOnly: true,
@@ -216,7 +237,7 @@ router.post('/logout', (req: Request, res: Response) => {
   res.json({ message: 'Logged out' });
 });
 
-router.post('/change-password', authenticateToken, passwordChangeLimiter, async (req: Request, res: Response) => {
+router.post('/change-password', authenticateToken, passwordChangeLimiter, authSlowDown, async (req: Request, res: Response) => {
   try {
     const { currentPassword, newPassword } = req.body ?? {};
     if (typeof currentPassword !== 'string' || currentPassword.length === 0) {
@@ -249,7 +270,10 @@ router.post('/change-password', authenticateToken, passwordChangeLimiter, async 
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    await db.update(users).set({ password_hash: passwordHash }).where(eq(users.id, req.user!.userId));
+    await db.update(users)
+      .set({ password_hash: passwordHash, token_version: result[0].token_version + 1 })
+      .where(eq(users.id, req.user!.userId));
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'auth.password_changed', resourceType: 'user', resourceId: req.user!.userId });
 
     res.clearCookie('token', {
       httpOnly: true,

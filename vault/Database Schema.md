@@ -23,6 +23,10 @@ erDiagram
     users ||--o{ reformat_templates : "created_by"
     reformat_templates ||--o{ reformat_template_shares : "template_id"
     users ||--o{ reformat_template_shares : "user_id"
+
+    users ||--o{ consumable_master : "created_by"
+
+    users ||--o{ awb_log : "created_by"
 ```
 
 ---
@@ -132,6 +136,37 @@ Mappings for template sharing among team members.
 
 ---
 
+### 🏷️ Consumables / Label Maker (`consumables`)
+
+#### `consumable_master`
+Master list of consumable parts used by the Label Maker.
+- `id` (`int`, PK, Auto-increment)
+- `part_number` (`varchar(100)`, Not Null, **Unique**) — upsert key for bulk imports
+- `description` (`varchar(255)`, Not Null)
+- `category` (`varchar(100)`, Default `'Other'`)
+- `expires` (`varchar(1)`, Default `'Y'`) — whether the part has an expiry (drives 9D-code expiry derivation)
+- `unit` (`varchar(20)`, Default `'pcs'`)
+- `created_by` (`int`, FK -> `users.id`, `ON DELETE SET NULL`)
+- `created_at` / `updated_at` (`timestamp`)
+
+---
+
+### 📄 PDF Extractor (`awb_log`)
+
+#### `awb_log`
+One row per extracted invoice; unique on the invoice reference so re-processing updates instead of duplicating.
+- `id` (`int`, PK, Auto-increment)
+- `invoice_reference` (`varchar(20)`, Not Null, **Unique**)
+- `hawb`, `invoice_total_amount`, `delivery_date`, `total_qty`, `received_date` (`varchar`, default empty — received date left blank by design)
+- `original_filename`, `month_folder` — provenance + filed-to folder
+- `status` (`varchar(20)`, Default `'ok'`) — `ok` / `duplicate` / `error` / `permit`
+- `created_by` (`int`, FK -> `users.id`, `ON DELETE SET NULL`)
+- `date_logged` (`timestamp`)
+
+---
+
 ## 🔗 Related Notes
 - [[Architecture Overview]]
 - [[Authentication & SSO]]
+- [[Tool - Consumables]]
+- [[Tool - PDF Extractor]]

@@ -20,8 +20,23 @@ export const users = mysqlTable('users', {
   password_hash: varchar('password_hash', { length: 255 }).notNull(),
   full_name: varchar('full_name', { length: 255 }).notNull(),
   role_id: int('role_id').references(() => roles.id, { onDelete: 'set null' }),
+  token_version: int('token_version').default(0).notNull(),
   created_at: timestamp('created_at').defaultNow().notNull(),
 });
+
+export const auditLog = mysqlTable('audit_log', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  actor_user_id: int('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  action: varchar('action', { length: 100 }).notNull(),
+  resource_type: varchar('resource_type', { length: 100 }).notNull(),
+  resource_id: varchar('resource_id', { length: 255 }),
+  metadata: text('metadata'),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  actionIdx: index('audit_log_action_idx').on(table.action),
+  actorIdx: index('audit_log_actor_idx').on(table.actor_user_id),
+  createdAtIdx: index('audit_log_created_at_idx').on(table.created_at),
+}));
 
 export const tools = mysqlTable('tools', {
   id: int('id').autoincrement().notNull().primaryKey(),

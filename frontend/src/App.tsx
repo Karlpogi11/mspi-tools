@@ -1,21 +1,35 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/auth';
+import { api } from './lib/api';
 import Layout from './components/Layout';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const PendingApprovalPage = lazy(() => import('./pages/PendingApprovalPage'));
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
-const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
-const AdminToolsPage = lazy(() => import('./pages/AdminToolsPage'));
-const AdminPcountPage = lazy(() => import('./pages/admin/AdminPcountPage'));
-const PcountIndexPage = lazy(() => import('./pages/pcount/IndexPage'));
-const PcountSessionPage = lazy(() => import('./pages/pcount/SessionPage'));
-const RfpuPage = lazy(() => import('./pages/RfpuPage'));
-const ReformatPage = lazy(() => import('./pages/reformat/ReformatPage'));
-const ConsumablesPage = lazy(() => import('./pages/consumables/ConsumablesPage'));
-const PdfExtractorPage = lazy(() => import('./pages/pdf-extractor/PdfExtractorPage'));
+const loadDashboardPage = () => import('./pages/DashboardPage');
+const loadAdminPage = () => import('./pages/admin/AdminPage');
+const loadAdminUsersPage = () => import('./pages/AdminUsersPage');
+const loadAdminToolsPage = () => import('./pages/AdminToolsPage');
+
+const DashboardPage = lazy(loadDashboardPage);
+const AdminPage = lazy(loadAdminPage);
+const AdminUsersPage = lazy(loadAdminUsersPage);
+const AdminToolsPage = lazy(loadAdminToolsPage);
+const loadAdminPcountPage = () => import('./pages/admin/AdminPcountPage');
+const loadPcountIndexPage = () => import('./pages/pcount/IndexPage');
+const loadPcountSessionPage = () => import('./pages/pcount/SessionPage');
+const loadRfpuPage = () => import('./pages/RfpuPage');
+const loadReformatPage = () => import('./pages/reformat/ReformatPage');
+const loadConsumablesPage = () => import('./pages/consumables/ConsumablesPage');
+const loadPdfExtractorPage = () => import('./pages/pdf-extractor/PdfExtractorPage');
+
+const AdminPcountPage = lazy(loadAdminPcountPage);
+const PcountIndexPage = lazy(loadPcountIndexPage);
+const PcountSessionPage = lazy(loadPcountSessionPage);
+const RfpuPage = lazy(loadRfpuPage);
+const ReformatPage = lazy(loadReformatPage);
+const ConsumablesPage = lazy(loadConsumablesPage);
+const PdfExtractorPage = lazy(loadPdfExtractorPage);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -35,11 +49,58 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function PrefetchCommonRoutes() {
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') return;
+    const prefetch = () => {
+      void Promise.all([
+        loadDashboardPage(),
+        loadAdminPage(),
+        loadAdminUsersPage(),
+        loadAdminToolsPage(),
+        loadAdminPcountPage(),
+        loadPcountIndexPage(),
+        loadPcountSessionPage(),
+        loadRfpuPage(),
+        loadReformatPage(),
+        loadConsumablesPage(),
+        loadPdfExtractorPage(),
+      ]).catch(() => undefined);
+
+      void Promise.all([
+        api.myTools(),
+        api.sessions.list(),
+        api.reformat.listTemplates(),
+        api.consumables.listMaster(),
+        ...(user.roleName === 'Admin'
+          ? [api.admin.getUsers(), api.admin.getRoles(), api.admin.getTools(), api.pcountAdmin.listSessions()]
+          : []),
+      ]).catch(() => undefined);
+    };
+    prefetch();
+  }, [user]);
+
+  return null;
+}
+
+function RouteFallback() {
+  return (
+    <div className="min-h-[240px] animate-pulse space-y-4 p-6" aria-label="Loading page">
+      <div className="h-6 w-40 rounded-md bg-[#e5e5ea]" />
+      <div className="h-4 w-64 rounded-md bg-[#e5e5ea]" />
+      <div className="h-24 rounded-xl bg-[#f5f5f7]" />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Suspense fallback={<div className="min-h-screen bg-[#f5f5f7]" />}>
+        <PrefetchCommonRoutes />
+        <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<Layout />}>

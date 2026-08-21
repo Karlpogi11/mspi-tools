@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Tool, type Role } from '../lib/api';
+import { invalidateQuery, useCachedQuery } from '../lib/queryCache';
 
 interface ToolForm {
   name: string;
@@ -13,28 +14,17 @@ interface ToolForm {
 const emptyForm: ToolForm = { name: '', url: '', icon: 'default', description: '', roleIds: [] };
 
 export default function AdminToolsPage() {
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [loading, setLoading] = useState(true);
+  const toolsQuery = useCachedQuery<Tool[]>('admin-tools', api.admin.getTools);
+  const rolesQuery = useCachedQuery<Role[]>('admin-roles', api.admin.getRoles);
+  const tools = toolsQuery.data || [];
+  const roles = rolesQuery.data || [];
+  const loading = toolsQuery.loading || rolesQuery.loading;
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ToolForm>(emptyForm);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
   const loadData = async () => {
-    setLoading(true);
-    try {
-      const [t, r] = await Promise.all([api.admin.getTools(), api.admin.getRoles()]);
-      setTools(t);
-      setRoles(r);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    await Promise.all([toolsQuery.refresh(), rolesQuery.refresh()]);
   };
 
   const resetForm = () => {
@@ -62,11 +52,13 @@ export default function AdminToolsPage() {
       await api.admin.createTool(form);
     }
     resetForm();
+    invalidateQuery('admin-tools');
     loadData();
   };
 
   const deleteTool = async (id: number) => {
     await api.admin.deleteTool(id);
+    invalidateQuery('admin-tools');
     loadData();
   };
 

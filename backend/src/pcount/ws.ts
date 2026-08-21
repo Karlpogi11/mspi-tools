@@ -14,7 +14,7 @@ export function initWs(server: Server, _options: { allowUnauthenticated?: boolea
   wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', async (ws, request) => {
-    const auth = getSessionAuth(request);
+    const auth = await getSessionAuth(request);
     if (!auth) {
       ws.close(1008, 'Authentication required');
       return;
@@ -88,7 +88,7 @@ export function initWs(server: Server, _options: { allowUnauthenticated?: boolea
   }, 15_000);
 }
 
-function getSessionAuth(request: IncomingMessage): { userId: number } | null {
+async function getSessionAuth(request: IncomingMessage): Promise<{ userId: number } | null> {
   const token = request.headers.cookie
     ?.split(';')
     .map(part => part.trim())
@@ -96,7 +96,7 @@ function getSessionAuth(request: IncomingMessage): { userId: number } | null {
     ?.slice('token='.length);
   if (!token) return null;
   try {
-    const payload = verifyAccessToken(decodeURIComponent(token));
+    const payload = await verifyAccessToken(decodeURIComponent(token));
     return payload ? { userId: payload.userId } : null;
   } catch {
     return null;

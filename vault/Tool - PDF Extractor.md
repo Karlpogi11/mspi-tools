@@ -34,12 +34,23 @@ Runtime data lives in `backend/data/pdf-extractor/` (gitignored):
 Route: `/pdf-extractor` (registered in the `tools` table, roles PMS/CSO/ENGR/Admin).
 
 - Drag & drop **or** Import button — any filename works, files are renamed automatically
+- Uploads run through a **streaming batch pipeline**: files are processed in chunks and completed batches are combined into one ordered Excel download; failed files are automatically retried in smaller groups, and leftovers can be re-queued via per-row **Retry**
 - Per-file result rows: Invoice Ref, HAWB, Amount, Delivery Date, Qty, Received Date (blank), filed-to folder
 - **Copy** button → tab-separated text (pastes straight into Google Sheets/Excel)
 - **Export Excel** button → `awb-log.xlsx` from the table on screen (Received Date column remains blank)
 - AWB Log table below shows the last 500 logged rows, with its own Copy / Export buttons
+- **Temporary error log** panel (admin) showing per-file extraction diagnostics, clearable
 
-Backend `POST /api/pdf-extractor/extract` (multipart `files[]`, max 50 × 60 MB) processes each file and returns `{ results: [{ file, status: ok|duplicate|error|permit, fields, dest }] }`. Auth: shared `authenticateToken` JWT cookie.
+Backend endpoints (auth: shared `authenticateToken` JWT cookie):
+
+- `POST /api/pdf-extractor/extract` — legacy multipart `files[]` (max 50 × 60 MB), returns `{ results: [{ file, status: ok|duplicate|error|permit, fields, dest }] }`
+- `POST /api/pdf-extractor/extract-stream` — streaming batch processing used by the UI (returns per-batch results + a run token)
+- `POST /api/pdf-extractor/finalize-run` — combines a completed run into one ordered `awb-log.xlsx` download
+- `POST /api/pdf-extractor/retry/:token` — re-processes a single failed file
+- `GET /api/pdf-extractor/download/:token` / `file/:token` — download / preview of generated artifacts
+- `GET /api/pdf-extractor/log` — last 500 logged rows
+- `GET /api/pdf-extractor/health` — service health
+- `GET|DELETE /api/pdf-extractor/diagnostics` — admin temporary diagnostics list / clear
 
 ### 2. Watcher (local drop folder)
 
