@@ -3,7 +3,7 @@ const steps = [
   <>Keep the extracted <strong>workpermit-extension</strong> folder on your computer. Do not select the ZIP file.</>,
   <>Open Chrome using your <strong>personal-email profile</strong>.</>,
   <>Open <strong>chrome://extensions</strong> in a new tab.</>,
-  <>Enable <strong>Developer mode</strong>.</>,
+  <>On the <strong>top-right</strong>, turn on the <strong>Developer mode</strong> switch. It should change color when enabled.</>,
   <>Click <strong>Load unpacked</strong>.</>,
   <>Select the extracted <strong>workpermit-extension</strong> folder—the folder that directly contains <strong>manifest.json</strong>.</>,
   <>Pin <strong>Work Permit Autofill</strong> from Chrome’s Extensions menu.</>,

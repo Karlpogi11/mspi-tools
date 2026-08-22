@@ -36,6 +36,8 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 const app = express();
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
+let appReady = false;
+let startupError: string | null = null;
 
 app.set('trust proxy', 1);
 server.keepAliveTimeout = 65_000;
@@ -71,7 +73,12 @@ for (const tool of tools) {
 app.use('/api/pcount/admin', pcountAdminRouter);
 
 app.get('/api/health', (_req, res) => {
-  res.setHeader('Cache-Control', 'public, max-age=30');
+  if (!appReady) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(503).json({ status: startupError ? 'error' : 'starting', app: 'gateway' });
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
   res.json({ status: 'ok', app: 'gateway' });
 });
 
@@ -132,6 +139,7 @@ async function start() {
     await syncBuiltinToolCatalog();
     logger.info('Built-in tool catalog synchronized');
   } catch (error) {
+    startupError = 'database unavailable';
     logger.warn('Database unavailable — API routes requiring DB will return errors');
     logger.warn('Update DATABASE_URL in backend/.env and restart');
     logger.warn({ err: error }, 'Database initialization failed');
@@ -143,6 +151,13 @@ async function start() {
     }
   }
 
+  if (!startupError) {
+    appReady = true;
+    logger.info('Gateway ready');
+  }
 }
 
-start();
+void start().catch((error) => {
+  startupError = (error as Error).message;
+  logger.error({ err: error }, 'Gateway startup failed');
+});

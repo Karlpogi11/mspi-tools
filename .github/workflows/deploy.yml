@@ -41,6 +41,11 @@ jobs:
           set -euo pipefail
           API="https://developers.hostinger.com/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs"
           health() { curl --max-time 10 -s -o /dev/null -w "%{http_code}" "$URL/api/health"; }
+          latest_build_uuid() {
+            curl --max-time 15 --fail-with-body -sS \
+              -H "Authorization: Bearer $TOKEN" "$API/builds" \
+              | jq -r '.data[0].uuid // "unknown"'
+          }
           latest_build_state() {
             curl --max-time 15 --fail-with-body -sS \
               -H "Authorization: Bearer $TOKEN" "$API/builds" \
@@ -85,10 +90,46 @@ jobs:
             return 1
           }
           if [ "$EVENT_NAME" = "push" ]; then
-            # Hostinger starts Git builds shortly after the GitHub push event.
-            # Do not mark the old app healthy before that deployment is visible.
-            echo "=== Allowing the Hostinger deployment to start ==="
-            sleep 30
+            BASELINE_BUILD=$(latest_build_uuid)
+            BASELINE_STATE=$(latest_build_state || echo "unknown")
+            echo "=== Latest build: $BASELINE_BUILD ($BASELINE_STATE) ==="
+            NEW_BUILD=""
+            if [ "$BASELINE_STATE" = "pending" ] || [ "$BASELINE_STATE" = "running" ]; then
+              NEW_BUILD="$BASELINE_BUILD"
+              echo "=== Hostinger deployment is already in progress ==="
+            else
+              echo "=== Waiting for Hostinger to register the new deployment ==="
+              for i in $(seq 1 18); do
+                CURRENT_BUILD=$(latest_build_uuid)
+                STATE=$(latest_build_state || echo "unknown")
+                echo "[$i] build: $CURRENT_BUILD ($STATE)"
+                if [ "$CURRENT_BUILD" != "$BASELINE_BUILD" ] && [ "$CURRENT_BUILD" != "unknown" ]; then
+                  NEW_BUILD="$CURRENT_BUILD"
+                  break
+                fi
+                sleep 10
+              done
+              if [ -z "$NEW_BUILD" ]; then
+                echo "=== Hostinger did not register a new build after the push ==="
+                exit 1
+              fi
+            fi
+            echo "=== Waiting for new build $NEW_BUILD to complete ==="
+            BUILD_COMPLETED=false
+            for i in $(seq 1 60); do
+              STATE=$(latest_build_state || echo "unknown")
+              echo "[$i] build: $STATE"
+              case "$STATE" in
+                completed) BUILD_COMPLETED=true; break ;;
+                failed) echo "=== Hostinger build failed ==="; exit 1 ;;
+                pending|running) sleep 10 ;;
+                *) echo "=== Unknown Hostinger build state: $STATE ==="; exit 1 ;;
+              esac
+            done
+            if [ "$BUILD_COMPLETED" != "true" ]; then
+              echo "=== Hostinger build did not complete in time ==="
+              exit 1
+            fi
           fi
           echo "=== Waiting for app to become healthy ==="
           if wait_for_healthy 3; then echo "=== Healthy ==="; exit 0; fi
