@@ -448,7 +448,23 @@ if (window.__wpDiag && names.length < 2) {
     const selectOrFill = async (field, value, forceCombo = false) => {
       if (!field || value === undefined || value === null || value === '') return false;
       if (forceCombo || isCombo(field.el)) {
-        if (H.setComboElement) return H.setComboElement(field.el, value);
+        if (/specific scope/i.test(field.label || '') && H.setComboValue) {
+          const label = field.el.closest?.('label');
+          const rowRoot = label?.parentElement || field.el.parentElement?.parentElement || doc;
+          const result = await H.setComboValue(rowRoot, [field.label], value);
+          if (result === 'ok' || result === 'typed') return true;
+        }
+        if (H.setComboElement) {
+          const picked = await H.setComboElement(field.el, value);
+          if (!picked) {
+            window.__wpDiag.push({
+              kind: 'combo',
+              text: `${field.label}: option not committed`,
+              detail: H.collectVisibleItems ? JSON.stringify(H.collectVisibleItems().slice(0, 15)) : 'visible items unavailable',
+            });
+          }
+          return picked;
+        }
         await H.openCombo(field.el);
         let picked = await H.pickOption(doc, value, 5000);
         if (!picked && field.label) {
@@ -462,35 +478,98 @@ if (window.__wpDiag && names.length < 2) {
       return H.setValueOn(field.el, value);
     };
 
+    const generalScope = work.generalScope ?? work.scope;
+    const specificScope = work.specificScope ?? work.specific;
+    const detailsOfWork = work.detailsOfWork ?? work.scopeOfWork ?? '';
     const scopes = H.findFields(doc, ['General Scope']).filter(skipEquip).slice(0, typeOfWorkLimit);
     // The site uses "Pullout" as the parent choice. Selecting the long
     // description directly does not render the dependent Specific Scope field.
-    const scopeOption = /pullout/i.test(work.scope || '') ? 'Pullout' : work.scope;
+    const scopeOption = /pullout/i.test(generalScope || '') ? 'Pullout' : generalScope;
     progress('General Scope', 'working');
     let scopeOk = true;
     for (let i = 0; i < scopes.length; i++) {
       progress(`General Scope ${i + 1}`, 'working');
-      const ok = await selectOrFill(scopes[i], scopeOption, true);
+      let ok = await selectOrFill(scopes[i], scopeOption, true);
+      const waitForRowSpecificScope = () => {
+        const fields = H.findFields(doc, ['Specific Scope']).filter(skipEquip);
+        const field = fields[i];
+        return field && (field.el.tagName !== 'SELECT' || field.el.options.length > 1) ? field : null;
+      };
+      if (ok && !await waitFor(waitForRowSpecificScope, 6000, 250)) {
+        window.__wpDiag.push({ kind: 'combo', text: `General Scope ${i + 1}: Specific Scope options delayed; retrying parent selection` });
+        ok = await selectOrFill(scopes[i], scopeOption, true);
+        if (ok) await waitFor(waitForRowSpecificScope, 6000, 250);
+      }
       scopeOk = ok && scopeOk;
       progress(`General Scope ${i + 1}`, ok ? 'done' : 'failed');
+      if (ok) await sleep(500);
     }
     await sleep(900);
     progress('General Scope', scopeOk && scopes.length > 0 ? 'done' : 'failed');
     logEntry(logs, `General Scope${testLabel} = ${scopeOption || 'Pullout'}`, scopeOk && scopes.length > 0);
 
-    if (cfg.testFirstType && (!scopeOk || !scopes.length)) {
+    const expectedSpecificScopes = Math.min(scopes.length, typeOfWorkLimit);
+    const itemLabels = [
+      'Items to pullout', 'Items to pull out', 'Item to pull out',
+      'Items to be pulled out', 'Items Delivered', 'Indicate the items to pull out',
+    ];
+    const findVisibleItems = () => {
+      const direct = H.findFields(doc, itemLabels).filter((field) => skipEquip(field) && H.isVisible(field.el));
+      if (direct.length) return direct;
+      return Array.from(doc.querySelectorAll('input, textarea, select, [role=combobox]'))
+        .filter((el) => H.isVisible(el) && !/checkbox|radio|button|file/i.test(el.type || ''))
+        .filter((el) => !(el.tagName === 'SELECT' && Array.from(el.options || []).some((option) => /pullout of (machine|merchandise|tools)|pullout\/hauling/i.test(option.textContent || ''))))
+        .map((el) => {
+          const parentText = el.parentElement ? el.parentElement.textContent || '' : '';
+          const label = `${H.labelFor(el)} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''} ${parentText}`;
+          return { el, label: label.replace(/\s+/g, ' ').trim() };
+        })
+        .filter((field) => /item/i.test(field.label) && /(pull|deliver|stock|merchandise)/i.test(field.label));
+    };
+    const items = await waitFor(() => {
+      const found = findVisibleItems();
+      return found.length ? found : null;
+    }, 8000, 250) || findVisibleItems();
+    window.__wpDiag.push({
+      kind: 'field',
+      text: `Items controls found after General Scope: ${items.length}/${expectedSpecificScopes}`,
+      detail: items.map((field) => `${field.label} [${field.el.tagName}#${field.el.id || '-'}]`).join(' | '),
+    });
+    progress('Items to Pull Out', 'working');
+    const itemValue = work.items || '';
+    window.__wpDiag.push({ kind: 'field', text: 'Temporary Items fill trace', detail: JSON.stringify({ requested: itemValue, count: items.length, phase: 'after-general-scope' }) });
+    for (let i = 0; i < items.length; i++) {
+      checkCancelled();
+      const field = items[i].el;
+      const before = String(field.value || '');
+      const ok = itemValue ? await H.setValueOn(field, itemValue) : true;
+      await sleep(150);
+      const after = String(field.value || '');
+      window.__wpDiag.push({ kind: 'field', text: `Temporary Items row ${i + 1} trace`, detail: JSON.stringify({ label: items[i].label, tag: field.tagName, id: field.id || '', before, after, requested: itemValue }) });
+      progress(`Items to Pull Out ${i + 1}`, ok ? 'done' : 'failed');
+    }
+    progress('Items to Pull Out', items.length > 0 ? 'done' : 'failed');
+    logEntry(logs, `Items${testLabel} = ${itemValue || '(left blank)'}`, !itemValue || items.length > 0);
+
+    if (!scopeOk || !scopes.length) {
       progress('Specific Scope', 'failed');
       logEntry(logs, 'Specific Scope skipped because General Scope was not selected', false);
       return;
     }
 
-    const specificValue = work.specific || (
-      /pullout/i.test(work.scope || '')
-        ? 'Pullout of merchandise/goods/items/products/stocks'
-        : ''
-    );
-    await sleep(1400);
-    const specificScopes = H.findFields(doc, ['Specific Scope']).filter(skipEquip).slice(0, typeOfWorkLimit);
+    const specificValue = /pullout/i.test(scopeOption || '') && /delivery\s*\/\s*pullout|apple products/i.test(specificScope || '')
+      ? 'Pullout of merchandise/goods/items/products/stocks'
+      : specificScope || '';
+    const specificScopes = await waitFor(() => {
+      const found = H.findFields(doc, ['Specific Scope']).filter(skipEquip);
+      const populated = found.filter((field) => field.el.tagName !== 'SELECT' || field.el.options.length > 1);
+      return found.length >= expectedSpecificScopes && populated.length >= expectedSpecificScopes ? found : null;
+    }, 8000, 250) || H.findFields(doc, ['Specific Scope']).filter(skipEquip);
+    window.__wpDiag.push({
+      kind: 'field',
+      text: `Specific Scope controls found: ${specificScopes.length}/${expectedSpecificScopes}`,
+      detail: specificScopes.map((field) => `${field.label}${field.el.tagName === 'SELECT' ? ` [${field.el.options.length} options]` : ''}`).join(' | '),
+    });
     progress('Specific Scope', 'working');
     let specificOk = true;
     for (let i = 0; i < specificScopes.length; i++) {
@@ -500,41 +579,28 @@ if (window.__wpDiag && names.length < 2) {
       specificOk = ok && specificOk;
       progress(`Specific Scope ${i + 1}`, ok ? 'done' : 'failed');
     }
-    progress('Specific Scope', specificOk && specificScopes.length > 0 ? 'done' : 'failed');
-    logEntry(logs, `Specific Scope${testLabel} = ${specificValue}`, specificOk && specificScopes.length > 0);
+    const specificRequired = Boolean(specificValue);
+    const specificSelected = !specificRequired || (specificOk && specificScopes.length > 0);
+    progress('Specific Scope', specificSelected ? 'done' : 'failed');
+    logEntry(logs, `Specific Scope${testLabel} = ${specificValue || '(not set)'}`, specificSelected);
 
-    if (cfg.testFirstType && (!specificOk || !specificScopes.length)) {
+    if (!specificSelected) {
       progress('Items to Pull Out', 'failed');
       logEntry(logs, 'Items skipped because Specific Scope was not selected', false);
       return;
     }
 
-    // Items to Pull Out is a plain textbox revealed after Specific Scope is
-    // selected; allow the dependent row time to render before locating it.
-    await sleep(1200);
-    const items = H.findFields(doc, ['Items to pullout', 'Items to pull out', 'Items to be pulled out', 'Items Delivered']).filter(skipEquip).slice(0, typeOfWorkLimit);
-    progress('Items to Pull Out', 'working');
-    for (let i = 0; i < items.length; i++) {
-      checkCancelled();
-      progress(`Items to Pull Out ${i + 1}`, 'working');
-      const itemValue = work.items || '';
-      const ok = itemValue ? await H.setValueOn(items[i].el, itemValue) : true;
-      progress(`Items to Pull Out ${i + 1}`, ok ? 'done' : 'failed');
-    }
-    progress('Items to Pull Out', items.length > 0 ? 'done' : 'failed');
-    logEntry(logs, `Items${testLabel} = ${work.items || '(left blank)'}`, !work.items || items.length > 0);
-
-    const details = H.findFields(doc, ['Indicate the details of work', 'details of work']).filter(skipEquip).slice(0, typeOfWorkLimit);
+    const details = H.findFields(doc, ['Indicate the details of work']).filter(skipEquip).slice(0, typeOfWorkLimit);
     progress('Details of Work', 'working');
     for (let i = 0; i < details.length; i++) {
       checkCancelled();
       progress(`Details of Work ${i + 1}`, 'working');
-      const detailValue = work.scopeOfWork || work.items || 'DELIVERY/PULLOUT OF APPLE PRODUCTS';
+      const detailValue = detailsOfWork;
       const ok = await H.setValueOn(details[i].el, detailValue);
       progress(`Details of Work ${i + 1}`, ok ? 'done' : 'failed');
     }
     progress('Details of Work', details.length > 0 ? 'done' : 'failed');
-    logEntry(logs, `Details of work = ${work.scopeOfWork || work.items || 'DELIVERY/PULLOUT OF APPLE PRODUCTS'}`, details.length > 0);
+    logEntry(logs, `Indicate the details of work = ${detailsOfWork || '(blank)'}`, details.length > 0);
 
     if (!work.leaveScheduleBlank) {
       const fromFields = H.findFields(doc, ['From']);

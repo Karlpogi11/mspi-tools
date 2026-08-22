@@ -21,9 +21,10 @@ const DEFAULT_PROFILE = {
   work: {
     tenantStatus: 'Operating',
     numWork: 5,
-    scope: 'Pullout of merchandise/goods/items/products/stocks',
+    generalScope: 'Pullout',
     items: 'DELIVERY/PULLOUT OF APPLE PRODUCTS',
-    specific: 'DELIVERY/PULLOUT OF APPLE PRODUCTS',
+    specificScope: 'Pullout of merchandise/goods/items/products/stocks',
+    detailsOfWork: 'DELIVERY/PULLOUT OF APPLE PRODUCTS',
     fromTime: '11:00 AM',
     toTime: '05:00 PM',
     urgent: false,
@@ -54,9 +55,9 @@ const state = {
 const PEST_CONTROL_PRESET = {
   permitType: 'pest-control',
   work: {
-    tenantStatus: 'Operating', numWork: 1, scope: 'Maintenance',
-    items: '', specific: 'Pest control/proofing/baiting/misting',
-    serviceProvider: 'HOMEFIX PEST CONTROL SERVICES', scopeOfWork: 'Disinfection',
+    tenantStatus: 'Operating', numWork: 1, generalScope: 'Maintenance',
+    items: '', specificScope: 'Pest control/proofing/baiting/misting',
+    serviceProvider: 'HOMEFIX PEST CONTROL SERVICES', detailsOfWork: 'Disinfection',
     fromTime: '', toTime: '', leaveScheduleBlank: true, urgent: false,
   },
   personnel: [
@@ -125,6 +126,22 @@ function normalizeProfile(stored) {
   const source = stored && typeof stored === 'object' ? { ...stored } : {};
   delete source.name;
   delete source.profile;
+  const work = { ...(source.work || {}) };
+  if (work.generalScope === undefined && work.scope !== undefined) work.generalScope = work.scope;
+  if (work.specificScope === undefined && work.specific !== undefined) work.specificScope = work.specific;
+  if (work.detailsOfWork === undefined && work.scopeOfWork !== undefined) work.detailsOfWork = work.scopeOfWork;
+  delete work.scope;
+  delete work.specific;
+  delete work.scopeOfWork;
+  if (/pullout/i.test(work.generalScope || '') && /delivery\s*\/\s*pullout|apple products/i.test(work.specificScope || '')) {
+    work.specificScope = 'Pullout of merchandise/goods/items/products/stocks';
+  }
+  if (source.permitType === 'pullout' || /^pullout$/i.test(work.generalScope || '')) {
+    if (/^disinfection$/i.test(work.detailsOfWork || '')) work.detailsOfWork = 'DELIVERY/PULLOUT OF APPLE PRODUCTS';
+    if (/^homefix pest control services$/i.test(work.serviceProvider || '')) delete work.serviceProvider;
+    if (work.leaveScheduleBlank === true) work.leaveScheduleBlank = false;
+  }
+  source.work = work;
   return deepMerge(structuredClone(DEFAULT_PROFILE), source);
 }
 
@@ -316,6 +333,7 @@ function applyPermitPreset(type) {
   const current = collect();
   const preset = type === 'pest-control' ? PEST_CONTROL_PRESET : PULL_OUT_PRESET;
   state.profile = deepMerge(current, structuredClone(preset));
+  state.profile.work = structuredClone(preset.work);
   render();
   persist();
   setStatus(type === 'pest-control' ? 'Pest Control template loaded' : 'Pullout template loaded', 'ok');
@@ -425,6 +443,7 @@ async function onFill() {
   clearLog();
   $('progress').innerHTML = '';
   const cfg = collect();
+  appendLog(`Template selected: ${state.templateChoice || state.profile.permitType || 'current'}`, true);
   $('btnFill').disabled = true;
   $('btnFill').textContent = 'Working…';
   $('btnCancel').hidden = false;

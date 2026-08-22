@@ -310,10 +310,14 @@
     const sel = '[class*=button], button, span, a, [role=button], [class*=icon]';
     for (let n = el; n && n !== document.body; n = n.parentElement) {
       const items = Array.from(n.querySelectorAll(sel)).filter((v) => isVisible(v) && v !== el);
-      for (const v of items) {
+      const candidates = items.map((v) => {
         const txt = norm(textOf(v) + ' ' + (v.getAttribute('title') || '') + ' ' + (v.getAttribute('aria-label') || ''));
-        if (txt && (txt.includes('view all') || txt.includes('search') || txt === 'select' || (v.querySelector && v.querySelector('svg, i[class*=icon], [class*=icon]')))) return v;
-      }
+        const isInfo = /tooltip-content|info-circle|fa-info-circle/i.test(String(v.className || '') + ' ' + (v.id || '') + ' ' + (v.getAttribute('data-icon') || ''));
+        const rank = txt === 'select' ? 0 : txt.includes('view all') ? 1 : txt.includes('search') ? 2 : (v.querySelector && v.querySelector('svg, i[class*=icon], [class*=icon]')) ? 3 : 4;
+        return { v, rank: isInfo ? 4 : rank, txt };
+      }).filter((item) => item.rank < 4);
+      candidates.sort((a, b) => a.rank - b.rank);
+      if (candidates[0]) return candidates[0].v;
       const own = n.children.length <= 3;
       if (!own) break;
     }
@@ -553,6 +557,32 @@
         }
       }
       if (!ok) {
+        // Some portal selects contain only the placeholder and load the real
+        // choices through a sibling lookup button.
+        const trigger = viewAllTrigger(f.el);
+        diag('combo-debug', `Temporary ${labelKeys[0]} lookup trace`, JSON.stringify({
+          select: elInfo(f.el),
+          selectOptions: Array.from(f.el.options).map((o) => ({ text: textOf(o), value: o.value })).slice(0, 10),
+          trigger: elInfo(trigger),
+          parent: f.el.parentElement ? f.el.parentElement.outerHTML.slice(0, 700) : '',
+        }));
+        if (trigger) {
+          trigger.click();
+          await sleep(800);
+          const search = findPopupSearch(f.el.ownerDocument || document);
+          if (search) {
+            setText(search, value);
+            await sleep(650);
+          }
+          ok = await pickFromOpened(f.el.ownerDocument || document, value, 5000);
+          diag('combo-debug', `Temporary ${labelKeys[0]} lookup result`, JSON.stringify({
+            selectOptions: Array.from(f.el.options).map((o) => ({ text: textOf(o), value: o.value })).slice(0, 10),
+            search: elInfo(search),
+            visibleItems: collectSamples(),
+          }));
+        }
+      }
+      if (!ok) {
         ok = await pickFromOpened(document, value, 4000);
       }
       if (!ok) {
@@ -591,13 +621,14 @@
       await sleep(650);
     }
 
-    let picked = await pickFromOpened(document, value, 3500);
+    const ownerDoc = el.ownerDocument || document;
+    let picked = await pickFromOpened(ownerDoc, value, 3500);
     if (!picked) {
-      const search = findPopupSearch(document);
+      const search = findPopupSearch(ownerDoc);
       if (search) {
         setText(search, value);
         await sleep(650);
-        picked = await pickFromOpened(document, value, 4500);
+        picked = await pickFromOpened(ownerDoc, value, 4500);
       }
     }
     if (!picked) {
@@ -606,7 +637,22 @@
         await clearValue(inner);
         setText(inner, value);
         await sleep(650);
-        picked = await pickFromOpened(document, value, 4500);
+        picked = await pickFromOpened(ownerDoc, value, 4500);
+      }
+    }
+    if (!picked) {
+      // Lookup-backed controls such as Specific Scope need the adjacent
+      // View All/search trigger before their options exist in the DOM.
+      const trigger = viewAllTrigger(el);
+      if (trigger) {
+        trigger.click();
+        await sleep(700);
+        const search = findPopupSearch(ownerDoc);
+        if (search) {
+          setText(search, value);
+          await sleep(650);
+        }
+        picked = await pickFromOpened(ownerDoc, value, 4500);
       }
     }
     if (!picked && input) {
@@ -618,7 +664,7 @@
         picked = true;
       } catch {}
     }
-    if (!picked) await closeLists();
+    await closeLists();
     return !!picked;
   }
 
