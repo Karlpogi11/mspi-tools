@@ -191,6 +191,7 @@ export const applecareGmailConnections = mysqlTable('applecare_gmail_connections
   user_id: int('user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
   gmail_email: varchar('gmail_email', { length: 255 }).notNull(),
   refresh_token_encrypted: text('refresh_token_encrypted').notNull(),
+  last_synced_at: timestamp('last_synced_at'),
   created_at: timestamp('created_at').defaultNow().notNull(),
   updated_at: timestamp('updated_at').defaultNow().notNull().onUpdateNow(),
 });

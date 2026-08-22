@@ -306,7 +306,7 @@ export interface AwbLogRow {
   date_logged: string | null;
 }
 
-export interface ApplecareStatus { connected: boolean; email: string | null }
+export interface ApplecareStatus { connected: boolean; email: string | null; lastSyncedAt: string | null }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
 export interface ApplecarePackingList {
   id: number; gmail_message_id: string; subject: string; sender: string; received_by: string | null; ship_to: string;
@@ -552,6 +552,7 @@ export const api = {
     detail: (id: number) => request<ApplecarePackingListDetail>(`/applecare/lists/${id}`),
     sites: () => request<ApplecareSite[]>('/applecare/sites'),
     createSite: (shipTo: string, siteName: string) => request<ApplecareSite>('/applecare/sites', { method: 'POST', body: JSON.stringify({ shipTo, siteName }) }),
+    updateSite: (id: number, siteName: string) => request<ApplecareSite>(`/applecare/sites/${id}`, { method: 'PUT', body: JSON.stringify({ siteName }) }),
     attachmentUrl: (id: number) => `${BASE}/applecare/lists/${id}/attachment`,
     downloadAttachment: async (id: number, filename: string) => {
       const res = await fetch(`${BASE}/applecare/lists/${id}/attachment`, { credentials: 'include' });

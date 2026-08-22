@@ -4,7 +4,7 @@ export async function ensureApplecareTables(): Promise<void> {
   const pool = getDbPool();
   await pool.query(`CREATE TABLE IF NOT EXISTS applecare_gmail_connections (
     id int AUTO_INCREMENT NOT NULL, user_id int NOT NULL, gmail_email varchar(255) NOT NULL,
-    refresh_token_encrypted text NOT NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    refresh_token_encrypted text NOT NULL, last_synced_at timestamp NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY applecare_gmail_user_unique (user_id),
     CONSTRAINT applecare_gmail_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -32,6 +32,11 @@ export async function ensureApplecareTables(): Promise<void> {
   )`);
   try {
     await pool.query('ALTER TABLE applecare_packing_list_items ADD COLUMN po_no varchar(150) NULL');
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw error;
+  }
+  try {
+    await pool.query('ALTER TABLE applecare_gmail_connections ADD COLUMN last_synced_at timestamp NULL');
   } catch (error) {
     if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw error;
   }

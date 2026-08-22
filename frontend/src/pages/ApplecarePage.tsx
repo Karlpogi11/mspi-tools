@@ -12,6 +12,7 @@ export default function ApplecarePage() {
   const isAdmin = user?.roleName === 'Admin';
   const [connected, setConnected] = useState(false);
   const [gmail, setGmail] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [lists, setLists] = useState<ApplecarePackingList[]>([]);
   const [sites, setSites] = useState<ApplecareSite[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
@@ -38,6 +39,8 @@ export default function ApplecarePage() {
     return `${hour % 12 || 12}:${match[2]} ${suffix}`;
   };
 
+  const formatSyncedAt = (value: string | null) => value ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value)) : 'never';
+
   const downloadAttachment = async (id: number, filename: string) => {
     try { await api.applecare.downloadAttachment(id, filename); }
     catch (error) { setMessage((error as Error).message); }
@@ -45,7 +48,7 @@ export default function ApplecarePage() {
 
   const refresh = async () => {
     const [status, rows, siteRows] = await Promise.all([api.applecare.status(), api.applecare.lists(), api.applecare.sites()]);
-    setConnected(status.connected); setGmail(status.email); setLists(rows); setSites(siteRows);
+    setConnected(status.connected); setGmail(status.email); setLastSyncedAt(status.lastSyncedAt); setLists(rows); setSites(siteRows);
   };
   useEffect(() => { void refresh().catch((error) => setMessage(error.message)); }, []);
 
@@ -54,17 +57,32 @@ export default function ApplecarePage() {
     return (!selectedSite || row.site_id === Number(selectedSite)) && haystack.includes(query.toLowerCase());
   }), [lists, query, selectedSite]);
 
+  const matchedSite = useMemo(() => sites.find((site) => site.ship_to === newShipTo.trim() || site.site_name.toLowerCase() === newSite.trim().toLowerCase()), [sites, newShipTo, newSite]);
+  const siteSuggestions = useMemo(() => {
+    const search = `${newShipTo} ${newSite}`.trim().toLowerCase();
+    if (!search) return [];
+    return sites.filter((site) => `${site.ship_to} ${site.site_name}`.toLowerCase().includes(search)).slice(0, 5);
+  }, [sites, newShipTo, newSite]);
+
   const sync = async () => {
     setBusy(true); setMessage('Checking Gmail…');
     try { const result = await api.applecare.sync(); await refresh(); setMessage(`${result.imported} new packing list${result.imported === 1 ? '' : 's'} imported`); }
     catch (error) { setMessage((error as Error).message); } finally { setBusy(false); }
   };
 
+  const syncIsStale = connected && (!lastSyncedAt || Date.now() - new Date(lastSyncedAt).getTime() > 60 * 60 * 1000);
+
   const addSite = async () => {
     if (!newShipTo || !newSite) return;
-    try { await api.applecare.createSite(newShipTo, newSite); setNewShipTo(''); setNewSite(''); await refresh(); }
+    try {
+      if (matchedSite) await api.applecare.updateSite(matchedSite.id, newSite);
+      else await api.applecare.createSite(newShipTo, newSite);
+      setNewShipTo(''); setNewSite(''); await refresh(); setMessage(matchedSite ? 'Site mapping updated' : 'Site mapping added');
+    }
     catch (error) { setMessage((error as Error).message); }
   };
+
+  const chooseSite = (site: ApplecareSite) => { setNewShipTo(site.ship_to); setNewSite(site.site_name); };
 
   const disconnect = async () => {
     setBusy(true);
@@ -80,7 +98,7 @@ export default function ApplecarePage() {
       </header>
 
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3 border-b border-[#d2d2d7] pb-5">
-        <div><p className={`text-[13px] font-medium ${connected ? 'text-[#248a3d]' : 'text-[#1d1d1f]'}`}>{connected ? `● Connected · ${gmail}` : 'Gmail not connected'}</p><p className="mt-1 text-[12px] text-[#6e6e73]">Read-only access · checks every five minutes</p></div>
+        <div><p className={`text-[13px] font-medium ${connected ? 'text-[#248a3d]' : 'text-[#1d1d1f]'}`}>{connected ? `● Connected · ${gmail}` : 'Gmail not connected'}</p><p className="mt-1 text-[12px] text-[#6e6e73]">Read-only access · Last synced {formatSyncedAt(lastSyncedAt)}{syncIsStale && connected ? ' · Click Sync now to check for updates' : ''}</p></div>
         <div className="flex gap-2">{connected ? <><button className={disconnectButton} onClick={disconnect} disabled={busy}>Disconnect</button><button className={button} onClick={sync} disabled={busy}>{busy ? 'Syncing…' : 'Sync now'}</button></> : <button className={primary} onClick={() => { window.location.href = api.applecare.connectUrl(); }}>Connect Gmail</button>}</div>
       </div>
 
@@ -89,12 +107,12 @@ export default function ApplecarePage() {
       {message && <p className="mb-3 text-[12px] text-[#6e6e73]">{message}</p>}
       <div className="overflow-hidden rounded-xl bg-white shadow-[0_1px_3px_#00000012]">
         <div className="grid grid-cols-[1.1fr_1fr_1fr_.8fr_.7fr_1.1fr_.15fr] gap-3 bg-[#fafafd] px-4 py-2 text-[10px] font-semibold uppercase tracking-[.08em] text-[#86868b]"><span>Date</span><span>Site</span><span>ShipTo</span><span>Status</span><span>Total qty</span><span>Email</span><span /></div>
-        {filtered.length === 0 ? <div className="p-12 text-center text-[13px] text-[#6e6e73]">{connected ? 'No AppleCare packing lists found in the last 7 days.' : 'Connect Gmail to begin.'}</div> : filtered.map((row) => <button key={row.id} className="group grid w-full cursor-pointer grid-cols-[1.1fr_1fr_1fr_.8fr_.7fr_1.1fr_.15fr] gap-3 border-t border-[#f0f0f2] px-4 py-2 text-left text-[11px] leading-4 text-[#3c3c43] transition hover:bg-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0071e34d]" onClick={async () => setSelected(await api.applecare.detail(row.id))}><span>{formatDate(row.packing_date || row.received_at)}<small className="block text-[10px] text-[#86868b]">{formatTime(row.packing_time)}</small></span><span>{row.site_name || <span className="text-[#b0b0b5]">Unmapped</span>}</span><span className="font-medium">{row.ship_to}</span><span>{row.status}</span><span className="font-medium">{row.total_quantity}</span><span className="min-w-0"><a className="font-medium text-[#0071e3] hover:underline" href={row.email_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Open email</a></span><span className="text-right text-[18px] leading-4 text-[#a1a1a6] transition-transform group-hover:translate-x-0.5" aria-hidden="true">›</span></button>)}
+        {filtered.length === 0 ? <div className="p-12 text-center text-[13px] text-[#6e6e73]">{connected ? 'No AppleCare packing lists found in the last 7 days.' : 'Connect Gmail to begin.'}</div> : filtered.map((row) => <button key={row.id} className="group grid w-full cursor-pointer grid-cols-[1.1fr_1fr_1fr_.8fr_.7fr_1.1fr_.15fr] gap-3 border-t border-[#f0f0f2] px-4 py-2 text-left text-[11px] leading-4 text-[#3c3c43] transition hover:bg-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0071e34d]" onClick={async () => setSelected(await api.applecare.detail(row.id))}><span>{formatDate(row.packing_date || row.received_at)}<small className="block text-[10px] text-[#86868b]">{formatTime(row.packing_time)}</small></span><span>{row.site_name || <span className="text-[#b0b0b5]">Unmapped</span>}</span><span className="font-medium">{row.ship_to}</span><span className="capitalize">{row.status}</span><span className="font-medium">{row.total_quantity}</span><span className="min-w-0"><a className="font-medium text-[#0071e3] hover:underline" href={row.email_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Open email</a></span><span className="text-right text-[18px] leading-4 text-[#a1a1a6] transition-transform group-hover:translate-x-0.5" aria-hidden="true">›</span></button>)}
       </div>
 
       {selected && <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/25 p-5" onClick={() => setSelected(null)}><div className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="flex items-start justify-between"><div><h2 className="text-[19px] font-semibold tracking-[-.02em] text-[#1d1d1f]">Packing list {selected.ship_to}</h2><p className="mt-1 text-[12px] text-[#6e6e73]">{selected.subject}</p></div><button className={button} onClick={() => setSelected(null)}>Close</button></div><div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 text-[12px] sm:grid-cols-4"><div><b className="text-[#86868b]">Site</b><p className="mt-1">{selected.site_id ? sites.find((s) => s.id === selected.site_id)?.site_name : 'Unmapped'}</p></div><div><b className="text-[#86868b]">Date</b><p className="mt-1">{formatDate(selected.packing_date)}</p></div><div><b className="text-[#86868b]">Time</b><p className="mt-1">{formatTime(selected.packing_time)}</p></div><div><b className="text-[#86868b]">Attachment</b><p className="mt-1 truncate">{selected.attachment_name || '—'}</p></div></div>{selected.attachment_name && <button className="mt-5 text-[12px] font-semibold text-[#0071e3]" onClick={() => void downloadAttachment(selected.id, selected.attachment_name)}>Download attachment</button>}<table className="mt-6 w-full text-left text-[12px]"><thead><tr className="border-b text-[#86868b]"><th className="py-2">Part number</th><th>Purchase number</th><th>Description</th><th>Serial number</th><th>Qty</th></tr></thead><tbody>{selected.items.map((item) => <tr key={item.id} className="border-b border-[#f0f0f2]"><td className="py-2">{item.part_number}</td><td>{item.po_no || '—'}</td><td>{item.description}</td><td>{item.serial_number || '—'}</td><td>{item.quantity}</td></tr>)}</tbody></table></div></div>}
 
-      {isAdmin && <div className="mt-8 border-t border-[#d2d2d7] pt-5"><h2 className="text-[14px] font-semibold">Site mapping</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Map ShipTo numbers to site names.</p><div className="mt-3 flex flex-wrap gap-2"><input className="h-9 rounded-lg border-0 bg-white px-3 text-[12px] shadow-sm ring-1 ring-[#e5e5ea] outline-none focus:ring-2 focus:ring-[#0071e34d]" placeholder="ShipTo number" value={newShipTo} onChange={(e) => setNewShipTo(e.target.value)} /><input className="h-9 rounded-lg border-0 bg-white px-3 text-[12px] shadow-sm ring-1 ring-[#e5e5ea] outline-none focus:ring-2 focus:ring-[#0071e34d]" placeholder="Site name" value={newSite} onChange={(e) => setNewSite(e.target.value)} /><button className={primary} onClick={addSite}>Add site</button></div></div>}
+      {isAdmin && <div className="mt-8 border-t border-[#d2d2d7] pt-5"><h2 className="text-[14px] font-semibold">Site mapping</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Enter either value to find an existing mapping or create a new one.</p><div className="relative mt-3 flex flex-wrap gap-2"><input className="h-9 rounded-lg border-0 bg-white px-3 text-[12px] shadow-sm ring-1 ring-[#e5e5ea] outline-none focus:ring-2 focus:ring-[#0071e34d]" placeholder="ShipTo number" value={newShipTo} onChange={(e) => { const value = e.target.value; setNewShipTo(value); if (!value.trim()) setNewSite(''); else { const site = sites.find((item) => item.ship_to === value.trim()); if (site) setNewSite(site.site_name); } }} /><input className="h-9 rounded-lg border-0 bg-white px-3 text-[12px] shadow-sm ring-1 ring-[#e5e5ea] outline-none focus:ring-2 focus:ring-[#0071e34d]" placeholder="Site name" value={newSite} onChange={(e) => { const value = e.target.value; setNewSite(value); if (!value.trim()) setNewShipTo(''); else { const site = sites.find((item) => item.site_name.toLowerCase() === value.trim().toLowerCase()); if (site) setNewShipTo(site.ship_to); } }} /><button className={primary} onClick={addSite} disabled={!newShipTo.trim() || !newSite.trim()}>{matchedSite ? 'Update site' : 'Add site'}</button>{siteSuggestions.length > 0 && !matchedSite && <div className="absolute left-0 top-11 z-10 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-[#e5e5ea] bg-white p-1 shadow-[0_12px_30px_#00000018]">{siteSuggestions.map((site) => <button key={site.id} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-[#f5f5f7]" onClick={() => chooseSite(site)}><span className="min-w-[86px] text-[11px] font-medium text-[#6e6e73]">{site.ship_to}</span><span className="min-w-0 flex-1 truncate text-[12px] text-[#1d1d1f]">{site.site_name}</span><span className="text-[16px] leading-none text-[#a1a1a6]">›</span></button>)}</div>}</div></div>}
     </div>
   );
 }

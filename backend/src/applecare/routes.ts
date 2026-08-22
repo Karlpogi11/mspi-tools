@@ -127,6 +127,11 @@ function parseSubject(subject: string) {
   return { shipTo, packingDate: date ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}` : '', packingTime: time ? `${time.slice(0, 2)}:${time.slice(2)}` : '' };
 }
 
+function shipToVariants(shipTo: string): string[] {
+  const unpadded = shipTo.replace(/^0+(?=\d)/, '');
+  return [...new Set([shipTo, unpadded])];
+}
+
 async function attachmentBuffer(token: string, messageId: string, part: GmailPart): Promise<Buffer> {
   if (part.body?.data) return decodeBase64(part.body.data);
   if (!part.body?.attachmentId) return Buffer.alloc(0);
@@ -207,7 +212,7 @@ async function performSyncConnection(connection: typeof applecareGmailConnection
   for (const summary of result.messages || []) {
     const [existing] = await db.select().from(applecarePackingLists).where(eq(applecarePackingLists.gmail_message_id, summary.id)).limit(1);
     const existingAttachmentPath = existing ? await findAttachmentPath(existing.attachment_path, existing.attachment_name) : null;
-    const [existingSite] = existing ? await db.select({ id: applecareSites.id }).from(applecareSites).where(eq(applecareSites.ship_to, existing.ship_to)).limit(1) : [];
+    const [existingSite] = existing ? await db.select({ id: applecareSites.id }).from(applecareSites).where(inArray(applecareSites.ship_to, shipToVariants(existing.ship_to))).limit(1) : [];
     if (existing && /\.(xlsx?|pdf)$/i.test(existing.attachment_name || '') && existing.raw_text) {
       const [existingItem] = await db.select({ id: applecarePackingListItems.id, po_no: applecarePackingListItems.po_no })
         .from(applecarePackingListItems)
@@ -231,7 +236,7 @@ async function performSyncConnection(connection: typeof applecareGmailConnection
     const subject = header(message, 'Subject');
     const parsed = parseSubject(subject);
     if (!parsed.shipTo) continue;
-    const site = await db.select({ id: applecareSites.id }).from(applecareSites).where(eq(applecareSites.ship_to, parsed.shipTo)).limit(1);
+    const site = await db.select({ id: applecareSites.id }).from(applecareSites).where(inArray(applecareSites.ship_to, shipToVariants(parsed.shipTo))).limit(1);
     // Inspect every MIME branch. Gmail may place the attachment after the
     // plain-text body or inside a nested multipart/alternative section.
     const attachmentParts = (message.payload?.parts || []).flatMap(partsOf)
@@ -292,9 +297,13 @@ async function performSyncConnection(connection: typeof applecareGmailConnection
 }
 
 async function syncConnection(connection: typeof applecareGmailConnections.$inferSelect) {
-  if (activeSyncs.has(connection.id)) return 0;
+  if (activeSyncs.has(connection.id)) return null;
   activeSyncs.add(connection.id);
-  try { return await performSyncConnection(connection); }
+  try {
+    const imported = await performSyncConnection(connection);
+    await getDb().update(applecareGmailConnections).set({ last_synced_at: new Date() }).where(eq(applecareGmailConnections.id, connection.id));
+    return imported;
+  }
   finally { activeSyncs.delete(connection.id); }
 }
 
@@ -326,8 +335,8 @@ router.get('/gmail/callback', async (req: Request, res: Response) => {
 });
 
 router.get('/status', async (req: Request, res: Response) => {
-  const [connection] = await getDb().select({ id: applecareGmailConnections.id, email: applecareGmailConnections.gmail_email }).from(applecareGmailConnections).where(eq(applecareGmailConnections.user_id, req.user!.userId)).limit(1);
-  res.json({ connected: !!connection, email: connection?.email || null });
+  const [connection] = await getDb().select({ id: applecareGmailConnections.id, email: applecareGmailConnections.gmail_email, lastSyncedAt: applecareGmailConnections.last_synced_at }).from(applecareGmailConnections).where(eq(applecareGmailConnections.user_id, req.user!.userId)).limit(1);
+  res.json({ connected: !!connection, email: connection?.email || null, lastSyncedAt: connection?.lastSyncedAt || null });
 });
 
 router.delete('/gmail/disconnect', async (req: Request, res: Response) => {
@@ -349,7 +358,7 @@ router.delete('/gmail/disconnect', async (req: Request, res: Response) => {
 router.post('/sync', async (req: Request, res: Response) => {
   const [connection] = await getDb().select().from(applecareGmailConnections).where(eq(applecareGmailConnections.user_id, req.user!.userId)).limit(1);
   if (!connection) { res.status(400).json({ error: 'Connect Gmail first' }); return; }
-  try { res.json({ imported: await syncConnection(connection) }); }
+  try { res.json({ imported: (await syncConnection(connection)) ?? 0 }); }
   catch (error) { res.status(502).json({ error: (error as Error).message }); }
 });
 
@@ -422,10 +431,14 @@ router.post('/sites', requireAdmin, async (req: Request, res: Response) => {
     res.status(500).json({ error: message });
   }
 });
-
-export async function syncAllApplecareConnections() {
-  const connections = await getDb().select().from(applecareGmailConnections);
-  for (const connection of connections) { try { await syncConnection(connection); } catch (error) { console.warn('[applecare] sync failed', (error as Error).message); } }
-}
+router.put('/sites/:id', requireAdmin, async (req: Request, res: Response) => {
+  const siteName = String(req.body?.siteName || '').trim();
+  if (!siteName) { res.status(400).json({ error: 'Site name is required' }); return; }
+  const [site] = await getDb().select().from(applecareSites).where(eq(applecareSites.id, Number(req.params.id))).limit(1);
+  if (!site) { res.status(404).json({ error: 'Site mapping not found' }); return; }
+  await getDb().update(applecareSites).set({ site_name: siteName }).where(eq(applecareSites.id, site.id));
+  const [updated] = await getDb().select().from(applecareSites).where(eq(applecareSites.id, site.id)).limit(1);
+  res.json(updated);
+});
 
 export default router;

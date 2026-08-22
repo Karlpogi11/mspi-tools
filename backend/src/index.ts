@@ -21,7 +21,7 @@ import pdfExtractorRoutes from './pdf-extractor/routes.js';
 import { ensureAwbLogTable } from './pdf-extractor/store.js';
 import { ocrPool } from './pdf-extractor/ocr.js';
 import { httpLogger, logger } from './logger.js';
-import applecareRoutes, { syncAllApplecareConnections } from './applecare/routes.js';
+import applecareRoutes from './applecare/routes.js';
 import { ensureApplecareTables } from './applecare/store.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
@@ -142,10 +142,6 @@ async function start() {
       await tool.init(server);
     }
   }
-
-  setInterval(() => {
-    void syncAllApplecareConnections().catch(() => undefined);
-  }, 5 * 60 * 1000).unref();
 
 }
 
