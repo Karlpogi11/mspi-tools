@@ -1,7 +1,29 @@
 (function () {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const textOf = (el) => (el && (el.textContent || '')).replace(/\s+/g, ' ').trim();
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let cancellationCheck = () => false;
+  const sleep = (ms) => new Promise((resolve, reject) => {
+    const start = Date.now();
+    let timer;
+    const tick = () => {
+      if (cancellationCheck()) {
+        clearTimeout(timer);
+        reject(new Error('Fill cancelled by user'));
+        return;
+      }
+      const remaining = ms - (Date.now() - start);
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      timer = setTimeout(tick, Math.min(50, remaining));
+    };
+    tick();
+  });
+
+  function setCancellationCheck(fn) {
+    cancellationCheck = typeof fn === 'function' ? fn : () => false;
+  }
 
   async function waitFor(fn, timeout = 8000, interval = 250) {
     const start = Date.now();
@@ -30,7 +52,8 @@
     if (tag === 'TEXTAREA') return true;
     if (tag === 'SELECT') return true;
     if (tag === 'INPUT') return !['checkbox', 'radio', 'button', 'submit', 'file'].includes((el.type || '').toLowerCase());
-    if (el.getAttribute && el.getAttribute('role') === 'combobox') return true;
+    if (el.getAttribute && ['combobox', 'textbox'].includes(el.getAttribute('role'))) return true;
+    if (el.isContentEditable) return true;
     return false;
   }
 
@@ -707,7 +730,7 @@
   }
 
   window.__wpH = {
-    norm, textOf, sleep, waitFor, isVisible, isEditable, setText, setSelect,
+    norm, textOf, sleep, waitFor, isVisible, isEditable, setText, setSelect, setCancellationCheck,
     findField, findFields, findCheckbox, findButtonByText, findHeading, sectionByHeading, longestContainerOf: longestContainer,
     collectAllDocs, allDocs, openCombo, typeInCombo, pickOption, setComboValue, setComboElement,
     setValueOn, setTime, fillInput, labelFor, collectVisibleItems, pickFromOpened,

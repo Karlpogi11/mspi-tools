@@ -130,9 +130,15 @@ function normalizeProfile(stored) {
   if (work.generalScope === undefined && work.scope !== undefined) work.generalScope = work.scope;
   if (work.specificScope === undefined && work.specific !== undefined) work.specificScope = work.specific;
   if (work.detailsOfWork === undefined && work.scopeOfWork !== undefined) work.detailsOfWork = work.scopeOfWork;
+  if (work.items === undefined) {
+    work.items = work.itemsToPullOut ?? work.itemsToPullout ?? work.itemToPullOut ?? '';
+  }
   delete work.scope;
   delete work.specific;
   delete work.scopeOfWork;
+  delete work.itemsToPullOut;
+  delete work.itemsToPullout;
+  delete work.itemToPullOut;
   if (/pullout/i.test(work.generalScope || '') && /delivery\s*\/\s*pullout|apple products/i.test(work.specificScope || '')) {
     work.specificScope = 'Pullout of merchandise/goods/items/products/stocks';
   }
