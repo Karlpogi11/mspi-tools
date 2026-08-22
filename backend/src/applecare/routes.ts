@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import ExcelJS from 'exceljs';
 import { getDb } from '../db/index.js';
 import { authenticateToken, requireAdmin } from '../auth.js';
@@ -14,9 +14,35 @@ import { ensureApplecareTables } from './store.js';
 const router = Router();
 router.use(authenticateToken);
 
-const DATA_DIR = path.resolve(process.env.APPLECARE_DATA_DIR || path.resolve(process.cwd(), 'data', 'applecare'));
-const SUBJECT_QUERY = 'subject:"AppleCare Packing List"';
+const SUBJECT_QUERY = 'newer_than:7d subject:"AppleCare Packing List"';
 const OAUTH_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const activeSyncs = new Set<number>();
+
+function dataDir(): string {
+  const configured = process.env.APPLECARE_DATA_DIR || path.resolve(process.cwd(), 'data', 'applecare');
+  return path.resolve(configured);
+}
+
+async function findAttachmentPath(storedPath: string | null | undefined, attachmentName: string | null | undefined): Promise<string | null> {
+  const candidates = storedPath ? [storedPath, path.join(dataDir(), path.basename(storedPath))] : [];
+  for (const candidate of candidates) {
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isFile()) return candidate;
+    } catch { /* Try the persistent data directory fallback below. */ }
+  }
+
+  if (!attachmentName) return null;
+  try {
+    const safeName = path.basename(attachmentName).replace(/[^A-Za-z0-9._-]/g, '_');
+    const files = await fs.readdir(dataDir());
+    const match = files.find((file) => file === safeName || file.endsWith(`-${safeName}`));
+    if (!match) return null;
+    const candidate = path.join(dataDir(), match);
+    const stat = await fs.stat(candidate);
+    return stat.isFile() ? candidate : null;
+  } catch { return null; }
+}
 
 function config() {
   const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI', 'JWT_SECRET'] as const;
@@ -53,10 +79,15 @@ function encrypt(value: string, key: Buffer): string {
 }
 
 function decrypt(value: string, key: Buffer): string {
-  const [ivRaw, tagRaw, bodyRaw] = value.split('.');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivRaw, 'base64url'));
-  decipher.setAuthTag(Buffer.from(tagRaw, 'base64url'));
-  return Buffer.concat([decipher.update(Buffer.from(bodyRaw, 'base64url')), decipher.final()]).toString('utf8');
+  try {
+    const [ivRaw, tagRaw, bodyRaw] = value.split('.');
+    if (!ivRaw || !tagRaw || !bodyRaw) throw new Error('Malformed encrypted token');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivRaw, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagRaw, 'base64url'));
+    return Buffer.concat([decipher.update(Buffer.from(bodyRaw, 'base64url')), decipher.final()]).toString('utf8');
+  } catch {
+    throw new Error('The Gmail connection needs to be reconnected. The server encryption key may have changed.');
+  }
 }
 
 async function tokenFor(connection: typeof applecareGmailConnections.$inferSelect) {
@@ -121,7 +152,7 @@ async function attachmentText(buffer: Buffer, filename: string): Promise<string>
 async function parseExcelItems(buffer: Buffer) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer as any);
-  const items: Array<{ part_number: string; description: string; serial_number: string; quantity: number; raw_text: string }> = [];
+  const items: Array<{ part_number: string; description: string; po_no: string; serial_number: string; quantity: number; raw_text: string }> = [];
   const lines: string[] = [];
   workbook.worksheets.forEach((sheet) => {
     let headers: string[] = [];
@@ -144,6 +175,7 @@ async function parseExcelItems(buffer: Buffer) {
       items.push({
         part_number: partNumber.slice(0, 150),
         description: get('description', 'itemdescription').slice(0, 500),
+        po_no: get('pono', 'ponumber', 'purchaseno', 'purchasenumber').slice(0, 150),
         serial_number: get('serialno', 'serialnumber', 'serial').slice(0, 150),
         quantity: Number(quantityRaw) || 0,
         raw_text: values.join(' | ').slice(0, 1000),
@@ -157,25 +189,43 @@ function parseItems(text: string) {
   return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
     const match = line.match(/^([^|\s]+)\s*[|\s]+(.+?)[|\s]+(\d+)$/);
     if (!match) return null;
-    return { part_number: match[1].slice(0, 150), description: match[2].slice(0, 500), serial_number: '', quantity: Number(match[3]), raw_text: line.slice(0, 1000) };
+    return { part_number: match[1].slice(0, 150), description: match[2].slice(0, 500), po_no: '', serial_number: '', quantity: Number(match[3]), raw_text: line.slice(0, 1000) };
   }).filter((item): item is NonNullable<typeof item> => !!item);
 }
 
-async function syncConnection(connection: typeof applecareGmailConnections.$inferSelect) {
+function purchaseNumberFromStoredRow(rawText: string | null, filename: string | null): string | null {
+  if (!rawText || !/\.xlsx?$/i.test(filename || '')) return null;
+  const value = rawText.split('|')[8]?.trim();
+  return value || null;
+}
+
+async function performSyncConnection(connection: typeof applecareGmailConnections.$inferSelect) {
   const token = await tokenFor(connection);
   const result = await gmail<{ messages?: Array<{ id: string; threadId?: string }> }>(token, `/messages?q=${encodeURIComponent(SUBJECT_QUERY)}&maxResults=100`);
   const db = getDb();
   let imported = 0;
   for (const summary of result.messages || []) {
     const [existing] = await db.select().from(applecarePackingLists).where(eq(applecarePackingLists.gmail_message_id, summary.id)).limit(1);
+    const existingAttachmentPath = existing ? await findAttachmentPath(existing.attachment_path, existing.attachment_name) : null;
+    const [existingSite] = existing ? await db.select({ id: applecareSites.id }).from(applecareSites).where(eq(applecareSites.ship_to, existing.ship_to)).limit(1) : [];
     if (existing && /\.(xlsx?|pdf)$/i.test(existing.attachment_name || '') && existing.raw_text) {
-      const [existingItem] = await db.select({ id: applecarePackingListItems.id })
+      const [existingItem] = await db.select({ id: applecarePackingListItems.id, po_no: applecarePackingListItems.po_no })
         .from(applecarePackingListItems)
         .where(eq(applecarePackingListItems.packing_list_id, existing.id))
         .limit(1);
       // Re-read old Excel records imported by the initial generic parser so
       // the structured PartNo/Description/SerialNo/Qty parser can populate them.
-      if (existingItem) continue;
+      if (existingItem && existingAttachmentPath) {
+        if (!existing.received_by || (!existing.site_id && existingSite?.id)) {
+          await db.update(applecarePackingLists)
+            .set({
+              received_by: existing.received_by || connection.gmail_email,
+              ...(existing.site_id || !existingSite?.id ? {} : { site_id: existingSite.id }),
+            })
+            .where(eq(applecarePackingLists.id, existing.id));
+        }
+        continue;
+      }
     }
     const message = await gmail<GmailMessage>(token, `/messages/${encodeURIComponent(summary.id)}?format=full`);
     const subject = header(message, 'Subject');
@@ -196,9 +246,10 @@ async function syncConnection(connection: typeof applecareGmailConnections.$infe
     if (attachment?.filename) {
       const buffer = await attachmentBuffer(token, message.id, attachment);
       attachmentName = attachment.filename.slice(0, 255);
-      await fs.mkdir(DATA_DIR, { recursive: true });
+      const currentDataDir = dataDir();
+      await fs.mkdir(currentDataDir, { recursive: true });
       const fileName = `${crypto.randomUUID()}-${path.basename(attachmentName).replace(/[^A-Za-z0-9._-]/g, '_')}`;
-      attachmentPath = path.join(DATA_DIR, fileName);
+      attachmentPath = path.join(currentDataDir, fileName);
       await fs.writeFile(attachmentPath, buffer, { mode: 0o600 });
       if (/\.xlsx?$/i.test(attachmentName)) {
         const parsedExcel = await parseExcelItems(buffer);
@@ -214,6 +265,7 @@ async function syncConnection(connection: typeof applecareGmailConnections.$infe
       gmail_thread_id: message.threadId || '',
       subject: subject.slice(0, 500),
       sender: header(message, 'From').slice(0, 500),
+      received_by: existing?.received_by || connection.gmail_email,
       ship_to: parsed.shipTo,
       site_id: site[0]?.id || null,
       packing_date: parsed.packingDate,
@@ -237,6 +289,13 @@ async function syncConnection(connection: typeof applecareGmailConnections.$infe
     imported++;
   }
   return imported;
+}
+
+async function syncConnection(connection: typeof applecareGmailConnections.$inferSelect) {
+  if (activeSyncs.has(connection.id)) return 0;
+  activeSyncs.add(connection.id);
+  try { return await performSyncConnection(connection); }
+  finally { activeSyncs.delete(connection.id); }
 }
 
 router.get('/gmail/connect', (req: Request, res: Response) => {
@@ -296,21 +355,55 @@ router.post('/sync', async (req: Request, res: Response) => {
 
 router.get('/lists', async (req: Request, res: Response) => {
   const db = getDb();
-  const rows = await db.select({ list: applecarePackingLists, siteName: applecareSites.site_name }).from(applecarePackingLists).leftJoin(applecareSites, eq(applecarePackingLists.site_id, applecareSites.id)).orderBy(desc(applecarePackingLists.received_at), desc(applecarePackingLists.id)).limit(500);
-  res.json(rows.map(({ list, siteName }) => ({ ...list, site_name: siteName || null, email_url: `https://mail.google.com/mail/u/0/#all/${list.gmail_message_id}` })));
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 7);
+  let accountFilter: string | null = null;
+  if (req.user!.roleName !== 'Admin') {
+    const [connection] = await db.select({ email: applecareGmailConnections.gmail_email })
+      .from(applecareGmailConnections)
+      .where(eq(applecareGmailConnections.user_id, req.user!.userId))
+      .limit(1);
+    if (!connection) { res.json([]); return; }
+    accountFilter = connection.email;
+  }
+  const visibility = accountFilter ? eq(applecarePackingLists.received_by, accountFilter) : undefined;
+  const rows = await db.select({
+    list: applecarePackingLists,
+    siteName: applecareSites.site_name,
+    totalQuantity: sql<number>`COALESCE((SELECT SUM(quantity) FROM applecare_packing_list_items WHERE packing_list_id = ${applecarePackingLists.id}), 0)`,
+  }).from(applecarePackingLists).leftJoin(applecareSites, eq(applecarePackingLists.site_id, applecareSites.id)).where(visibility ? and(gte(applecarePackingLists.received_at, cutoff), visibility) : gte(applecarePackingLists.received_at, cutoff)).orderBy(desc(applecarePackingLists.received_at), desc(applecarePackingLists.id)).limit(500);
+  res.json(rows.map(({ list, siteName, totalQuantity }) => ({ ...list, site_name: siteName || null, total_quantity: Number(totalQuantity) || 0, email_url: `https://mail.google.com/mail/u/0/#all/${list.gmail_message_id}` })));
 });
 
 router.get('/lists/:id', async (req: Request, res: Response) => {
   const [list] = await getDb().select().from(applecarePackingLists).where(eq(applecarePackingLists.id, Number(req.params.id))).limit(1);
   if (!list) { res.status(404).json({ error: 'Packing list not found' }); return; }
+  if (req.user!.roleName !== 'Admin') {
+    const [connection] = await getDb().select({ email: applecareGmailConnections.gmail_email })
+      .from(applecareGmailConnections)
+      .where(eq(applecareGmailConnections.user_id, req.user!.userId))
+      .limit(1);
+    if (!connection || list.received_by !== connection.email) { res.status(404).json({ error: 'Packing list not found' }); return; }
+  }
   const items = await getDb().select().from(applecarePackingListItems).where(eq(applecarePackingListItems.packing_list_id, list.id));
-  res.json({ ...list, items });
+  res.json({ ...list, items: items.map((item) => ({ ...item, po_no: item.po_no || purchaseNumberFromStoredRow(item.raw_text, list.attachment_name) })) });
 });
 
 router.get('/lists/:id/attachment', async (req: Request, res: Response) => {
   const [list] = await getDb().select().from(applecarePackingLists).where(eq(applecarePackingLists.id, Number(req.params.id))).limit(1);
   if (!list?.attachment_path) { res.status(404).json({ error: 'Attachment not found' }); return; }
-  res.download(list.attachment_path, list.attachment_name || 'packing-list');
+  if (req.user!.roleName !== 'Admin') {
+    const [connection] = await getDb().select({ email: applecareGmailConnections.gmail_email })
+      .from(applecareGmailConnections)
+      .where(eq(applecareGmailConnections.user_id, req.user!.userId))
+      .limit(1);
+    if (!connection || list.received_by !== connection.email) { res.status(404).json({ error: 'Attachment not found' }); return; }
+  }
+  const attachmentPath = await findAttachmentPath(list.attachment_path, list.attachment_name);
+  if (!attachmentPath) { res.status(404).json({ error: 'Attachment is no longer available. Sync Gmail to download it again.' }); return; }
+  res.download(attachmentPath, list.attachment_name || 'packing-list', (error) => {
+    if (error && !res.headersSent) res.status(404).json({ error: 'Attachment is no longer available.' });
+  });
 });
 
 router.get('/sites', async (_req, res) => res.json(await getDb().select().from(applecareSites).orderBy(applecareSites.site_name)));

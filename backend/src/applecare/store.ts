@@ -18,7 +18,7 @@ export async function ensureApplecareTables(): Promise<void> {
   )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS applecare_packing_lists (
     id int AUTO_INCREMENT NOT NULL, gmail_message_id varchar(255) NOT NULL, gmail_thread_id varchar(255) DEFAULT '',
-    subject varchar(500) NOT NULL, sender varchar(500) DEFAULT '', ship_to varchar(30) NOT NULL,
+    subject varchar(500) NOT NULL, sender varchar(500) DEFAULT '', received_by varchar(320) NULL, ship_to varchar(30) NOT NULL,
     site_id int NULL, packing_date varchar(20) DEFAULT '', packing_time varchar(10) DEFAULT '', received_at timestamp NULL,
     attachment_name varchar(255) DEFAULT '', attachment_path varchar(500) DEFAULT '', status varchar(30) NOT NULL DEFAULT 'incoming',
     raw_text text, imported_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (id),
@@ -27,7 +27,17 @@ export async function ensureApplecareTables(): Promise<void> {
   )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS applecare_packing_list_items (
     id int AUTO_INCREMENT NOT NULL, packing_list_id int NOT NULL, part_number varchar(150) DEFAULT '',
-    description varchar(500) DEFAULT '', serial_number varchar(150) DEFAULT '', quantity int NOT NULL DEFAULT 0,
+    description varchar(500) DEFAULT '', po_no varchar(150) NULL, serial_number varchar(150) DEFAULT '', quantity int NOT NULL DEFAULT 0,
     raw_text text, PRIMARY KEY (id), CONSTRAINT applecare_item_list_fk FOREIGN KEY (packing_list_id) REFERENCES applecare_packing_lists(id) ON DELETE CASCADE
   )`);
+  try {
+    await pool.query('ALTER TABLE applecare_packing_list_items ADD COLUMN po_no varchar(150) NULL');
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw error;
+  }
+  try {
+    await pool.query('ALTER TABLE applecare_packing_lists ADD COLUMN received_by varchar(320) NULL');
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME') throw error;
+  }
 }

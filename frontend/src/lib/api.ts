@@ -309,11 +309,11 @@ export interface AwbLogRow {
 export interface ApplecareStatus { connected: boolean; email: string | null }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
 export interface ApplecarePackingList {
-  id: number; gmail_message_id: string; subject: string; sender: string; ship_to: string;
+  id: number; gmail_message_id: string; subject: string; sender: string; received_by: string | null; ship_to: string;
   site_id: number | null; site_name?: string | null; packing_date: string; packing_time: string;
-  received_at: string | null; attachment_name: string; status: string; email_url: string;
+  received_at: string | null; attachment_name: string; status: string; total_quantity: number; email_url: string;
 }
-export interface ApplecareItem { id: number; part_number: string; description: string; serial_number: string; quantity: number; raw_text: string | null }
+export interface ApplecareItem { id: number; part_number: string; description: string; po_no: string | null; serial_number: string; quantity: number; raw_text: string | null }
 export interface ApplecarePackingListDetail extends ApplecarePackingList { items: ApplecareItem[]; raw_text?: string | null }
 
 export const api = {
@@ -553,6 +553,14 @@ export const api = {
     sites: () => request<ApplecareSite[]>('/applecare/sites'),
     createSite: (shipTo: string, siteName: string) => request<ApplecareSite>('/applecare/sites', { method: 'POST', body: JSON.stringify({ shipTo, siteName }) }),
     attachmentUrl: (id: number) => `${BASE}/applecare/lists/${id}/attachment`,
+    downloadAttachment: async (id: number, filename: string) => {
+      const res = await fetch(`${BASE}/applecare/lists/${id}/attachment`, { credentials: 'include' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(data?.error || 'Attachment is unavailable');
+      }
+      await saveBlob(await res.blob(), filename || 'packing-list');
+    },
   },
 
   pdfExtractor: {
