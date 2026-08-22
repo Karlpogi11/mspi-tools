@@ -21,12 +21,17 @@ import pdfExtractorRoutes from './pdf-extractor/routes.js';
 import { ensureAwbLogTable } from './pdf-extractor/store.js';
 import { ocrPool } from './pdf-extractor/ocr.js';
 import { httpLogger, logger } from './logger.js';
+import applecareRoutes, { syncAllApplecareConnections } from './applecare/routes.js';
+import { ensureApplecareTables } from './applecare/store.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
 
-dotenv.config({ path: path.resolve(_dirname, '.env'), override: true });
-dotenv.config({ override: true });
+// Resolve the backend environment file consistently when started from either
+// backend/src (tsx) or backend/dist (compiled production build).
+dotenv.config({ path: path.resolve(_dirname, '..', '.env') });
+dotenv.config({ path: path.resolve(_dirname, '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -56,6 +61,7 @@ const tools = [
   { name: 'reformat', router: reformatRoutes, hasGateway: false },
   { name: 'consumables', router: consumablesRoutes, hasGateway: false },
   { name: 'pdf-extractor', router: pdfExtractorRoutes, hasGateway: false },
+  { name: 'applecare', router: applecareRoutes, hasGateway: false },
 ];
 
 for (const tool of tools) {
@@ -121,6 +127,8 @@ async function start() {
     logger.info('Database connected');
     await ensureAwbLogTable();
     logger.info('PDF Extractor log table ready');
+    await ensureApplecareTables();
+    logger.info('AppleCare tables ready');
     await syncBuiltinToolCatalog();
     logger.info('Built-in tool catalog synchronized');
   } catch (error) {
@@ -134,6 +142,10 @@ async function start() {
       await tool.init(server);
     }
   }
+
+  setInterval(() => {
+    void syncAllApplecareConnections().catch(() => undefined);
+  }, 5 * 60 * 1000).unref();
 
 }
 

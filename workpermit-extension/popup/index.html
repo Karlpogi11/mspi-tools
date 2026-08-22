@@ -8,140 +8,105 @@
 </head>
 <body>
   <main class="wrap">
-    <header class="head">
-      <div class="brand">
-        <span class="eyebrow">MSPI TOOL</span>
-        <h1>Work Permit Extension</h1>
-        <p class="sub">Fill the fields on the active permit page.</p>
-      </div>
-      <div class="head-actions">
-        <button id="btnFill" class="primary" title="Fill the form on the active tab">Fill current page</button>
-        <button id="btnTestFirst" class="secondary" title="Test only the first Type of Work row">Test first row</button>
-        <button id="btnCancel" class="cancel" title="Cancel the current fill operation" hidden>Cancel</button>
-      </div>
+    <header class="header">
+      <span class="eyebrow">MSPI EXTENSION</span>
+      <h1>Work Permit Autofill</h1>
+      <p>Choose a permit template, review the details, then fill the active page.</p>
     </header>
 
     <section class="panel">
-      <h2>Permit Type</h2>
-      <div class="grid cols-2">
-        <label>Template
-          <select id="f_permitType">
-            <option value="pullout">Pullout</option>
-            <option value="pest-control">Pest Control</option>
-          </select>
-        </label>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Page 1 — Mall Details</h2>
-      <div class="grid cols-2">
-        <label>Trade Name
-          <input id="f_trade" data-field="mall.tradeName" spellcheck="false" />
-        </label>
-        <label>Classification
-          <input id="f_class" data-field="mall.classification" spellcheck="false" />
-        </label>
-        <label>Branch
-          <input id="f_branch" data-field="mall.branch" spellcheck="false" />
-        </label>
-        <label>Area Type
-          <input id="f_area" data-field="mall.areaType" spellcheck="false" />
-        </label>
-        <label class="span-2">Location <span class="hint">(leave blank to skip — you type it)</span>
-          <input id="f_loc" data-field="mall.location" spellcheck="false" />
-        </label>
-        <label class="span-2 check">
-          <input type="checkbox" id="f_ddowns" data-field="mallCombos" />
-          Auto-fill these dropdowns too <span class="hint">(Trade Name, Classification, Branch, Area Type — leave unchecked to pick them manually)</span>
-        </label>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Requestor Details</h2>
-      <div class="grid cols-3">
-        <label class="span-2">Contact Number
-          <input id="f_reqTel" data-field="requestor.contact" spellcheck="false" />
-        </label>
-        <label class="check">
-          <input type="checkbox" id="f_sameAsReq" data-field="sameAsRequestor" />
-          Same as the Requestor Details
-        </label>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Contact Persons (up to 2)</h2>
-      <div id="contacts"></div>
-    </section>
-
-    <section class="panel">
-      <h2>2 — Work Details</h2>
-      <div class="grid cols-2">
-        <label>Tenant Status
-          <input id="f_status" data-field="work.tenantStatus" spellcheck="false" />
+      <div class="section-heading compact"><h2>Permit details</h2></div>
+      <div class="form-grid two-col">
+        <label>Permit template
+          <select id="f_permitType" aria-label="Choose permit template"></select>
         </label>
         <label>Number of entries
           <input id="f_num" data-field="work.numWork" type="number" min="1" max="10" />
         </label>
-        <label>Scope
-          <input id="f_scope" data-field="work.scope" spellcheck="false" />
-        </label>
-        <label>Items to pull out
-          <input id="f_items" data-field="work.items" spellcheck="false" />
-        </label>
-        <label class="span-2">Details of work / Specific Scope
-          <input id="f_specific" data-field="work.specific" spellcheck="false" />
-        </label>
-        <label>From
-          <input id="f_from" data-field="work.fromTime" spellcheck="false" />
-        </label>
-        <label>To
-          <input id="f_to" data-field="work.toTime" spellcheck="false" />
-        </label>
-        <label class="span-2 check">
-          <input type="checkbox" id="f_urgent" data-field="work.urgent" />
-          This is an urgent request
-        </label>
       </div>
-      <p class="note">Dates are always left blank — you type them manually.</p>
+      <p class="helper">Changing the template updates the work defaults. Your changes save automatically.</p>
+    </section>
+
+    <button id="btnFill" class="primary-action" type="button">Fill current page</button>
+    <button id="btnCancel" class="cancel-action" type="button" hidden>Cancel fill</button>
+
+    <section class="panel">
+      <div class="section-heading compact"><h2>Mall details</h2></div>
+      <div class="form-grid two-col">
+        <label>Trade name
+          <select id="f_tradeChoice" class="choice-select" aria-label="Choose trade name">
+            <option value="">Choose or type manually</option>
+            <option value="MOBILE CARE BY POWER MAC CENTER">Mobile Care by Power Mac Center</option>
+            <option value="__manual__">Enter manually…</option>
+          </select>
+          <input id="f_trade" data-field="mall.tradeName" spellcheck="false" placeholder="Exact trade name" />
+        </label>
+        <label>Branch
+          <select id="f_branchChoice" class="choice-select" aria-label="Choose branch">
+            <option value="">Choose or type manually</option>
+            <option value="THE PODIUM">The Podium</option>
+            <option value="__manual__">Enter manually…</option>
+          </select>
+          <input id="f_branch" data-field="mall.branch" spellcheck="false" placeholder="Exact branch name" />
+        </label>
+        <label>Area type<input id="f_area" data-field="mall.areaType" spellcheck="false" /></label>
+        <label class="full-width">Mall location <span class="hint">filled automatically</span><input id="f_loc" data-field="mall.location" spellcheck="false" /></label>
+        <label class="check full-width"><input type="checkbox" id="f_ddowns" data-field="mallCombos" /> Auto-select Trade Name, Branch, and Area Type</label>
+      </div>
+      <p class="helper">Classification is filled automatically by the permit site after Trade Name is selected.</p>
     </section>
 
     <section class="panel">
-      <h2>Personnel <span class="muted">(one per line: First Last)</span></h2>
-      <textarea id="f_people" rows="6" spellcheck="false" placeholder="JIMSON SALAS&#10;LEOMAR BLANCO&#10;..."></textarea>
+      <div class="section-heading compact"><h2>Requestor & contacts</h2></div>
+      <div class="form-grid two-col">
+        <label>Requestor contact<input id="f_reqTel" data-field="requestor.contact" spellcheck="false" /></label>
+        <label class="check align-end"><input type="checkbox" id="f_sameAsReq" data-field="sameAsRequestor" /> Same as requestor</label>
+      </div>
+      <div id="contacts" class="contacts"></div>
     </section>
 
     <section class="panel">
-      <h2>Equipment <span class="muted">(one per line)</span></h2>
-      <textarea id="f_equipment" rows="4" spellcheck="false" placeholder="1pc Misting machine&#10;1pc spray can&#10;asstd. chem&#10;PPE"></textarea>
+      <div class="section-heading compact"><h2>Work details</h2></div>
+      <div class="form-grid two-col">
+        <label>Tenant status<input id="f_status" data-field="work.tenantStatus" spellcheck="false" /></label>
+        <label>Scope<input id="f_scope" data-field="work.scope" spellcheck="false" /></label>
+        <label>From time<input id="f_from" data-field="work.fromTime" spellcheck="false" placeholder="11:00 AM" /></label>
+        <label>To time<input id="f_to" data-field="work.toTime" spellcheck="false" placeholder="05:00 PM" /></label>
+        <label class="full-width">Items to pull out<input id="f_items" data-field="work.items" spellcheck="false" /></label>
+        <label class="full-width">Specific work details<input id="f_specific" data-field="work.specific" spellcheck="false" /></label>
+        <label class="check full-width"><input type="checkbox" id="f_urgent" data-field="work.urgent" /> Urgent request</label>
+      </div>
+      <p class="helper">Dates remain blank so you can enter the correct date for each request.</p>
     </section>
 
-    <footer class="foot">
-      <div class="foot-left">
-        <button id="btnSave" class="secondary">Save profile</button>
-        <button id="btnExport" class="secondary" title="Export profile JSON">Export</button>
-        <button id="btnImport" class="secondary" title="Import profile JSON">Import</button>
-        <button id="btnCopyLog" class="secondary" title="Copy the fill log to clipboard">Copy log</button>
-      </div>
-      <p id="status" class="status"></p>
-    </footer>
+    <section class="panel">
+      <div class="section-heading compact"><h2>People & equipment</h2></div>
+      <label>Personnel <span class="hint">one person per line</span>
+        <textarea id="f_people" rows="5" spellcheck="false" placeholder="First Last"></textarea>
+      </label>
+      <label class="stacked-label">Equipment <span class="hint">one item per line</span>
+        <textarea id="f_equipment" rows="4" spellcheck="false" placeholder="1pc Misting machine"></textarea>
+      </label>
+    </section>
+
+    <footer class="footer"><p id="status" class="status" aria-live="polite"></p></footer>
 
     <div id="progress" class="progress" aria-live="polite"></div>
-
-    <details class="advanced">
-      <summary>Diagnostics</summary>
-      <div class="advanced-actions">
-        <button id="btnProbe" title="Test only the Tenant Status dropdown and report what it sees">Test Tenant Status</button>
-        <button id="btnProbe1" title="Probe the 4 page-1 dropdowns: open their triggers and report the popup structure">Probe page 1 dropdowns</button>
-        <button id="btnDump" title="List every input/select on the page (including hidden) for debugging">Dump page fields</button>
-        <button id="btnMap" title="Copy detected fields to clipboard (for debugging)">Copy field map</button>
-      </div>
-    </details>
-
     <pre id="log" class="log"></pre>
   </main>
+
+  <div id="profileDialog" class="dialog-backdrop" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="profileDialogTitle">
+      <h2 id="profileDialogTitle">New permit template</h2>
+      <p>Name this template, then fill in its details below.</p>
+      <label>Template name<input id="profileNameInput" maxlength="60" autocomplete="off" /></label>
+      <div class="dialog-actions">
+        <button id="btnProfileCancel" class="secondary-button" type="button">Cancel</button>
+        <button id="btnProfileConfirm" class="primary-small" type="button">Create template</button>
+      </div>
+    </section>
+  </div>
+
   <script src="index.js"></script>
 </body>
 </html>

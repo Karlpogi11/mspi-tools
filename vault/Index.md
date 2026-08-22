@@ -17,6 +17,9 @@ Welcome to the Obsidian Vault for the MSPI Internal Tools project. This workspac
 - [[Tool - PDF Extractor]]: **AWB/Invoice PDF Extractor** — text-layer + OCR pipeline that files PDFs by month and logs every invoice.
 - [[Tool - Consumables]]: **Label Maker** — log received consumables, derive production/expiry from the 9D code, and print labels.
 
+### 🧩 Browser Extensions
+- [[Tool - Work Permit Extension]]: Standalone Chrome extension for approved personal-email users.
+
 ---
 
 ### 📂 Quick Directory Links

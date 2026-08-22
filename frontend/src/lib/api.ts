@@ -306,6 +306,16 @@ export interface AwbLogRow {
   date_logged: string | null;
 }
 
+export interface ApplecareStatus { connected: boolean; email: string | null }
+export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
+export interface ApplecarePackingList {
+  id: number; gmail_message_id: string; subject: string; sender: string; ship_to: string;
+  site_id: number | null; site_name?: string | null; packing_date: string; packing_time: string;
+  received_at: string | null; attachment_name: string; status: string; email_url: string;
+}
+export interface ApplecareItem { id: number; part_number: string; description: string; serial_number: string; quantity: number; raw_text: string | null }
+export interface ApplecarePackingListDetail extends ApplecarePackingList { items: ApplecareItem[]; raw_text?: string | null }
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ message: string; user: User }>('/auth/login', {
@@ -531,6 +541,18 @@ export const api = {
       }
       await saveBlob(await res.blob(), 'consumable-inventory.xlsx');
     },
+  },
+
+  applecare: {
+    status: () => request<ApplecareStatus>('/applecare/status'),
+    connectUrl: () => `${BASE}/applecare/gmail/connect`,
+    disconnect: () => request<{ message: string }>('/applecare/gmail/disconnect', { method: 'DELETE' }),
+    sync: () => request<{ imported: number }>('/applecare/sync', { method: 'POST' }),
+    lists: () => request<ApplecarePackingList[]>('/applecare/lists'),
+    detail: (id: number) => request<ApplecarePackingListDetail>(`/applecare/lists/${id}`),
+    sites: () => request<ApplecareSite[]>('/applecare/sites'),
+    createSite: (shipTo: string, siteName: string) => request<ApplecareSite>('/applecare/sites', { method: 'POST', body: JSON.stringify({ shipTo, siteName }) }),
+    attachmentUrl: (id: number) => `${BASE}/applecare/lists/${id}/attachment`,
   },
 
   pdfExtractor: {

@@ -185,3 +185,53 @@ export const awbLog = mysqlTable(
     invoiceRefUnique: uniqueIndex('awb_log_invoice_ref_unique').on(table.invoice_reference),
   })
 );
+
+export const applecareGmailConnections = mysqlTable('applecare_gmail_connections', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  user_id: int('user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
+  gmail_email: varchar('gmail_email', { length: 255 }).notNull(),
+  refresh_token_encrypted: text('refresh_token_encrypted').notNull(),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull().onUpdateNow(),
+});
+
+export const applecareSites = mysqlTable('applecare_sites', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  ship_to: varchar('ship_to', { length: 30 }).notNull().unique(),
+  site_name: varchar('site_name', { length: 255 }).notNull(),
+  active: int('active').default(1).notNull(),
+  created_by: int('created_by').references(() => users.id, { onDelete: 'set null' }),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull().onUpdateNow(),
+});
+
+export const applecarePackingLists = mysqlTable('applecare_packing_lists', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  gmail_message_id: varchar('gmail_message_id', { length: 255 }).notNull().unique(),
+  gmail_thread_id: varchar('gmail_thread_id', { length: 255 }).default(''),
+  subject: varchar('subject', { length: 500 }).notNull(),
+  sender: varchar('sender', { length: 500 }).default(''),
+  ship_to: varchar('ship_to', { length: 30 }).notNull(),
+  site_id: int('site_id').references(() => applecareSites.id, { onDelete: 'set null' }),
+  packing_date: varchar('packing_date', { length: 20 }).default(''),
+  packing_time: varchar('packing_time', { length: 10 }).default(''),
+  received_at: timestamp('received_at'),
+  attachment_name: varchar('attachment_name', { length: 255 }).default(''),
+  attachment_path: varchar('attachment_path', { length: 500 }).default(''),
+  status: varchar('status', { length: 30 }).default('incoming').notNull(),
+  raw_text: text('raw_text'),
+  imported_at: timestamp('imported_at').defaultNow().notNull(),
+}, (table) => ({
+  shipToIdx: index('applecare_packing_lists_ship_to_idx').on(table.ship_to),
+  receivedIdx: index('applecare_packing_lists_received_idx').on(table.received_at),
+}));
+
+export const applecarePackingListItems = mysqlTable('applecare_packing_list_items', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  packing_list_id: int('packing_list_id').notNull().references(() => applecarePackingLists.id, { onDelete: 'cascade' }),
+  part_number: varchar('part_number', { length: 150 }).default(''),
+  description: varchar('description', { length: 500 }).default(''),
+  serial_number: varchar('serial_number', { length: 150 }).default(''),
+  quantity: int('quantity').default(0).notNull(),
+  raw_text: text('raw_text'),
+});

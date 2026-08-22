@@ -10,6 +10,7 @@ Internal operations platform for `tools.mspi.io`, built for secure, role-based a
 - **Consumables** — consumable master data and label workflows
 - **PDF Extractor** — PDF upload, OCR extraction, validation, filing, and AWB logging
 - **Site Monitor** — RFPU deployment and health monitoring
+- **Chrome Extension — Work Permit Autofill** — standalone Chrome extension for approved personal-email Chrome users
 - **Admin** — users, roles, tool access, password resets, and audit events
 
 ## Architecture
@@ -87,6 +88,11 @@ mspi-tools/
 │       ├── components/
 │       ├── lib/
 │       └── pages/
+├── workpermit-extension/       # Standalone Chrome extension
+│   ├── manifest.json
+│   ├── content/
+│   ├── popup/
+│   └── README.md
 ├── .github/
 │   ├── dependabot.yml
 │   └── workflows/
@@ -105,6 +111,10 @@ mspi-tools/
 ## Adding a tool
 
 Prefer adding a focused domain module to the existing backend and frontend rather than creating a separate application. New tools should use the shared authentication, database access, audit logging, API cache, and restrained visual system.
+
+## Chrome Extension
+
+**Work Permit Autofill** is a separate browser tool, not a web route. It is intended only for approved users using Chrome with a personal email profile. Install it manually through `chrome://extensions` using **Developer mode → Load unpacked**. See [`workpermit-extension/README.md`](workpermit-extension/README.md) for the complete steps and restrictions.
 
 Before opening a pull request, verify:
 

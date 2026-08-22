@@ -42,7 +42,14 @@ const DEFAULT_PROFILE = {
 };
 
 const $ = (id) => document.getElementById(id);
-const state = { profile: structuredClone(DEFAULT_PROFILE), saveTimer: null };
+const state = {
+  profiles: {},
+  activeProfileId: '',
+  profile: structuredClone(DEFAULT_PROFILE),
+  saveTimer: null,
+  dialogMode: 'create',
+  templateChoice: '',
+};
 
 const PEST_CONTROL_PRESET = {
   permitType: 'pest-control',
@@ -78,17 +85,133 @@ function deepMerge(base, patch) {
 }
 
 async function loadProfile() {
-  const stored = (await chrome.storage.local.get('wpProfile')).wpProfile;
-  if (stored && stored._v === DEFAULT_PROFILE._v) {
-    state.profile = deepMerge(structuredClone(DEFAULT_PROFILE), stored);
+  const stored = await chrome.storage.local.get(['wpProfiles', 'wpProfile']);
+  const savedProfiles = stored.wpProfiles;
+  if (savedProfiles && typeof savedProfiles === 'object' && Object.keys(savedProfiles).length) {
+    state.profiles = Object.fromEntries(Object.entries(savedProfiles).map(([id, item]) => [id, {
+      name: String(item?.name || 'Current permit').replace(/^Default permit$/, 'Current permit').replace(/^Permit profile$/, 'Current permit'),
+      profile: normalizeProfile(item?.profile || item),
+    }]));
   } else {
-    delete stored?.mallCombos;
-    state.profile = deepMerge(structuredClone(DEFAULT_PROFILE), stored || {});
+    const id = makeProfileId();
+    state.profiles = { [id]: { name: 'Current permit', profile: normalizeProfile(stored.wpProfile || {}) } };
   }
+  state.activeProfileId = Object.keys(state.profiles)[0];
+  state.profile = structuredClone(state.profiles[state.activeProfileId].profile);
+  const activeName = state.profiles[state.activeProfileId]?.name || '';
+  state.templateChoice = /^(current permit|default permit|permit profile)$/i.test(activeName)
+    ? (state.profile.permitType || 'pullout')
+    : `saved:${state.activeProfileId}`;
+  await persist();
 }
 
 async function persist() {
-  await chrome.storage.local.set({ wpProfile: state.profile });
+  if (!state.activeProfileId) return;
+  state.profiles[state.activeProfileId] = {
+    ...state.profiles[state.activeProfileId],
+    profile: structuredClone(state.profile),
+  };
+  await chrome.storage.local.set({
+    wpProfiles: state.profiles,
+    wpProfile: state.profile,
+  });
+}
+
+function makeProfileId() {
+  return typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `profile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeProfile(stored) {
+  const source = stored && typeof stored === 'object' ? { ...stored } : {};
+  delete source.name;
+  delete source.profile;
+  return deepMerge(structuredClone(DEFAULT_PROFILE), source);
+}
+
+function renderTemplates() {
+  const select = $('f_permitType');
+  if (!select) return;
+  select.innerHTML = '';
+  const builtIns = [
+    ['pullout', 'Pullout'],
+    ['pest-control', 'Pest Control'],
+  ];
+  builtIns.forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+  Object.entries(state.profiles).forEach(([id, item]) => {
+    if (!item?.name || /^(current permit|default permit|permit profile)$/i.test(item.name)) return;
+    const option = document.createElement('option');
+    option.value = `saved:${id}`;
+    option.textContent = item.name;
+    select.appendChild(option);
+  });
+  const newOption = document.createElement('option');
+  newOption.value = '__new__';
+  newOption.textContent = '＋ New template…';
+  select.appendChild(newOption);
+  const active = state.profiles[state.activeProfileId];
+  const activeIsSaved = active?.name && !/^(current permit|default permit|permit profile)$/i.test(active.name);
+  const choice = state.templateChoice || (activeIsSaved ? `saved:${state.activeProfileId}` : (state.profile.permitType || 'pullout'));
+  select.value = Array.from(select.options).some((option) => option.value === choice) ? choice : 'pullout';
+}
+
+async function switchProfile(id) {
+  if (!state.profiles[id] || id === state.activeProfileId) return;
+  collect();
+  await persist();
+  state.activeProfileId = id;
+  state.profile = structuredClone(state.profiles[id].profile);
+  state.templateChoice = `saved:${id}`;
+  render();
+  setStatus('Permit selected', 'ok');
+}
+
+function openProfileDialog(mode) {
+  state.dialogMode = mode;
+  $('profileDialogTitle').textContent = mode === 'rename' ? 'Rename permit template' : 'New permit template';
+  $('profileNameInput').value = mode === 'rename' ? state.profiles[state.activeProfileId].name : '';
+  $('profileDialog').hidden = false;
+  $('profileNameInput').focus();
+}
+
+function closeProfileDialog() { $('profileDialog').hidden = true; }
+
+async function confirmProfileDialog() {
+  const name = $('profileNameInput').value.trim();
+  if (!name) { $('profileNameInput').focus(); return; }
+  if (state.dialogMode === 'rename') {
+    state.profiles[state.activeProfileId].name = name;
+  } else {
+    collect();
+    await persist();
+    const id = makeProfileId();
+    state.profiles[id] = { name, profile: structuredClone(state.profile) };
+    state.activeProfileId = id;
+    state.templateChoice = `saved:${id}`;
+  }
+  state.profile = structuredClone(state.profiles[state.activeProfileId].profile);
+  await persist();
+  renderTemplates();
+  render();
+  closeProfileDialog();
+  setStatus(state.dialogMode === 'rename' ? 'Permit renamed' : 'New permit created', 'ok');
+}
+
+async function deleteProfile() {
+  if (Object.keys(state.profiles).length < 2) return;
+  const name = state.profiles[state.activeProfileId].name;
+  if (!confirm(`Delete “${name}”? This cannot be undone.`)) return;
+  delete state.profiles[state.activeProfileId];
+  state.activeProfileId = Object.keys(state.profiles)[0];
+  state.profile = structuredClone(state.profiles[state.activeProfileId].profile);
+  await persist();
+  renderTemplates();
+  render();
+  setStatus('Permit deleted', 'ok');
 }
 
 function setAll(update) {
@@ -99,6 +222,7 @@ function setAll(update) {
 
 function render() {
   const p = state.profile;
+  renderTemplates();
   document.querySelectorAll('[data-field]').forEach((el) => {
     const path = el.dataset.field.split('.');
     let v = p;
@@ -123,7 +247,43 @@ function render() {
   });
   $('f_people').value = p.personnel.map((x) => `${x.first}${x.mi ? ' ' + x.mi : ''} ${x.last}`.trim()).join('\n');
   $('f_equipment').value = (p.equipment || []).join('\n');
-  $('f_permitType').value = p.permitType || 'pullout';
+  renderTemplates();
+  syncChoice('f_tradeChoice', 'f_trade');
+  syncChoice('f_branchChoice', 'f_branch');
+  bindAutoSaveCollections();
+}
+
+function syncChoice(selectId, inputId) {
+  const select = $(selectId);
+  const input = $(inputId);
+  if (!select || !input) return;
+  const value = input.value.trim();
+  const existing = Array.from(select.options).find((option) => option.value === value);
+  if (value && !existing) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.insertBefore(option, select.lastElementChild);
+  }
+  select.value = value && Array.from(select.options).some((option) => option.value === value) ? value : (value ? '__manual__' : '');
+}
+
+function bindChoice(selectId, inputId) {
+  const select = $(selectId);
+  const input = $(inputId);
+  if (!select || !input) return;
+  select.addEventListener('change', () => {
+    if (select.value === '__manual__') {
+      input.focus();
+      input.select();
+      return;
+    }
+    input.value = select.value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  input.addEventListener('input', () => {
+    if (!Array.from(select.options).some((option) => option.value === input.value.trim())) select.value = '__manual__';
+  });
 }
 
 function esc(s) {
@@ -158,7 +318,23 @@ function applyPermitPreset(type) {
   state.profile = deepMerge(current, structuredClone(preset));
   render();
   persist();
-  setStatus('Pest Control template loaded', 'ok');
+  setStatus(type === 'pest-control' ? 'Pest Control template loaded' : 'Pullout template loaded', 'ok');
+}
+
+async function onTemplateChange(event) {
+  const value = event.target.value;
+  if (value === '__new__') {
+    renderTemplates();
+    openProfileDialog('create');
+    return;
+  }
+  if (value.startsWith('saved:')) {
+    state.templateChoice = value;
+    await switchProfile(value.slice('saved:'.length));
+    return;
+  }
+  state.templateChoice = value;
+  applyPermitPreset(value);
 }
 
 function bindFields() {
@@ -171,9 +347,25 @@ function bindFields() {
       if (el.type === 'checkbox') node[key] = el.checked;
       else if (el.type === 'number') node[key] = parseInt(el.value, 10) || 1;
       else node[key] = el.value;
-      clearTimeout(state.saveTimer);
-      state.saveTimer = setTimeout(persist, 400);
-    });
+      schedulePersist();
+  });
+  });
+}
+
+function schedulePersist() {
+  clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(async () => {
+    collect();
+    await persist();
+    setStatus('Saved automatically', 'ok');
+  }, 400);
+}
+
+function bindAutoSaveCollections() {
+  document.querySelectorAll('#f_people, #f_equipment, #contacts input').forEach((el) => {
+    if (el.dataset.autoSaveBound) return;
+    el.dataset.autoSaveBound = '1';
+    el.addEventListener('input', schedulePersist);
   });
 }
 
@@ -229,13 +421,11 @@ async function sendToTab(msg) {
   }
 }
 
-async function onFill(testFirst = false) {
+async function onFill() {
   clearLog();
   $('progress').innerHTML = '';
   const cfg = collect();
-  cfg.testFirstType = testFirst;
   $('btnFill').disabled = true;
-  $('btnTestFirst').disabled = true;
   $('btnFill').textContent = 'Working…';
   $('btnCancel').hidden = false;
   setStatus('Filling…');
@@ -255,7 +445,6 @@ async function onFill(testFirst = false) {
     appendLog(message, false);
   } finally {
     $('btnFill').disabled = false;
-    $('btnTestFirst').disabled = false;
     $('btnFill').textContent = 'Fill current page';
     $('btnCancel').disabled = false;
     $('btnCancel').hidden = true;
@@ -582,14 +771,15 @@ async function onDump() {
 
 function onExport() {
   const cfg = collect();
-  const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+  const exportData = { name: state.profiles[state.activeProfileId]?.name || 'Permit profile', profile: cfg };
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'work-permit-profile.json';
+  a.download = `${(exportData.name || 'work-permit-profile').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.json`;
   a.click();
   URL.revokeObjectURL(url);
-  setStatus('Profile exported', 'ok');
+  setStatus('Permit exported', 'ok');
 }
 
 function onImport() {
@@ -601,10 +791,11 @@ function onImport() {
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
-      state.profile = deepMerge(structuredClone(DEFAULT_PROFILE), parsed);
-      persist();
+      const imported = parsed?.profile || parsed;
+      state.profile = normalizeProfile(imported);
+      await persist();
       render();
-      setStatus('Profile imported', 'ok');
+      setStatus('Permit imported', 'ok');
     } catch {
       setStatus('Invalid JSON file', 'err');
     }
@@ -619,25 +810,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadProfile();
   render();
   bindFields();
+  bindChoice('f_tradeChoice', 'f_trade');
+  bindChoice('f_branchChoice', 'f_branch');
   $('btnFill').addEventListener('click', onFill);
-  $('btnTestFirst').addEventListener('click', () => onFill(true));
   $('btnCancel').addEventListener('click', onCancel);
-  $('f_permitType').addEventListener('change', (event) => applyPermitPreset(event.target.value));
-  $('btnProbe').addEventListener('click', probeTenant);
-  $('btnProbe1').addEventListener('click', probePage1);
-  $('btnDump').addEventListener('click', onDump);
-  $('btnMap').addEventListener('click', onMap);
-  $('btnSave').addEventListener('click', () => {
-    collect();
-    persist();
-    setStatus('Saved', 'ok');
+  $('f_permitType').addEventListener('change', onTemplateChange);
+  $('btnProfileCancel').addEventListener('click', closeProfileDialog);
+  $('btnProfileConfirm').addEventListener('click', confirmProfileDialog);
+  $('profileNameInput').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') confirmProfileDialog();
+    if (event.key === 'Escape') closeProfileDialog();
   });
-  $('btnExport').addEventListener('click', onExport);
-  $('btnImport').addEventListener('click', onImport);
-  $('btnCopyLog').addEventListener('click', async () => {
-    const txt = $('log').innerText;
-    if (!txt) { setStatus('Nothing to copy yet', 'err'); return; }
-    await navigator.clipboard.writeText(txt);
-    setStatus('Log copied', 'ok');
+  $('profileDialog').addEventListener('click', (event) => {
+    if (event.target === $('profileDialog')) closeProfileDialog();
   });
 });

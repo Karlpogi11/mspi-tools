@@ -22,6 +22,8 @@ const loadRfpuPage = () => import('./pages/RfpuPage');
 const loadReformatPage = () => import('./pages/reformat/ReformatPage');
 const loadConsumablesPage = () => import('./pages/consumables/ConsumablesPage');
 const loadPdfExtractorPage = () => import('./pages/pdf-extractor/PdfExtractorPage');
+const loadChromeExtensionPage = () => import('./pages/ChromeExtensionPage');
+const loadApplecarePage = () => import('./pages/ApplecarePage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
 const PcountIndexPage = lazy(loadPcountIndexPage);
@@ -30,6 +32,8 @@ const RfpuPage = lazy(loadRfpuPage);
 const ReformatPage = lazy(loadReformatPage);
 const ConsumablesPage = lazy(loadConsumablesPage);
 const PdfExtractorPage = lazy(loadPdfExtractorPage);
+const ChromeExtensionPage = lazy(loadChromeExtensionPage);
+const ApplecarePage = lazy(loadApplecarePage);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -67,6 +71,8 @@ function PrefetchCommonRoutes() {
         loadReformatPage(),
         loadConsumablesPage(),
         loadPdfExtractorPage(),
+        loadChromeExtensionPage(),
+        loadApplecarePage(),
       ]).catch(() => undefined);
 
       void Promise.all([
@@ -189,6 +195,22 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <PdfExtractorPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/chrome-extension"
+                element={
+                  <ProtectedRoute>
+                    <ChromeExtensionPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/applecare"
+                element={
+                  <ProtectedRoute>
+                    <ApplecarePage />
                   </ProtectedRoute>
                 }
               />
