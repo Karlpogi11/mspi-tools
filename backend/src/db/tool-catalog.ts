@@ -3,16 +3,17 @@ import { getDb } from './index.js';
 import { roles, tools, roleToolAccess } from './schema.js';
 
 const BUILTIN_TOOLS = [
-  { name: 'Site Monitor', url: '/rfpu', icon: 'monitor', description: 'Real-time site monitoring and performance tracking for RFPU deployments.', roles: ['Admin', 'PMS', 'CSO', 'ENGR'] },
-  { name: 'PCount', url: '/pcount', icon: 'clipboard', description: 'Weekly merchandise inventory — import system export, scan products, and reconcile counts.', roles: ['Admin', 'PMS', 'CSO'] },
-  { name: 'ReFormat', url: '/reformat', icon: 'table', description: 'Import Excel/CSV files, map and rearrange columns, and export the reformatted result.', roles: ['Admin', 'PMS', 'CSO', 'ENGR'] },
-  { name: 'Label Maker', url: '/consumables', icon: 'tag', description: 'Consumables label maker - log parts, auto-compute production/expiry from the 9D code, and print cut-out labels.', roles: ['Admin', 'PMS', 'CSO', 'ENGR'] },
-  { name: 'PDF Extractor', url: '/pdf-extractor', icon: 'file', description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date, files them by month, and logs every invoice.', roles: ['Admin', 'PMS', 'CSO', 'ENGR'] },
-  { name: 'Chrome Extension', url: '/chrome-extension', icon: 'extension', description: 'Install Work Permit Autofill in Chrome. For approved users with a personal-email Chrome profile only.', roles: ['Admin', 'PMS', 'CSO', 'ENGR'] },
-  { name: 'AppleCare Packing Lists', url: '/applecare', icon: 'package', description: 'Connect Gmail and automatically collect AppleCare packing lists, attachments, sites, and incoming parts.', roles: ['Admin', 'PMS'] },
+  { name: 'Site Monitor', url: '/rfpu', icon: 'monitor', description: 'Real-time site monitoring and performance tracking for RFPU deployments.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'PCount', url: '/pcount', icon: 'clipboard', description: 'Weekly merchandise inventory — import system export, scan products, and reconcile counts.', roles: ['Admin', 'PMG', 'CSO'] },
+  { name: 'ReFormat', url: '/reformat', icon: 'table', description: 'Import Excel/CSV files, map and rearrange columns, and export the reformatted result.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'Label Maker', url: '/consumables', icon: 'tag', description: 'Consumables label maker - log parts, auto-compute production/expiry from the 9D code, and print cut-out labels.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'PDF Extractor', url: '/pdf-extractor', icon: 'file', description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date, files them by month, and logs every invoice.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'Chrome Extension', url: '/chrome-extension', icon: 'extension', description: 'Install Work Permit Autofill in Chrome. For approved users with a personal-email Chrome profile only.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'AppleCare Packing Lists', url: '/applecare', icon: 'package', description: 'Connect Gmail and automatically collect AppleCare packing lists, attachments, sites, and incoming parts.', roles: ['Admin', 'PMG'] },
+  { name: 'Frontline Monitor', url: '/frontline', icon: 'monitor', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin', 'PMG', 'CSO'] },
 ] as const;
 
-const BUILTIN_ROLE_NAMES = ['Admin', 'PMS', 'CSO', 'ENGR'];
+const BUILTIN_ROLE_NAMES = ['Admin', 'PMG', 'CSO', 'ENGR'];
 
 /** Add missing built-ins without overwriting tools configured in Admin. */
 export async function syncBuiltinToolCatalog() {

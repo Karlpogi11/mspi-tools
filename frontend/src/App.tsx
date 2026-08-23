@@ -24,6 +24,8 @@ const loadConsumablesPage = () => import('./pages/consumables/ConsumablesPage');
 const loadPdfExtractorPage = () => import('./pages/pdf-extractor/PdfExtractorPage');
 const loadChromeExtensionPage = () => import('./pages/ChromeExtensionPage');
 const loadApplecarePage = () => import('./pages/ApplecarePage');
+const loadFrontlinePage = () => import('./pages/FrontlinePage');
+const loadAdminFrontlinePage = () => import('./pages/admin/AdminFrontlinePage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
 const PcountIndexPage = lazy(loadPcountIndexPage);
@@ -34,6 +36,8 @@ const ConsumablesPage = lazy(loadConsumablesPage);
 const PdfExtractorPage = lazy(loadPdfExtractorPage);
 const ChromeExtensionPage = lazy(loadChromeExtensionPage);
 const ApplecarePage = lazy(loadApplecarePage);
+const FrontlinePage = lazy(loadFrontlinePage);
+const AdminFrontlinePage = lazy(loadAdminFrontlinePage);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -73,6 +77,8 @@ function PrefetchCommonRoutes() {
         loadPdfExtractorPage(),
         loadChromeExtensionPage(),
         loadApplecarePage(),
+        loadFrontlinePage(),
+        loadAdminFrontlinePage(),
       ]).catch(() => undefined);
 
       void Promise.all([
@@ -151,6 +157,14 @@ export default function App() {
                 }
               />
               <Route
+                path="/admin/frontline"
+                element={
+                  <ProtectedRoute>
+                    <AdminFrontlinePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/pcount"
                 element={
                   <ProtectedRoute>
@@ -211,6 +225,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <ApplecarePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/frontline"
+                element={
+                  <ProtectedRoute>
+                    <FrontlinePage />
                   </ProtectedRoute>
                 }
               />

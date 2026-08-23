@@ -2,7 +2,7 @@
 
 The **Consumables / Label Maker** tool speeds up consumables receiving: log received parts, auto-derive production and expiry dates from the **9D code**, generate printable cut-out labels, and export a clean inventory record.
 
-Route: `/consumables` (registered as "Label Maker" in the `tools` table, roles Admin/PMS/CSO/ENGR).
+Route: `/consumables` (registered as "Label Maker" in the `tools` table, roles Admin/PMG/CSO/ENGR).
 
 ---
 

@@ -23,6 +23,8 @@ import { ocrPool } from './pdf-extractor/ocr.js';
 import { httpLogger, logger } from './logger.js';
 import applecareRoutes from './applecare/routes.js';
 import { ensureApplecareTables } from './applecare/store.js';
+import frontlineRoutes from './frontline/routes.js';
+import { ensureFrontlineTables } from './frontline/store.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -56,6 +58,7 @@ app.use(cookieParser());
 app.use('/api/auth', authRoutes);
 app.use('/api', toolsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/frontline', frontlineRoutes);
 
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
@@ -136,6 +139,8 @@ async function start() {
     logger.info('PDF Extractor log table ready');
     await ensureApplecareTables();
     logger.info('AppleCare tables ready');
+    await ensureFrontlineTables();
+    logger.info('Frontline tables ready');
     await syncBuiltinToolCatalog();
     logger.info('Built-in tool catalog synchronized');
   } catch (error) {

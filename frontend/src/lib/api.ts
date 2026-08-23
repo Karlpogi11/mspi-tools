@@ -144,6 +144,7 @@ export interface Tool {
   icon: string;
   description: string;
   roleIds?: number[];
+  roleNames?: string[];
 }
 
 export interface Role {
@@ -307,6 +308,18 @@ export interface AwbLogRow {
 }
 
 export interface ApplecareStatus { connected: boolean; email: string | null; lastSyncedAt: string | null }
+export interface FrontlineSpreadsheet { id: string; name: string; modifiedTime?: string }
+export interface FrontlineSheet { title: string; sheetId: number }
+export interface FrontlineSource { id: number; spreadsheet_id: string; spreadsheet_name: string; selected_sheets: string[]; last_synced_at: string | null; last_sync_status: string; last_sync_error: string | null }
+export interface FrontlineReport {
+  total: number;
+  averageAht: number;
+  csos: Array<[string, number]>;
+  types: Array<[string, number]>;
+  divisions: Array<[string, number]>;
+  records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; cso: string; issue: string }>;
+}
+export interface FrontlineStatus { connected: boolean; sourceName: string | null; lastSyncedAt: string | null; syncStatus: string; syncError: string | null }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
 export interface ApplecarePackingList {
   id: number; gmail_message_id: string; subject: string; sender: string; received_by: string | null; ship_to: string;
@@ -388,6 +401,27 @@ export const api = {
       request<{ message: string }>(`/admin/tools/${id}`, {
         method: 'DELETE',
       }),
+    frontlineGoogleStatus: () => request<{ connected: boolean; email: string | null }>('/frontline/google/status'),
+    frontlineGoogleConnectUrl: () => `${BASE}/frontline/google/connect`,
+    frontlineGoogleDisconnect: () => request<{ message: string }>('/frontline/google/disconnect', { method: 'DELETE' }),
+    frontlineSheets: (spreadsheetId: string) => request<{ title: string; sheets: FrontlineSheet[] }>(`/frontline/spreadsheets/${encodeURIComponent(spreadsheetId)}/sheets`),
+    frontlineSource: () => request<FrontlineSource | null>('/frontline/source'),
+    saveFrontlineSource: (spreadsheetId: string, spreadsheetName: string, sheets: string[]) => request<{ message: string }>('/frontline/source', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, sheets }) }),
+    syncFrontline: () => request<{ imported: number }>('/frontline/sync', { method: 'POST' }),
+  },
+
+  frontline: {
+    status: () => request<FrontlineStatus>('/frontline/status'),
+    report: (params: { start?: string; end?: string; cso?: string[]; type?: string[]; division?: string[] } = {}) => {
+      const queryParams = new URLSearchParams();
+      if (params.start) queryParams.set('start', params.start);
+      if (params.end) queryParams.set('end', params.end);
+      for (const value of params.cso || []) queryParams.append('cso', value);
+      for (const value of params.type || []) queryParams.append('type', value);
+      for (const value of params.division || []) queryParams.append('division', value);
+      const query = queryParams.toString();
+      return request<FrontlineReport>(`/frontline/report${query ? `?${query}` : ''}`);
+    },
   },
 
   sessions: {

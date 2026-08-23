@@ -31,7 +31,7 @@ Runtime data lives in `backend/data/pdf-extractor/` (gitignored):
 
 ### 1. Web (launcher)
 
-Route: `/pdf-extractor` (registered in the `tools` table, roles PMS/CSO/ENGR/Admin).
+Route: `/pdf-extractor` (registered in the `tools` table, roles PMG/CSO/ENGR/Admin).
 
 - Drag & drop **or** Import button — any filename works, files are renamed automatically
 - Uploads run through a **streaming batch pipeline**: files are processed in chunks and completed batches are combined into one ordered Excel download; failed files are automatically retried in smaller groups, and leftovers can be re-queued via per-row **Retry**

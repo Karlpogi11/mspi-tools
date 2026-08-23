@@ -50,6 +50,8 @@ PORT=3001
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
 COOKIE_DOMAIN=
+# Optional: Google Sheets OAuth callback for Frontline Monitor
+GOOGLE_SHEETS_REDIRECT_URI=http://localhost:3001/api/frontline/google/callback
 ```
 
 Start the frontend and backend:
