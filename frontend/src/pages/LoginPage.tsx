@@ -6,7 +6,8 @@ import type { ApiRequestError } from '../lib/api';
 type Mode = 'login' | 'signup';
 
 const ALLOWED_DOMAINS = ['mspi.io', 'mobilecare.com', 'powermaccenter.com'];
-const LOGIN_COOLDOWN_KEY = 'mspi-login-rate-limit-until-v2';
+const LOGIN_COOLDOWN_KEY = 'mspi-login-rate-limit-until-v3';
+const LOGIN_COOLDOWN_SECONDS = 15;
 
 function remainingLoginCooldown(): number {
   const deadline = Number(window.localStorage.getItem(LOGIN_COOLDOWN_KEY) || 0);
@@ -72,7 +73,7 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : 'An error occurred');
       const apiError = err as ApiRequestError;
       if (mode === 'login' && apiError.status === 429) {
-        const retryAfter = apiError.retryAfter ?? 60;
+        const retryAfter = Math.min(apiError.retryAfter ?? LOGIN_COOLDOWN_SECONDS, LOGIN_COOLDOWN_SECONDS);
         window.localStorage.setItem(LOGIN_COOLDOWN_KEY, String(Date.now() + retryAfter * 1000));
         setLoginCooldown(retryAfter);
       }

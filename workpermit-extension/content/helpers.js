@@ -371,6 +371,28 @@
     return picked;
   }
 
+  function comboValue(el) {
+    if (!el) return '';
+    if (el.tagName === 'SELECT') {
+      return textOf(el.options[el.selectedIndex]) || el.value || '';
+    }
+    const input = el.matches?.('input, textarea')
+      ? el
+      : el.querySelector?.('input[type=text], input:not([type]), input[type=search], textarea');
+    return input?.value || el.getAttribute?.('aria-valuetext') || el.value || textOf(el) || el.getAttribute?.('aria-label') || '';
+  }
+
+  function comboCommitted(el, value) {
+    const expected = norm(value);
+    if (!expected) return true;
+    const actual = norm(comboValue(el));
+    return !!actual && (actual === expected || actual.includes(expected) || expected.includes(actual));
+  }
+
+  async function waitForComboCommit(el, value, timeout = 1800) {
+    return !!(await waitFor(() => comboCommitted(el, value) ? true : null, timeout, 100));
+  }
+
   async function typeInCombo(root, labelKeys, value) {
     const f = findField(root, labelKeys);
     if (!f) return false;
@@ -631,6 +653,7 @@
   async function setComboElement(el, value) {
     if (!el || value === undefined || value === null || value === '') return false;
     if (el.tagName === 'SELECT') return setSelect(el, value);
+    const commit = async (picked) => picked && await waitForComboCommit(el, value);
     await openCombo(el);
 
     // Some Type of Work controls are editable autocomplete inputs. Use the
@@ -645,13 +668,13 @@
     }
 
     const ownerDoc = el.ownerDocument || document;
-    let picked = await pickFromOpened(ownerDoc, value, 3500);
+    let picked = await commit(await pickFromOpened(ownerDoc, value, 3500));
     if (!picked) {
       const search = findPopupSearch(ownerDoc);
       if (search) {
         setText(search, value);
         await sleep(650);
-        picked = await pickFromOpened(ownerDoc, value, 4500);
+        picked = await commit(await pickFromOpened(ownerDoc, value, 4500));
       }
     }
     if (!picked) {
@@ -660,7 +683,7 @@
         await clearValue(inner);
         setText(inner, value);
         await sleep(650);
-        picked = await pickFromOpened(ownerDoc, value, 4500);
+        picked = await commit(await pickFromOpened(ownerDoc, value, 4500));
       }
     }
     if (!picked) {
@@ -675,7 +698,7 @@
           setText(search, value);
           await sleep(650);
         }
-        picked = await pickFromOpened(ownerDoc, value, 4500);
+        picked = await commit(await pickFromOpened(ownerDoc, value, 4500));
       }
     }
     if (!picked && input) {
@@ -684,7 +707,7 @@
         input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown', code: 'ArrowDown' }));
         input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter' }));
         input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter' }));
-        picked = true;
+        picked = await commit(true);
       } catch {}
     }
     await closeLists();

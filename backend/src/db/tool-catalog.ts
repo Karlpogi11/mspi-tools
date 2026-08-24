@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from './index.js';
 import { roles, tools, roleToolAccess } from './schema.js';
 
@@ -10,7 +10,7 @@ const BUILTIN_TOOLS = [
   { name: 'PDF Extractor', url: '/pdf-extractor', icon: 'file', description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date, files them by month, and logs every invoice.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'Chrome Extension', url: '/chrome-extension', icon: 'extension', description: 'Install Work Permit Autofill in Chrome. For approved users with a personal-email Chrome profile only.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'AppleCare Packing Lists', url: '/applecare', icon: 'package', description: 'Connect Gmail and automatically collect AppleCare packing lists, attachments, sites, and incoming parts.', roles: ['Admin', 'PMG'] },
-  { name: 'Frontline Monitor', url: '/frontline', icon: 'monitor', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin', 'PMG', 'CSO'] },
+  { name: 'Frontline Monitor', url: '/frontline', icon: 'monitor', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin'] },
 ] as const;
 
 const BUILTIN_ROLE_NAMES = ['Admin', 'PMG', 'CSO', 'ENGR'];
@@ -31,6 +31,10 @@ export async function syncBuiltinToolCatalog() {
 
     const existing = await db.select({ roleId: roleToolAccess.role_id }).from(roleToolAccess).where(eq(roleToolAccess.tool_id, tool.id));
     const existingRoleIds = new Set(existing.map((row) => row.roleId));
+    if (definition.name === 'Frontline Monitor') {
+      const nonAdminRoleIds = roleRows.filter((role) => role.name !== 'Admin').map((role) => role.id);
+      if (nonAdminRoleIds.length > 0) await db.delete(roleToolAccess).where(and(eq(roleToolAccess.tool_id, tool.id), inArray(roleToolAccess.role_id, nonAdminRoleIds)));
+    }
     const missingAccess = roleRows.filter((role) => definition.roles.some((roleName) => roleName === role.name) && !existingRoleIds.has(role.id)).map((role) => ({ role_id: role.id, tool_id: tool.id }));
     if (missingAccess.length > 0) await db.insert(roleToolAccess).values(missingAccess);
   }

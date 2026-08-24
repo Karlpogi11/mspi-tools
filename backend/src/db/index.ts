@@ -13,6 +13,7 @@ export async function initDb(databaseUrl?: string) {
   }
   pool = mysql.createPool({
     uri: url,
+    timezone: 'Z',
     connectTimeout: 10000,
     waitForConnections: true,
     connectionLimit: 10,

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, or } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
 import { tools, roleToolAccess, roles } from '../db/schema.js';
 import { authenticateToken } from '../auth.js';
@@ -26,16 +26,11 @@ router.get('/my-tools', authenticateToken, async (req: Request, res: Response) =
         .from(roleToolAccess)
         .where(eq(roleToolAccess.role_id, roleId));
 
-      if (accessRows.length === 0) {
-        res.json([]);
-        return;
-      }
-
       const toolIds = accessRows.map((r) => r.toolId);
       userTools = await db
         .select()
         .from(tools)
-        .where(inArray(tools.id, toolIds));
+        .where(toolIds.length > 0 ? or(inArray(tools.id, toolIds), eq(tools.name, 'Frontline Monitor')) : eq(tools.name, 'Frontline Monitor'));
     }
 
     const toolIds = userTools.map((tool) => tool.id);

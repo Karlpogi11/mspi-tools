@@ -320,6 +320,7 @@ export interface FrontlineReport {
   records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; cso: string; issue: string }>;
 }
 export interface FrontlineStatus { connected: boolean; sourceName: string | null; lastSyncedAt: string | null; syncStatus: string; syncError: string | null }
+export interface FrontlineAccessRequest { id: number; user_id: number; email?: string; full_name?: string; reason: string; status: 'pending' | 'approved' | 'rejected'; created_at: string; reviewed_at: string | null; access_scope?: 'all' | 'cso' | null; cso_name?: string | null }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
 export interface ApplecarePackingList {
   id: number; gmail_message_id: string; subject: string; sender: string; received_by: string | null; ship_to: string;
@@ -408,9 +409,14 @@ export const api = {
     frontlineSource: () => request<FrontlineSource | null>('/frontline/source'),
     saveFrontlineSource: (spreadsheetId: string, spreadsheetName: string, sheets: string[]) => request<{ message: string }>('/frontline/source', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, sheets }) }),
     syncFrontline: () => request<{ imported: number }>('/frontline/sync', { method: 'POST' }),
+    getFrontlineAccessRequests: () => request<FrontlineAccessRequest[]>('/admin/frontline/access-requests'),
+    grantFrontlineAccess: (email: string, scope: 'all' | 'cso', csoName?: string) => request<{ message: string }>('/admin/frontline/access', { method: 'POST', body: JSON.stringify({ email, scope, csoName }) }),
+    updateFrontlineAccessRequest: (id: number, status: 'approved' | 'rejected', scope?: 'all' | 'cso', csoName?: string) => request<{ message: string }>(`/admin/frontline/access-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status, scope, csoName }) }),
   },
 
   frontline: {
+    access: () => request<{ allowed: boolean; scope: 'all' | 'cso' | null; cso: string | null; request: FrontlineAccessRequest | null }>('/frontline/access'),
+    requestAccess: (reason: string) => request<{ message: string }>('/frontline/access-request', { method: 'POST', body: JSON.stringify({ reason }) }),
     status: () => request<FrontlineStatus>('/frontline/status'),
     report: (params: { start?: string; end?: string; cso?: string[]; type?: string[]; division?: string[] } = {}) => {
       const queryParams = new URLSearchParams();

@@ -75,6 +75,35 @@ async function tokenFor(connection: { refresh_token_encrypted: string }) {
 
 function frontendUrl() { return process.env.FRONTEND_URL || 'http://localhost:5173'; }
 function text(value: unknown) { return String(value ?? '').trim(); }
+function isoTimestamp(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/\dT\d/.test(raw) || /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) return `${raw.replace(' ', 'T')}Z`;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+type FrontlineAccess = { scope: 'all' | 'cso'; cso: string | null } | null;
+async function frontlineAccessFor(userId: number, roleId: number | null, roleName: string | null): Promise<FrontlineAccess> {
+  if (roleName === 'Admin') return { scope: 'all', cso: null };
+  const pool = getDbPool();
+  const [grantRows] = await pool.query('SELECT access_scope, cso_name FROM frontline_user_access WHERE user_id = ? LIMIT 1', [userId]);
+  const grant = (grantRows as Array<{ access_scope: string; cso_name: string | null }>)[0];
+  if (grant?.access_scope === 'all') return { scope: 'all', cso: null };
+  if (grant?.access_scope === 'cso' && grant.cso_name) return { scope: 'cso', cso: grant.cso_name };
+  return null;
+}
+async function requireFrontlineAccess(req: Request, res: Response, next: () => void) {
+  try {
+    if (await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName)) { next(); return; }
+    res.status(403).json({ error: 'Frontline Monitor access required' });
+  } catch (error) {
+    console.error('frontline access check error:', error);
+    res.status(500).json({ error: 'Unable to verify Frontline Monitor access' });
+  }
+}
 function headerKey(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 
@@ -96,6 +125,13 @@ function parseDate(value: string): string | null {
   if (match) {
     const year = match[3].length === 2 ? `20${match[3]}` : match[3];
     return `${year}-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}`;
+  }
+  const named = value.match(/^(?:(\d{1,2})\s+([A-Za-z]+)|([A-Za-z]+)\s+(\d{1,2}),?)\s+(\d{4})$/);
+  if (named) {
+    const day = Number(named[1] || named[4]);
+    const monthName = (named[2] || named[3]).toLowerCase();
+    const month = MONTHS.findIndex((name) => name.startsWith(monthName));
+    if (month >= 0 && day >= 1 && day <= 31) return `${named[5]}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
   if (/^\d+(\.\d+)?$/.test(value)) {
     const serial = Number(value);
@@ -168,6 +204,28 @@ async function connectionFor(userId: number) {
   return (rows as Array<{ refresh_token_encrypted: string }>)[0] || null;
 }
 
+router.get('/access', async (req, res) => {
+  await ensureFrontlineTables();
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  const [rows] = await getDbPool().query('SELECT id, reason, status, created_at, reviewed_at FROM frontline_access_requests WHERE user_id = ? LIMIT 1', [req.user!.userId]);
+  const request = (rows as Array<Record<string, unknown>>)[0];
+  res.json({ allowed: !!access, scope: access?.scope || null, cso: access?.cso || null, request: request ? { ...request, created_at: isoTimestamp(request.created_at), reviewed_at: isoTimestamp(request.reviewed_at) } : null });
+});
+
+router.post('/access-request', async (req, res) => {
+  const reason = text(req.body?.reason);
+  if (reason.length > 1000) { res.status(400).json({ error: 'The reason must be 1000 characters or fewer.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool();
+  const allowed = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  if (allowed) { res.status(409).json({ error: 'You already have Frontline Monitor access.' }); return; }
+  await pool.execute(`INSERT INTO frontline_access_requests (user_id, reason, status) VALUES (?, ?, 'pending') ON DUPLICATE KEY UPDATE reason = VALUES(reason), status = 'pending', reviewed_by = NULL, reviewed_at = NULL`, [req.user!.userId, reason]);
+  void writeAuditLog({ actorUserId: req.user!.userId, action: 'frontline.access_requested', resourceType: 'frontline_access_request' });
+  res.status(201).json({ message: 'Access request submitted.' });
+});
+
+router.use(requireFrontlineAccess);
+
 router.get('/status', async (_req, res) => {
   await ensureFrontlineTables();
   const [connectionRows] = await getDbPool().query('SELECT id FROM frontline_google_connections LIMIT 1');
@@ -191,7 +249,7 @@ router.get('/status', async (_req, res) => {
   res.json({
     connected: connectedRows.length > 0,
     sourceName,
-    lastSyncedAt: source?.last_synced_at || null,
+    lastSyncedAt: isoTimestamp(source?.last_synced_at),
     syncStatus: source?.last_sync_status || 'never',
     syncError: source?.last_sync_error || null,
   });
@@ -211,7 +269,7 @@ router.get('/source', requireAdmin, async (_req, res) => {
   await ensureFrontlineTables();
   const [rows] = await getDbPool().query('SELECT id, spreadsheet_id, spreadsheet_name, selected_sheets, last_synced_at, last_sync_status, last_sync_error FROM frontline_sources ORDER BY id DESC LIMIT 1');
   const source = (rows as Array<Record<string, unknown>>)[0];
-  res.json(source ? { ...source, selected_sheets: JSON.parse(String(source.selected_sheets || '[]')) } : null);
+  res.json(source ? { ...source, last_synced_at: isoTimestamp(source.last_synced_at), selected_sheets: JSON.parse(String(source.selected_sheets || '[]')) } : null);
 });
 
 router.post('/source', requireAdmin, async (req, res) => {
@@ -285,9 +343,12 @@ router.get('/report', async (req, res) => {
   await ensureFrontlineTables();
   const values = (value: unknown) => (Array.isArray(value) ? value : [value]).map(text).filter(Boolean);
   const start = text(req.query.start); const end = text(req.query.end); const csos = values(req.query.cso); const types = values(req.query.type); const divisions = values(req.query.division);
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  if (!access) { res.status(403).json({ error: 'Frontline Monitor access required' }); return; }
   const where: string[] = []; const args: string[] = [];
   const addIn = (column: string, selected: string[]) => { if (selected.length) { where.push(`${column} IN (${selected.map(() => '?').join(',')})`); args.push(...selected); } };
   if (start) { where.push('occurred_date >= ?'); args.push(start); } if (end) { where.push('occurred_date <= ?'); args.push(end); } addIn('cso', csos); addIn('transaction_type', types); addIn('product_division', divisions);
+  if (access.scope === 'cso' && access.cso) { where.push('cso = ?'); args.push(access.cso); }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const pool = getDbPool(); const [rows] = await pool.query(`SELECT id, source_sheet, source_row, occurred_date, aht_minutes, transaction_type, product_division, ar_number, serial_number, cso, issue FROM frontline_records ${clause} ORDER BY occurred_date DESC, id DESC LIMIT 10000`, args);
   const records = rows as Array<Record<string, unknown>>; const aht = records.map((row) => Number(row.aht_minutes)).filter(Number.isFinite);

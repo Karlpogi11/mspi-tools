@@ -49,4 +49,27 @@ export async function ensureFrontlineTables(): Promise<void> {
     KEY frontline_record_date_idx (occurred_date), KEY frontline_record_cso_idx (cso),
     CONSTRAINT frontline_record_source_fk FOREIGN KEY (source_id) REFERENCES frontline_sources(id) ON DELETE CASCADE
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_access_requests (
+    id int AUTO_INCREMENT NOT NULL,
+    user_id int NOT NULL,
+    reason varchar(1000) NOT NULL,
+    status varchar(20) NOT NULL DEFAULT 'pending',
+    reviewed_by int NULL,
+    reviewed_at timestamp NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY frontline_access_user_unique (user_id),
+    CONSTRAINT frontline_access_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT frontline_access_reviewer_fk FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_user_access (
+    user_id int NOT NULL,
+    access_scope varchar(20) NOT NULL DEFAULT 'cso',
+    cso_name varchar(150) NULL,
+    granted_by int NULL,
+    granted_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id),
+    CONSTRAINT frontline_user_access_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT frontline_user_access_grantor_fk FOREIGN KEY (granted_by) REFERENCES users(id) ON DELETE SET NULL
+  )`);
 }

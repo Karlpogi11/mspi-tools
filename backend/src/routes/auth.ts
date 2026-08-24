@@ -43,7 +43,7 @@ const signupLimiter = rateLimit({
 });
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * 1000,
   max: 5,
   skipSuccessfulRequests: true,
   standardHeaders: true,

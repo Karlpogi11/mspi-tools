@@ -472,7 +472,16 @@ if (window.__wpDiag && names.length < 2) {
             window.__wpDiag.push({
               kind: 'combo',
               text: `${field.label}: option not committed`,
-              detail: H.collectVisibleItems ? JSON.stringify(H.collectVisibleItems().slice(0, 15)) : 'visible items unavailable',
+              detail: JSON.stringify({
+                requested: value,
+                control: {
+                  id: field.el.id || '',
+                  tag: field.el.tagName,
+                  value: field.el.value || '',
+                  text: String(field.el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+                },
+                visibleItems: H.collectVisibleItems ? H.collectVisibleItems().slice(0, 15) : [],
+              }),
             });
           }
           return picked;
