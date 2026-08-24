@@ -31,7 +31,7 @@ function responseError(message: string, res: Response, data?: unknown): ApiReque
 }
 
 function notifyUnauthorized(path: string): void {
-  if (typeof window === 'undefined' || window.location.pathname === '/login' || path.startsWith('/auth/login') || path.startsWith('/auth/signup')) return;
+  if (typeof window === 'undefined' || window.location.pathname === '/login' || path === '/auth/me' || path.startsWith('/auth/login') || path.startsWith('/auth/signup')) return;
   getCache.clear();
   getInFlight.clear();
   window.sessionStorage.setItem(SESSION_EXPIRED_STORAGE_KEY, '1');
