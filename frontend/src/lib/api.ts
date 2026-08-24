@@ -328,11 +328,11 @@ export interface FrontlineReport {
   csos: Array<[string, number]>;
   types: Array<[string, number]>;
   divisions: Array<[string, number]>;
-  records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; device_model: string; cso: string; issue: string }>;
+  records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; device_model: string; cso: string; issue: string; endorsement_status?: string | null; endorsed_engineer_name?: string | null; endorsed_at?: string | null }>;
 }
 export interface FrontlineStatus { connected: boolean; sourceName: string | null; lastSyncedAt: string | null; syncStatus: string; syncError: string | null }
 export interface FrontlineAccessRequest { id: number; user_id: number; email?: string; full_name?: string; reason: string; status: 'pending' | 'approved' | 'rejected'; created_at: string; reviewed_at: string | null; access_scope?: 'all' | 'cso' | null; cso_name?: string | null }
-export interface EndorsementEngineer { id: number; user_id: number | null; full_name: string; email?: string; assignment_count: number; joined_at?: string; last_assigned_at?: string | null }
+export interface EndorsementEngineer { id: number; user_id: number | null; full_name: string; email?: string; assignment_count: number; status?: 'active' | 'left'; joined_at?: string; last_assigned_at?: string | null }
 export interface EngineerDashboard { date: string; availability: { user_id: number; status: 'active' | 'left'; joined_at: string; left_at: string | null; assignment_count: number } | null; totals: { total: number; pending: number }; divisions: Array<{ product_division: string; total: number }>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; created_at: string; engineer_name: string }> }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
 export interface ApplecarePackingList {
@@ -447,10 +447,11 @@ export const api = {
   endorsements: {
     join: () => request<{ message: string }>('/endorsements/availability/join', { method: 'POST' }),
     leave: () => request<{ message: string }>('/endorsements/availability/leave', { method: 'POST' }),
+    skip: () => request<{ message: string }>('/endorsements/availability/skip', { method: 'POST' }),
     addEngineer: (name: string) => request<{ message: string }>('/endorsements/availability/add', { method: 'POST', body: JSON.stringify({ name }) }),
     removeEngineer: (id: number) => request<{ message: string }>('/endorsements/availability/remove', { method: 'POST', body: JSON.stringify({ id }) }),
-    available: () => request<{ date: string; engineers: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null }>('/endorsements/available'),
-    create: (payload: { arNumber: string; frontlineRecordId: number; availabilityId?: number }) => request<{ message: string; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
+    available: () => request<{ date: string; engineers: EndorsementEngineer[]; roster: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null }>('/endorsements/available'),
+    create: (payload: { arNumber: string; frontlineRecordId: number; deviceModel?: string }) => request<{ message: string; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
     dashboard: (engineerUserId?: number) => request<EngineerDashboard>(`/endorsements/dashboard${engineerUserId ? `?engineerUserId=${engineerUserId}` : ''}`),
   },
 
