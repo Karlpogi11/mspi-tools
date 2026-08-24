@@ -110,11 +110,16 @@ async function initializeFrontlineTables(): Promise<void> {
     CONSTRAINT engineer_endorsement_engineer_fk FOREIGN KEY (engineer_user_id) REFERENCES users(id) ON DELETE SET NULL
   )`);
   try { await pool.query("ALTER TABLE engineer_daily_availability MODIFY COLUMN user_id int NULL"); } catch (error) { if (!String((error as Error).message).includes('Duplicate')) throw error; }
-  try { await pool.query("ALTER TABLE engineer_daily_availability ADD COLUMN engineer_name varchar(150) NOT NULL DEFAULT '' AFTER user_id"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
+  try { await pool.query("ALTER TABLE engineer_daily_availability ADD COLUMN engineer_name varchar(150) NULL AFTER user_id"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
+  await pool.query("UPDATE engineer_daily_availability a LEFT JOIN users u ON u.id = a.user_id SET a.engineer_name = COALESCE(NULLIF(a.engineer_name, ''), u.full_name, CONCAT('Engineer ', a.id)) WHERE a.engineer_name IS NULL OR a.engineer_name = ''");
+  await pool.query("ALTER TABLE engineer_daily_availability MODIFY COLUMN engineer_name varchar(150) NOT NULL");
+  try { await pool.query("ALTER TABLE engineer_daily_availability ADD KEY engineer_availability_user_idx (user_id)"); } catch (error) { if (!String((error as Error).message).includes('Duplicate key name')) throw error; }
   try { await pool.query("ALTER TABLE engineer_daily_availability DROP INDEX engineer_availability_day_unique"); } catch (error) { if (!String((error as Error).message).includes('check that column/key exists')) throw error; }
   try { await pool.query("ALTER TABLE engineer_daily_availability ADD UNIQUE KEY engineer_availability_day_name_unique (engineer_name, availability_date)"); } catch (error) { if (!String((error as Error).message).includes('Duplicate key name')) throw error; }
   try { await pool.query("ALTER TABLE engineer_endorsements MODIFY COLUMN engineer_user_id int NULL"); } catch (error) { if (!String((error as Error).message).includes('Duplicate')) throw error; }
-  try { await pool.query("ALTER TABLE engineer_endorsements ADD COLUMN engineer_name varchar(150) NOT NULL DEFAULT '' AFTER engineer_user_id"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
+  try { await pool.query("ALTER TABLE engineer_endorsements ADD COLUMN engineer_name varchar(150) NULL AFTER engineer_user_id"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
+  await pool.query("UPDATE engineer_endorsements e LEFT JOIN engineer_daily_availability a ON a.user_id = e.engineer_user_id SET e.engineer_name = COALESCE(NULLIF(e.engineer_name, ''), a.engineer_name, CONCAT('Engineer ', e.engineer_user_id)) WHERE e.engineer_name IS NULL OR e.engineer_name = ''");
+  await pool.query("ALTER TABLE engineer_endorsements MODIFY COLUMN engineer_name varchar(150) NOT NULL");
 }
 
 export function ensureFrontlineTables(): Promise<void> {
