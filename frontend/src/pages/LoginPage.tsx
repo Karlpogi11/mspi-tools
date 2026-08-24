@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import type { ApiRequestError } from '../lib/api';
+import { SESSION_EXPIRED_STORAGE_KEY, type ApiRequestError } from '../lib/api';
 
 type Mode = 'login' | 'signup';
 
@@ -29,11 +29,18 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [loginCooldown, setLoginCooldown] = useState(remainingLoginCooldown);
   const [justSignedUp, setJustSignedUp] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState('');
 
   const { login, signup } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const statusMessage = (location.state as { message?: string } | null)?.message;
+
+  useEffect(() => {
+    if (window.sessionStorage.getItem(SESSION_EXPIRED_STORAGE_KEY) !== '1') return;
+    window.sessionStorage.removeItem(SESSION_EXPIRED_STORAGE_KEY);
+    setSessionMessage('Your session expired. Please sign in again.');
+  }, []);
 
   useEffect(() => {
     if (loginCooldown <= 0) {
@@ -117,7 +124,7 @@ export default function LoginPage() {
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
-          {statusMessage && <p className="rounded-lg bg-[#ecfdf3] px-3 py-2 text-[12.5px] text-[#166534]">{statusMessage}</p>}
+          {(statusMessage || sessionMessage) && <p className="rounded-lg bg-[#fff7ed] px-3 py-2 text-[12.5px] text-[#9a3412]">{statusMessage || sessionMessage}</p>}
           {mode === 'signup' && (
             <div>
               <label className="block text-[12.5px] font-medium text-[#1a1a2e] mb-1">Full name</label>

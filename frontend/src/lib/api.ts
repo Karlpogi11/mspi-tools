@@ -4,6 +4,8 @@ const BASE = import.meta.env.VITE_API_URL || '/api';
 const GET_CACHE_TTL = 30_000;
 const getCache = new Map<string, { data: unknown; updatedAt: number }>();
 const getInFlight = new Map<string, Promise<unknown>>();
+export const AUTH_UNAUTHORIZED_EVENT = 'mspi:auth-unauthorized';
+export const SESSION_EXPIRED_STORAGE_KEY = 'mspi-session-expired';
 
 export interface ApiRequestError extends Error {
   status?: number;
@@ -26,6 +28,14 @@ function responseError(message: string, res: Response, data?: unknown): ApiReque
   error.retryAfter = retryAfterSeconds(res);
   error.data = data;
   return error;
+}
+
+function notifyUnauthorized(path: string): void {
+  if (typeof window === 'undefined' || window.location.pathname === '/login' || path.startsWith('/auth/login') || path.startsWith('/auth/signup')) return;
+  getCache.clear();
+  getInFlight.clear();
+  window.sessionStorage.setItem(SESSION_EXPIRED_STORAGE_KEY, '1');
+  window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
 }
 
 function proxySafePdfName(name: string, index: number): string {
@@ -86,6 +96,7 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     }
 
     if (!res.ok) {
+      if (res.status === 401) notifyUnauthorized(path);
       throw responseError(((data as { error?: string } | null)?.error) || 'An error occurred', res, data);
     }
 
