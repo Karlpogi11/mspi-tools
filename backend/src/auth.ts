@@ -32,7 +32,14 @@ export async function authenticateToken(
     return;
   }
 
-  const payload = await verifyAccessToken(token);
+  let payload: JwtPayload | null;
+  try {
+    payload = await verifyAccessToken(token);
+  } catch (error) {
+    console.error('Token verification unavailable:', error);
+    res.status(503).json({ error: 'Authentication service unavailable' });
+    return;
+  }
   if (!payload) {
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
@@ -43,19 +50,20 @@ export async function authenticateToken(
 }
 
 export async function verifyAccessToken(token: string): Promise<JwtPayload | null> {
+  let payload: JwtPayload;
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
-    if (!Number.isInteger(payload.userId) || !Number.isInteger(payload.tokenVersion)) return null;
-    const [user] = await getDb()
-      .select({ tokenVersion: users.token_version })
-      .from(users)
-      .where(eq(users.id, payload.userId))
-      .limit(1);
-    if (!user || user.tokenVersion !== payload.tokenVersion) return null;
-    return payload;
+    payload = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
   } catch {
     return null;
   }
+  if (!Number.isInteger(payload.userId) || !Number.isInteger(payload.tokenVersion)) return null;
+  const [user] = await getDb()
+    .select({ tokenVersion: users.token_version })
+    .from(users)
+    .where(eq(users.id, payload.userId))
+    .limit(1);
+  if (!user || user.tokenVersion !== payload.tokenVersion) return null;
+  return payload;
 }
 
 export function requireAdmin(
