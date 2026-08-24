@@ -298,7 +298,7 @@ router.post('/sync', requireAdmin, async (req, res) => {
       if (headerIndex < 0) continue;
       const headers = values[headerIndex].map(headerKey); let currentDate: string | null = null;
       const find = (...names: string[]) => headers.findIndex((header) => names.includes(header));
-      const dateIdx = find('date', 'date logged', 'date of transaction', 'occurred date'); const fallbackDateIdxes = dateIdx >= 0 ? [dateIdx] : [0, 1, 5]; const period = sheetPeriod(sheet); const startIdx = find('start time'); const endIdx = find('end time'); const typeIdx = find('type of transaction'); const divisionIdx = find('product division'); const arIdx = find('a/r number', 'ar number'); const serialIdx = find('serial number'); const csoIdx = find('cso', 'name of cso'); const issueIdx = find('issue / remarks', 'issue remarks', 'issue');
+      const dateIdx = find('date', 'date logged', 'date of transaction', 'occurred date'); const fallbackDateIdxes = dateIdx >= 0 ? [dateIdx] : [0, 1, 5]; const period = sheetPeriod(sheet); const startIdx = find('start time'); const endIdx = find('end time'); const typeIdx = find('type of transaction'); const divisionIdx = find('product division'); const arIdx = find('a/r number', 'a r number', 'ar number'); const serialIdx = find('serial number'); const deviceIdx = find('device model', 'device/model', 'model', 'device', 'product name', 'product'); const csoIdx = find('cso', 'name of cso'); const issueIdx = find('issue / remarks', 'issue remarks', 'issue');
       const hasDateMarkers = values.slice(headerIndex + 1).some((row) => {
         const type = text(row[typeIdx]); const cso = text(row[csoIdx]);
         return !type && !cso && fallbackDateIdxes.some((index) => !!parseDate(text(row[index])));
@@ -312,16 +312,16 @@ router.post('/sync', requireAdmin, async (req, res) => {
         else if (!hasDateMarkers && (matchingSheetDate || explicitDate)) currentDate = matchingSheetDate || explicitDate;
         if (!type && !cso) continue;
         const raw = JSON.stringify(row); const sourceRow = i + 1; const aht = startIdx >= 0 && endIdx >= 0 ? parseMinutes(text(row[startIdx]), text(row[endIdx])) : null;
-        records.push([sourceId, sheet, sourceRow, currentDate, startIdx >= 0 ? text(row[startIdx]) : '', endIdx >= 0 ? text(row[endIdx]) : '', aht, type, divisionIdx >= 0 ? text(row[divisionIdx]) : '', arIdx >= 0 ? text(row[arIdx]) : '', serialIdx >= 0 ? text(row[serialIdx]) : '', cso, issueIdx >= 0 ? text(row[issueIdx]) : '', raw]);
+        records.push([sourceId, sheet, sourceRow, currentDate, startIdx >= 0 ? text(row[startIdx]) : '', endIdx >= 0 ? text(row[endIdx]) : '', aht, type, divisionIdx >= 0 ? text(row[divisionIdx]) : '', arIdx >= 0 ? text(row[arIdx]) : '', serialIdx >= 0 ? text(row[serialIdx]) : '', deviceIdx >= 0 ? text(row[deviceIdx]) : '', cso, issueIdx >= 0 ? text(row[issueIdx]) : '', raw]);
       }
     }
     const writeConnection = await pool.getConnection();
     try {
       await writeConnection.beginTransaction();
-      const insertSql = `INSERT INTO frontline_records (source_id, source_sheet, source_row, occurred_date, start_time, end_time, aht_minutes, transaction_type, product_division, ar_number, serial_number, cso, issue, raw_json) VALUES ${Array.from({ length: 500 }, () => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(',')} ON DUPLICATE KEY UPDATE occurred_date = VALUES(occurred_date), start_time = VALUES(start_time), end_time = VALUES(end_time), aht_minutes = VALUES(aht_minutes), transaction_type = VALUES(transaction_type), product_division = VALUES(product_division), ar_number = VALUES(ar_number), serial_number = VALUES(serial_number), cso = VALUES(cso), issue = VALUES(issue), raw_json = VALUES(raw_json)`;
+      const insertSql = `INSERT INTO frontline_records (source_id, source_sheet, source_row, occurred_date, start_time, end_time, aht_minutes, transaction_type, product_division, ar_number, serial_number, device_model, cso, issue, raw_json) VALUES ${Array.from({ length: 500 }, () => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(',')} ON DUPLICATE KEY UPDATE occurred_date = VALUES(occurred_date), start_time = VALUES(start_time), end_time = VALUES(end_time), aht_minutes = VALUES(aht_minutes), transaction_type = VALUES(transaction_type), product_division = VALUES(product_division), ar_number = VALUES(ar_number), serial_number = VALUES(serial_number), device_model = VALUES(device_model), cso = VALUES(cso), issue = VALUES(issue), raw_json = VALUES(raw_json)`;
       for (let i = 0; i < records.length; i += 500) {
         const batch = records.slice(i, i + 500);
-        const sql = batch.length === 500 ? insertSql : `INSERT INTO frontline_records (source_id, source_sheet, source_row, occurred_date, start_time, end_time, aht_minutes, transaction_type, product_division, ar_number, serial_number, cso, issue, raw_json) VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(',')} ON DUPLICATE KEY UPDATE occurred_date = VALUES(occurred_date), start_time = VALUES(start_time), end_time = VALUES(end_time), aht_minutes = VALUES(aht_minutes), transaction_type = VALUES(transaction_type), product_division = VALUES(product_division), ar_number = VALUES(ar_number), serial_number = VALUES(serial_number), cso = VALUES(cso), issue = VALUES(issue), raw_json = VALUES(raw_json)`;
+        const sql = batch.length === 500 ? insertSql : `INSERT INTO frontline_records (source_id, source_sheet, source_row, occurred_date, start_time, end_time, aht_minutes, transaction_type, product_division, ar_number, serial_number, device_model, cso, issue, raw_json) VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(',')} ON DUPLICATE KEY UPDATE occurred_date = VALUES(occurred_date), start_time = VALUES(start_time), end_time = VALUES(end_time), aht_minutes = VALUES(aht_minutes), transaction_type = VALUES(transaction_type), product_division = VALUES(product_division), ar_number = VALUES(ar_number), serial_number = VALUES(serial_number), device_model = VALUES(device_model), cso = VALUES(cso), issue = VALUES(issue), raw_json = VALUES(raw_json)`;
         await writeConnection.query(sql, batch.flat());
       }
       await writeConnection.commit();
@@ -342,15 +342,15 @@ router.post('/sync', requireAdmin, async (req, res) => {
 router.get('/report', async (req, res) => {
   await ensureFrontlineTables();
   const values = (value: unknown) => (Array.isArray(value) ? value : [value]).map(text).filter(Boolean);
-  const start = text(req.query.start); const end = text(req.query.end); const csos = values(req.query.cso); const types = values(req.query.type); const divisions = values(req.query.division);
+  const start = text(req.query.start); const end = text(req.query.end); const ar = text(req.query.ar); const csos = values(req.query.cso); const types = values(req.query.type); const divisions = values(req.query.division);
   const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
   if (!access) { res.status(403).json({ error: 'Frontline Monitor access required' }); return; }
   const where: string[] = []; const args: string[] = [];
   const addIn = (column: string, selected: string[]) => { if (selected.length) { where.push(`${column} IN (${selected.map(() => '?').join(',')})`); args.push(...selected); } };
-  if (start) { where.push('occurred_date >= ?'); args.push(start); } if (end) { where.push('occurred_date <= ?'); args.push(end); } addIn('cso', csos); addIn('transaction_type', types); addIn('product_division', divisions);
+  if (start) { where.push('occurred_date >= ?'); args.push(start); } if (end) { where.push('occurred_date <= ?'); args.push(end); } if (ar) { where.push('ar_number LIKE ?'); args.push(`%${ar}%`); } addIn('cso', csos); addIn('transaction_type', types); addIn('product_division', divisions);
   if (access.scope === 'cso' && access.cso) { where.push('cso = ?'); args.push(access.cso); }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const pool = getDbPool(); const [rows] = await pool.query(`SELECT id, source_sheet, source_row, occurred_date, aht_minutes, transaction_type, product_division, ar_number, serial_number, cso, issue FROM frontline_records ${clause} ORDER BY occurred_date DESC, id DESC LIMIT 10000`, args);
+  const pool = getDbPool(); const [rows] = await pool.query(`SELECT id, source_sheet, source_row, occurred_date, aht_minutes, transaction_type, product_division, ar_number, serial_number, device_model, cso, issue FROM frontline_records ${clause} ORDER BY occurred_date DESC, id DESC LIMIT 10000`, args);
   const records = rows as Array<Record<string, unknown>>; const aht = records.map((row) => Number(row.aht_minutes)).filter(Number.isFinite);
   const countBy = (key: string) => Object.entries(records.reduce<Record<string, number>>((acc, row) => { const value = String(row[key] || 'Unspecified'); acc[value] = (acc[value] || 0) + 1; return acc; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 10);
   res.json({ total: records.length, averageAht: aht.length ? Math.round(aht.reduce((sum, value) => sum + value, 0) / aht.length * 100) / 100 : 0, csos: countBy('cso'), types: countBy('transaction_type'), divisions: countBy('product_division'), records });

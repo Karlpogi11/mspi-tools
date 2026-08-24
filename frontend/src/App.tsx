@@ -26,6 +26,7 @@ const loadChromeExtensionPage = () => import('./pages/ChromeExtensionPage');
 const loadApplecarePage = () => import('./pages/ApplecarePage');
 const loadFrontlinePage = () => import('./pages/FrontlinePage');
 const loadAdminFrontlinePage = () => import('./pages/admin/AdminFrontlinePage');
+const loadEngineerEndorsementsPage = () => import('./pages/EngineerEndorsementsPage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
 const PcountIndexPage = lazy(loadPcountIndexPage);
@@ -38,6 +39,7 @@ const ChromeExtensionPage = lazy(loadChromeExtensionPage);
 const ApplecarePage = lazy(loadApplecarePage);
 const FrontlinePage = lazy(loadFrontlinePage);
 const AdminFrontlinePage = lazy(loadAdminFrontlinePage);
+const EngineerEndorsementsPage = lazy(loadEngineerEndorsementsPage);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -79,6 +81,7 @@ function PrefetchCommonRoutes() {
         loadApplecarePage(),
         loadFrontlinePage(),
         loadAdminFrontlinePage(),
+        loadEngineerEndorsementsPage(),
       ]).catch(() => undefined);
 
       void Promise.all([
@@ -233,6 +236,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <FrontlinePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/endorsements"
+                element={
+                  <ProtectedRoute>
+                    <EngineerEndorsementsPage />
                   </ProtectedRoute>
                 }
               />

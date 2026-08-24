@@ -11,14 +11,24 @@ const BUILTIN_TOOLS = [
   { name: 'Chrome Extension', url: '/chrome-extension', icon: 'extension', description: 'Install Work Permit Autofill in Chrome. For approved users with a personal-email Chrome profile only.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'AppleCare Packing Lists', url: '/applecare', icon: 'package', description: 'Connect Gmail and automatically collect AppleCare packing lists, attachments, sites, and incoming parts.', roles: ['Admin', 'PMG'] },
   { name: 'Frontline Monitor', url: '/frontline', icon: 'monitor', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin'] },
+  { name: 'Engineer Endorsements', url: '/endorsements', icon: 'wrench', description: 'Podium only — join the daily Engineer queue and manage customer device endorsements from Frontline Monitor.', roles: ['Admin', 'ENGR'] },
 ] as const;
 
 const BUILTIN_ROLE_NAMES = ['Admin', 'PMG', 'CSO', 'ENGR'];
+const REMOVED_BUILTIN_URLS = ['/permit-tracker'];
 
 /** Add missing built-ins without overwriting tools configured in Admin. */
 export async function syncBuiltinToolCatalog() {
   const db = getDb();
   const roleRows = await db.select().from(roles).where(inArray(roles.name, BUILTIN_ROLE_NAMES));
+
+  for (const url of REMOVED_BUILTIN_URLS) {
+    const staleTools = await db.select({ id: tools.id }).from(tools).where(eq(tools.url, url));
+    for (const staleTool of staleTools) {
+      await db.delete(roleToolAccess).where(eq(roleToolAccess.tool_id, staleTool.id));
+      await db.delete(tools).where(eq(tools.id, staleTool.id));
+    }
+  }
 
   for (const definition of BUILTIN_TOOLS) {
     let [tool] = await db.select().from(tools).where(eq(tools.url, definition.url)).limit(1);

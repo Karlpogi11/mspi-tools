@@ -68,7 +68,7 @@ export default function DashboardPage() {
               className="group relative flex h-full min-h-[clamp(150px,18vw,190px)] w-full flex-col rounded-[14px] border border-black/[0.06] bg-[#FFFFFF] p-4 no-underline transition-all duration-200 hover:-translate-y-0.5 hover:border-black/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 focus-visible:ring-offset-2"
             >
               <ToolIcon icon={tool.icon} active={false} />
-              {tool.name === 'Frontline Monitor' && <span className="absolute right-4 top-4 rounded-full border border-[#e5e5e7] bg-[#fafafa] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#6e6e73]">Podium only</span>}
+              {(tool.name === 'Frontline Monitor' || tool.name === 'Engineer Endorsements') && <span className="absolute right-4 top-4 rounded-full border border-[#e5e5e7] bg-[#fafafa] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#6e6e73]">Podium only</span>}
               <h3 className="mt-3 text-[19px] font-medium leading-[1.1] tracking-[-0.014em] text-[#1d1d1f]">
                 {tool.name}
               </h3>

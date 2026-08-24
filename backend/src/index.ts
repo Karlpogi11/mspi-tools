@@ -25,6 +25,7 @@ import applecareRoutes from './applecare/routes.js';
 import { ensureApplecareTables } from './applecare/store.js';
 import frontlineRoutes from './frontline/routes.js';
 import { ensureFrontlineTables } from './frontline/store.js';
+import endorsementRoutes from './endorsements/routes.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -59,6 +60,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api', toolsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/frontline', frontlineRoutes);
+app.use('/api/endorsements', endorsementRoutes);
 
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
