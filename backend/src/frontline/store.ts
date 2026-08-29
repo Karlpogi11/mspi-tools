@@ -1,6 +1,14 @@
 import { getDbPool } from '../db/index.js';
 
 let frontlineTablesReady: Promise<void> | null = null;
+const APPLE_DEVICE_MODELS = [
+  'iPhone 17 Pro', 'iPhone 17 Pro Max', 'iPhone Air', 'iPhone 17', 'iPhone 17e', 'iPhone 16 Pro', 'iPhone 16 Pro Max', 'iPhone 16', 'iPhone 16 Plus', 'iPhone 16e',
+  'iPhone 15 Pro', 'iPhone 15 Pro Max', 'iPhone 15', 'iPhone 15 Plus', 'iPhone 14 Pro', 'iPhone 14 Pro Max', 'iPhone 14', 'iPhone 14 Plus', 'iPhone 13 Pro', 'iPhone 13 Pro Max', 'iPhone 13 mini', 'iPhone 13', 'iPhone SE (3rd generation)', 'iPhone 12 Pro', 'iPhone 12 Pro Max', 'iPhone 12 mini', 'iPhone 12', 'iPhone 11 Pro', 'iPhone 11 Pro Max', 'iPhone 11', 'iPhone SE (2nd generation)', 'iPhone XS', 'iPhone XS Max', 'iPhone XR', 'iPhone X', 'iPhone 8', 'iPhone 8 Plus', 'iPhone 7', 'iPhone 7 Plus',
+  'iPad Pro 13-inch (M5)', 'iPad Pro 11-inch (M5)', 'iPad Air 13-inch (M4)', 'iPad Air 11-inch (M4)', 'iPad (A16)', 'iPad mini (A17 Pro)', 'iPad Pro 13-inch (M4)', 'iPad Pro 12.9-inch (6th generation)', 'iPad Pro 12.9-inch (5th generation)', 'iPad Pro 12.9-inch (4th generation)', 'iPad Pro 12.9-inch (3rd generation)', 'iPad Pro 12.9-inch (2nd generation)', 'iPad Pro 12.9-inch (1st generation)', 'iPad Pro 11-inch (4th generation)', 'iPad Pro 11-inch (3rd generation)', 'iPad Pro 11-inch (2nd generation)', 'iPad Pro 11-inch (1st generation)', 'iPad Air (5th generation)', 'iPad Air (4th generation)', 'iPad Air (3rd generation)', 'iPad Air 2', 'iPad (10th generation)', 'iPad (9th generation)', 'iPad (8th generation)', 'iPad (7th generation)',
+  'MacBook Neo', 'MacBook Air 13-inch (M4)', 'MacBook Air 15-inch (M4)', 'MacBook Air 13-inch (M3)', 'MacBook Air 15-inch (M3)', 'MacBook Air 13-inch (M2)', 'MacBook Air 15-inch (M2)', 'MacBook Air (M1, 2020)', 'MacBook Pro 14-inch (M5)', 'MacBook Pro 16-inch (M4 Max)', 'MacBook Pro 16-inch (M4 Pro)', 'MacBook Pro 14-inch (M4 Pro)', 'MacBook Pro 14-inch (M4)', 'MacBook Pro 16-inch (M3 Max)', 'MacBook Pro 16-inch (M3 Pro)', 'MacBook Pro 14-inch (M3 Pro)', 'MacBook Pro 14-inch (M3)', 'MacBook Pro 16-inch (M2 Max)', 'MacBook Pro 16-inch (M2 Pro)', 'MacBook Pro 14-inch (M2 Pro)', 'MacBook Pro 14-inch (M2)', 'MacBook Pro 16-inch (M1 Max)', 'MacBook Pro 16-inch (M1 Pro)', 'MacBook Pro 14-inch (M1 Pro)', 'MacBook Pro 14-inch (M1)', 'MacBook Pro 13-inch (M2)', 'MacBook Pro 13-inch (M1)',
+  'iMac 24-inch (M4)', 'iMac 24-inch (M3)', 'iMac 24-inch (M1, 2021)', 'iMac 27-inch (Intel, 2020)', 'iMac 27-inch (Intel, 2019)', 'iMac Pro (2017)',
+  'Apple Watch Series 11', 'Apple Watch SE 3', 'Apple Watch Ultra 3', 'Apple Watch SE 2', 'Apple Watch Series 10', 'Apple Watch Ultra 2', 'Apple Watch Series 9', 'Apple Watch Ultra', 'Apple Watch Series 8', 'Apple Watch Series 7', 'Apple Watch Series 6', 'Apple Watch SE', 'Apple Watch Series 5', 'Apple Watch Series 4', 'Apple Watch Series 3', 'Apple Watch Series 2', 'Apple Watch Series 1',
+];
 
 async function initializeFrontlineTables(): Promise<void> {
   const pool = getDbPool();
@@ -14,11 +22,26 @@ async function initializeFrontlineTables(): Promise<void> {
     PRIMARY KEY (id), UNIQUE KEY frontline_google_user_unique (user_id),
     CONSTRAINT frontline_google_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS engineer_calendar_entries (
+    id bigint AUTO_INCREMENT NOT NULL,
+    entry_date date NOT NULL,
+    product_division varchar(100) NOT NULL,
+    engineer_name varchar(150) NOT NULL,
+    entry_count int NOT NULL,
+    details varchar(1000) NOT NULL DEFAULT '',
+    created_by int NOT NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY engineer_calendar_entry_unique (entry_date, product_division, engineer_name),
+    KEY engineer_calendar_entry_date_idx (entry_date),
+    CONSTRAINT engineer_calendar_entry_creator_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+  )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS frontline_sources (
     id int AUTO_INCREMENT NOT NULL,
     spreadsheet_id varchar(255) NOT NULL,
     spreadsheet_name varchar(255) NOT NULL,
     selected_sheets text NOT NULL,
+    write_sheet_name varchar(255) NULL,
     updated_by int NULL,
     last_synced_at timestamp NULL,
     last_sync_status varchar(20) NOT NULL DEFAULT 'never',
@@ -27,6 +50,23 @@ async function initializeFrontlineTables(): Promise<void> {
     updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY frontline_source_spreadsheet_unique (spreadsheet_id),
     CONSTRAINT frontline_source_user_fk FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+  )`);
+  try { await pool.query("ALTER TABLE frontline_sources ADD COLUMN write_sheet_name varchar(255) NULL AFTER selected_sheets"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_sheet_writes (
+    id bigint AUTO_INCREMENT NOT NULL,
+    source_id int NOT NULL,
+    sheet_name varchar(255) NOT NULL,
+    headers_json text NOT NULL,
+    values_json text NOT NULL,
+    status varchar(20) NOT NULL DEFAULT 'pending',
+    error_message varchar(500) NULL,
+    created_by int NOT NULL,
+    written_at timestamp NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY frontline_sheet_writes_status_idx (status),
+    CONSTRAINT frontline_sheet_writes_source_fk FOREIGN KEY (source_id) REFERENCES frontline_sources(id) ON DELETE RESTRICT,
+    CONSTRAINT frontline_sheet_writes_user_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT
   )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS frontline_records (
     id bigint AUTO_INCREMENT NOT NULL,
@@ -89,6 +129,26 @@ async function initializeFrontlineTables(): Promise<void> {
     KEY engineer_availability_active_idx (availability_date, status, assignment_count, last_assigned_at),
     CONSTRAINT engineer_availability_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS engineer_roster (
+    id bigint AUTO_INCREMENT NOT NULL,
+    user_id int NULL,
+    engineer_name varchar(150) NOT NULL,
+    active int NOT NULL DEFAULT 1,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY engineer_roster_name_unique (engineer_name),
+    KEY engineer_roster_user_idx (user_id),
+    CONSTRAINT engineer_roster_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_device_models (
+    id int AUTO_INCREMENT NOT NULL,
+    model_name varchar(150) NOT NULL,
+    active int NOT NULL DEFAULT 1,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY frontline_device_model_name_unique (model_name)
+  )`);
+  await pool.query(`INSERT IGNORE INTO frontline_device_models (model_name) VALUES ${APPLE_DEVICE_MODELS.map(() => '(?)').join(',')}`, APPLE_DEVICE_MODELS);
   await pool.query(`CREATE TABLE IF NOT EXISTS engineer_endorsements (
     id bigint AUTO_INCREMENT NOT NULL,
     ar_number varchar(100) NOT NULL,
@@ -120,6 +180,7 @@ async function initializeFrontlineTables(): Promise<void> {
   try { await pool.query("ALTER TABLE engineer_endorsements ADD COLUMN engineer_name varchar(150) NULL AFTER engineer_user_id"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
   await pool.query("UPDATE engineer_endorsements e LEFT JOIN engineer_daily_availability a ON a.user_id = e.engineer_user_id SET e.engineer_name = COALESCE(NULLIF(e.engineer_name, ''), a.engineer_name, CONCAT('Engineer ', e.engineer_user_id)) WHERE e.engineer_name IS NULL OR e.engineer_name = ''");
   await pool.query("ALTER TABLE engineer_endorsements MODIFY COLUMN engineer_name varchar(150) NOT NULL");
+  await pool.query("INSERT IGNORE INTO engineer_roster (user_id, engineer_name, active) SELECT MAX(user_id), engineer_name, 1 FROM engineer_daily_availability GROUP BY engineer_name");
 }
 
 export function ensureFrontlineTables(): Promise<void> {

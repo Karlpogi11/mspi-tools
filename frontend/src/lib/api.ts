@@ -321,7 +321,7 @@ export interface AwbLogRow {
 export interface ApplecareStatus { connected: boolean; email: string | null; lastSyncedAt: string | null }
 export interface FrontlineSpreadsheet { id: string; name: string; modifiedTime?: string }
 export interface FrontlineSheet { title: string; sheetId: number }
-export interface FrontlineSource { id: number; spreadsheet_id: string; spreadsheet_name: string; selected_sheets: string[]; last_synced_at: string | null; last_sync_status: string; last_sync_error: string | null }
+export interface FrontlineSource { id: number; spreadsheet_id: string; spreadsheet_name: string; selected_sheets: string[]; write_sheet_name: string | null; last_synced_at: string | null; last_sync_status: string; last_sync_error: string | null }
 export interface FrontlineReport {
   total: number;
   averageAht: number;
@@ -334,6 +334,7 @@ export interface FrontlineStatus { connected: boolean; sourceName: string | null
 export interface FrontlineAccessRequest { id: number; user_id: number; email?: string; full_name?: string; reason: string; status: 'pending' | 'approved' | 'rejected'; created_at: string; reviewed_at: string | null; access_scope?: 'all' | 'cso' | null; cso_name?: string | null }
 export interface EndorsementEngineer { id: number; user_id: number | null; full_name: string; email?: string; assignment_count: number; status?: 'active' | 'left'; joined_at?: string; last_assigned_at?: string | null }
 export interface EngineerDashboard { date: string; availability: { user_id: number; status: 'active' | 'left'; joined_at: string; left_at: string | null; assignment_count: number } | null; totals: { total: number; pending: number }; divisions: Array<{ product_division: string; total: number }>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; created_at: string; engineer_name: string }> }
+ export interface EngineerCalendar { month: string; divisions: string[]; columns: Array<{ division: string; engineer: string; total: number }>; totals: Record<string, number>; days: Array<{ date: string; day: string; counts: Record<string, Record<string, Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; engineer_name: string; created_at: string; manual_count?: number; details?: string; is_manual?: boolean }>>>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; engineer_name: string; created_at: string }> }> }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
 export interface ApplecarePackingList {
   id: number; gmail_message_id: string; subject: string; sender: string; received_by: string | null; ship_to: string;
@@ -420,7 +421,7 @@ export const api = {
     frontlineGoogleDisconnect: () => request<{ message: string }>('/frontline/google/disconnect', { method: 'DELETE' }),
     frontlineSheets: (spreadsheetId: string) => request<{ title: string; sheets: FrontlineSheet[] }>(`/frontline/spreadsheets/${encodeURIComponent(spreadsheetId)}/sheets`),
     frontlineSource: () => request<FrontlineSource | null>('/frontline/source'),
-    saveFrontlineSource: (spreadsheetId: string, spreadsheetName: string, sheets: string[]) => request<{ message: string }>('/frontline/source', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, sheets }) }),
+    saveFrontlineSource: (spreadsheetId: string, spreadsheetName: string, sheets: string[], writeSheetName: string) => request<{ message: string }>('/frontline/source', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, sheets, writeSheetName }) }),
     syncFrontline: () => request<{ imported: number }>('/frontline/sync', { method: 'POST' }),
     getFrontlineAccessRequests: () => request<FrontlineAccessRequest[]>('/admin/frontline/access-requests'),
     grantFrontlineAccess: (email: string, scope: 'all' | 'cso', csoName?: string) => request<{ message: string }>('/admin/frontline/access', { method: 'POST', body: JSON.stringify({ email, scope, csoName }) }),
@@ -431,6 +432,7 @@ export const api = {
     access: () => request<{ allowed: boolean; scope: 'all' | 'cso' | null; cso: string | null; request: FrontlineAccessRequest | null }>('/frontline/access'),
     requestAccess: (reason: string) => request<{ message: string }>('/frontline/access-request', { method: 'POST', body: JSON.stringify({ reason }) }),
     status: () => request<FrontlineStatus>('/frontline/status'),
+    deviceModels: () => request<string[]>('/frontline/device-models'),
     report: (params: { start?: string; end?: string; ar?: string; cso?: string[]; type?: string[]; division?: string[] } = {}) => {
       const queryParams = new URLSearchParams();
       if (params.start) queryParams.set('start', params.start);
@@ -442,17 +444,25 @@ export const api = {
       const query = queryParams.toString();
       return request<FrontlineReport>(`/frontline/report${query ? `?${query}` : ''}`);
     },
+    writeSchema: (sheet: string) => request<{ sheet: string; headers: string[] }>(`/frontline/write-schema?sheet=${encodeURIComponent(sheet)}`),
+    writeEntry: (payload: { sheet: string; headers: string[]; values: string[] }) => request<{ message: string }>('/frontline/write-entry', { method: 'POST', body: JSON.stringify(payload) }),
   },
 
   endorsements: {
     join: () => request<{ message: string }>('/endorsements/availability/join', { method: 'POST' }),
     leave: () => request<{ message: string }>('/endorsements/availability/leave', { method: 'POST' }),
     skip: () => request<{ message: string }>('/endorsements/availability/skip', { method: 'POST' }),
+    passNext: () => request<{ message: string }>('/endorsements/availability/pass-next', { method: 'POST' }),
     addEngineer: (name: string) => request<{ message: string }>('/endorsements/availability/add', { method: 'POST', body: JSON.stringify({ name }) }),
     removeEngineer: (id: number) => request<{ message: string }>('/endorsements/availability/remove', { method: 'POST', body: JSON.stringify({ id }) }),
     available: () => request<{ date: string; engineers: EndorsementEngineer[]; roster: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null }>('/endorsements/available'),
-    create: (payload: { arNumber: string; frontlineRecordId: number; deviceModel?: string }) => request<{ message: string; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
+    create: (payload: { arNumber: string; frontlineRecordId: number; deviceModel?: string }) => request<{ message: string; endorsementId: number; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
+    updateDeviceModel: (id: number, deviceModel: string) => request<{ message: string; deviceModel: string }>(`/endorsements/${id}`, { method: 'PATCH', body: JSON.stringify({ deviceModel }) }),
     dashboard: (engineerUserId?: number) => request<EngineerDashboard>(`/endorsements/dashboard${engineerUserId ? `?engineerUserId=${engineerUserId}` : ''}`),
+    calendar: (month: string) => request<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
+    saveCalendarEntry: (payload: { date: string; division: string; engineer: string; count: number; details?: string }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'PUT', body: JSON.stringify(payload) }),
+    passEndorsement: (id: number) => request<{ message: string; engineer: string }>(`/endorsements/${id}/pass`, { method: 'POST' }),
+    cancelEndorsement: (id: number) => request<{ message: string }>(`/endorsements/${id}/cancel`, { method: 'POST' }),
   },
 
   sessions: {

@@ -9,6 +9,7 @@ export default function AdminFrontlinePage() {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [spreadsheetName, setSpreadsheetName] = useState('');
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
+  const [writeSheetName, setWriteSheetName] = useState('');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -27,14 +28,14 @@ export default function AdminFrontlinePage() {
     const [nextStatus, nextSource, nextRequests] = await Promise.all([api.admin.frontlineGoogleStatus(), api.admin.frontlineSource(), api.admin.getFrontlineAccessRequests()]);
     setStatus(nextStatus); setSource(nextSource);
     setAccessRequests(nextRequests);
-    if (nextSource) { setSpreadsheetId(nextSource.spreadsheet_id); setSpreadsheetName(nextSource.spreadsheet_name); setSelectedSheets(nextSource.selected_sheets); }
+    if (nextSource) { setSpreadsheetId(nextSource.spreadsheet_id); setSpreadsheetName(nextSource.spreadsheet_name); setSelectedSheets(nextSource.selected_sheets); setWriteSheetName(nextSource.write_sheet_name || ''); }
   };
 
   useEffect(() => { void load().catch((error) => setMessage(error.message)); }, []);
 
   const chooseSpreadsheet = async (id: string) => {
     const normalizedId = id.match(/\/spreadsheets\/d\/([^/]+)/)?.[1] || id.trim();
-    setSpreadsheetId(normalizedId); setSpreadsheetName(normalizedId); setSelectedSheets([]); setSheets([]);
+    setSpreadsheetId(normalizedId); setSpreadsheetName(normalizedId); setSelectedSheets([]); setWriteSheetName(''); setSheets([]);
     if (!normalizedId) return;
     setLoadingSheets(true); setMessage('');
     try {
@@ -53,9 +54,9 @@ export default function AdminFrontlinePage() {
   };
 
   const save = async () => {
-    if (!spreadsheetId || selectedSheets.length === 0) return;
+    if (!spreadsheetId || selectedSheets.length === 0 || !writeSheetName) return;
     setBusy(true); setSaving(true); setMessage('Saving source…');
-    try { await api.admin.saveFrontlineSource(spreadsheetId, spreadsheetName || spreadsheetId, selectedSheets); setMessage('Source saved.'); await load(); }
+    try { await api.admin.saveFrontlineSource(spreadsheetId, spreadsheetName || spreadsheetId, selectedSheets, writeSheetName); setMessage('Source saved.'); await load(); }
     catch (error) { setMessage((error as Error).message); } finally { setBusy(false); setSaving(false); }
   };
 
@@ -72,7 +73,7 @@ export default function AdminFrontlinePage() {
       <div>
         <Link to="/admin" className="mb-2 inline-flex items-center gap-1 text-[12px] font-medium text-[#6e6e73] hover:text-[#1d1d1f]">← Back to Manage</Link>
         <h1 className="text-[26px] font-semibold tracking-tight text-[#1d1d1f]">Frontline Monitor</h1>
-        <p className="mt-1 text-[14px] text-[#6e6e73]">Connect a read-only Google Sheet source for MSPI Tools reports.</p>
+        <p className="mt-1 text-[14px] text-[#6e6e73]">Connect Google Sheets. Source tabs stay read-only; website entries use a separate destination tab.</p>
       </div>
 
       {params.get('error') && <div className="border border-[#fecaca] bg-[#fff7f7] px-4 py-3 text-[13px] text-[#b91c1c]">{params.get('error')}</div>}
@@ -96,10 +97,10 @@ export default function AdminFrontlinePage() {
 
       {activeTab === 'source' && status.connected && <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">
         <h2 className="text-[15px] font-semibold text-[#1d1d1f]">Report source</h2>
-        <p className="mt-1 text-[12px] text-[#6e6e73]">Choose the spreadsheet and monthly worksheets used by Frontline Monitor.</p>
+        <p className="mt-1 text-[12px] text-[#6e6e73]">Choose source worksheets for Frontline Monitor, then choose a separate tab for website entries. Source worksheets are never written to.</p>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row"><input value={spreadsheetId} onChange={(event) => setSpreadsheetId(event.target.value)} placeholder="Paste Google Sheet ID or URL" className="h-10 min-w-0 flex-1 rounded-lg border border-[#d2d2d7] bg-white px-3 text-[13px] text-[#1d1d1f]" /><button aria-label={loadingSheets ? 'Loading worksheets' : 'Load worksheets'} onClick={() => void chooseSpreadsheet(spreadsheetId)} disabled={busy || loadingSheets || !spreadsheetId.trim()} className="inline-flex h-10 min-w-[128px] shrink-0 items-center justify-center gap-2 rounded-lg border border-[#d2d2d7] px-4 text-[12px] font-medium text-[#3c3c43] disabled:opacity-40">{loadingSheets ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#3c3c43]/30 border-t-[#3c3c43]" aria-hidden="true" /> : 'Load worksheets'}</button></div>
-        {sheets.length > 0 && <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{sheets.map((sheet) => <label key={sheet.title} className="flex items-center gap-2 rounded-lg border border-[#e5e5e7] px-3 py-2 text-[12px] text-[#3c3c43]"><input type="checkbox" checked={selectedSheets.includes(sheet.title)} onChange={(event) => setSelectedSheets((current) => event.target.checked ? [...current, sheet.title] : current.filter((name) => name !== sheet.title))} />{sheet.title}</label>)}</div>}
-        <div className="mt-5 flex flex-wrap items-center gap-2"><button aria-label={saving ? 'Saving source' : 'Save source'} disabled={busy || sheets.length === 0 || !spreadsheetId || selectedSheets.length === 0} onClick={() => void save()} className="inline-flex h-[34px] min-w-[98px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-40">{saving ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/35 border-t-white" aria-hidden="true" /> : 'Save source'}</button><button disabled={busy || !source || sheets.length === 0 || source.spreadsheet_id !== spreadsheetId} onClick={() => void sync()} className="shrink-0 rounded-full border border-[#d2d2d7] px-4 py-2 text-[12px] font-medium text-[#3c3c43] disabled:opacity-40">Refresh data</button><span className="text-[11px] text-[#86868b]">{formatPhilippineTime(source?.last_synced_at || null)}</span></div>
+        {sheets.length > 0 && <><div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{sheets.map((sheet) => <label key={sheet.title} className="flex items-center gap-2 rounded-lg border border-[#e5e5e7] px-3 py-2 text-[12px] text-[#3c3c43]"><input type="checkbox" checked={selectedSheets.includes(sheet.title)} onChange={(event) => { if (event.target.checked) { setSelectedSheets((current) => [...current, sheet.title]); if (writeSheetName === sheet.title) setWriteSheetName(''); } else setSelectedSheets((current) => current.filter((name) => name !== sheet.title)); }} />{sheet.title}</label>)}</div><div className="mt-5 max-w-md"><label className="block text-[11px] font-medium text-[#6e6e73]">Website entry destination<select value={writeSheetName} onChange={(event) => { const value = event.target.value; setWriteSheetName(value); setSelectedSheets((current) => current.filter((name) => name !== value)); }} className="mt-1.5 h-10 w-full rounded-lg border border-[#d2d2d7] bg-white px-3 text-[13px] text-[#1d1d1f]"><option value="">Select a separate worksheet</option>{sheets.filter((sheet) => !selectedSheets.includes(sheet.title)).map((sheet) => <option key={sheet.title} value={sheet.title}>{sheet.title}</option>)}</select></label><p className="mt-1.5 text-[11px] text-[#86868b]">This tab must have its own complete header row. Website entries append only to this tab.</p></div></>}
+        <div className="mt-5 flex flex-wrap items-center gap-2"><button aria-label={saving ? 'Saving source' : 'Save source'} disabled={busy || sheets.length === 0 || !spreadsheetId || selectedSheets.length === 0 || !writeSheetName} onClick={() => void save()} className="inline-flex h-[34px] min-w-[98px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-40">{saving ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/35 border-t-white" aria-hidden="true" /> : 'Save source'}</button><button disabled={busy || !source || sheets.length === 0 || source.spreadsheet_id !== spreadsheetId} onClick={() => void sync()} className="shrink-0 rounded-full border border-[#d2d2d7] px-4 py-2 text-[12px] font-medium text-[#3c3c43] disabled:opacity-40">Refresh data</button><span className="text-[11px] text-[#86868b]">{formatPhilippineTime(source?.last_synced_at || null)}</span></div>
       </section>}
 
       {activeTab === 'access' && <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">

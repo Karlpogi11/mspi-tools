@@ -7,7 +7,7 @@ import { ensureFrontlineTables } from './store.js';
 
 const router = Router();
 router.use(authenticateToken);
-const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly openid email';
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets openid email';
 
 function config() {
   const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'JWT_SECRET'] as const;
@@ -226,6 +226,51 @@ router.post('/access-request', async (req, res) => {
 
 router.use(requireFrontlineAccess);
 
+async function approvedSheet(sheetName: string) {
+  const [rows] = await getDbPool().query('SELECT id, spreadsheet_id, write_sheet_name, updated_by FROM frontline_sources ORDER BY id DESC LIMIT 1');
+  const source = (rows as Array<Record<string, unknown>>)[0];
+  if (!source) throw new Error('Choose a Google Sheet source first.');
+  const writeSheetName = text(source.write_sheet_name);
+  if (!writeSheetName) throw new Error('Configure a separate website entry worksheet in Admin first.');
+  if (writeSheetName !== sheetName) throw new Error('This worksheet is not approved for website entry.');
+  if (!source.updated_by) throw new Error('The approved Google Sheet connection owner is missing.');
+  const connection = await connectionFor(Number(source.updated_by));
+  if (!connection) throw new Error('Reconnect the approved Google account with Sheets write access.');
+  return { source, connection };
+}
+
+router.get('/write-schema', async (req, res) => {
+  const sheet = text(req.query.sheet);
+  try {
+    const { connection } = await approvedSheet(sheet); const token = await tokenFor(connection);
+    const [sourceRows] = await getDbPool().query('SELECT spreadsheet_id FROM frontline_sources ORDER BY id DESC LIMIT 1');
+    const spreadsheetId = String((sourceRows as Array<Record<string, unknown>>)[0]?.spreadsheet_id || '');
+    const data = await google<{ values?: string[][] }>(token, `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`${sheet}!1:10`)}?majorDimension=ROWS`);
+    const headers = (data.values || []).find((row) => row.some((value) => text(value)))?.map((value) => text(value)) || [];
+    if (!headers.length || headers.some((header) => !header)) { res.status(409).json({ error: 'The website entry worksheet must contain a complete header row.' }); return; }
+    res.json({ sheet, headers });
+  } catch (error) { res.status(400).json({ error: (error as Error).message }); }
+});
+
+router.post('/write-entry', async (req, res) => {
+  const sheet = text(req.body?.sheet); const headers = Array.isArray(req.body?.headers) ? req.body.headers.map(text) : []; const values = Array.isArray(req.body?.values) ? req.body.values.map(text) : [];
+  if (!sheet || !headers.length || headers.length !== values.length) { res.status(400).json({ error: 'Worksheet columns and values are required.' }); return; }
+  try {
+    const { source, connection } = await approvedSheet(sheet); const token = await tokenFor(connection); const sourceId = Number(source.id); const sourceSpreadsheetId = String(source.spreadsheet_id);
+    const schema = await google<{ values?: string[][] }>(token, `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sourceSpreadsheetId)}/values/${encodeURIComponent(`${sheet}!1:10`)}?majorDimension=ROWS`);
+    const currentHeaders = (schema.values || []).find((row) => row.some((value) => text(value)))?.map((value) => text(value)) || [];
+    if (currentHeaders.length !== headers.length || currentHeaders.some((header, index) => header !== headers[index])) { res.status(409).json({ error: 'Worksheet columns changed. Reload the form before submitting.' }); return; }
+    const pool = getDbPool(); const [result] = await pool.execute('INSERT INTO frontline_sheet_writes (source_id, sheet_name, headers_json, values_json, status, created_by) VALUES (?, ?, ?, ?, ?, ?)', [sourceId, sheet, JSON.stringify(headers), JSON.stringify(values), 'pending', req.user!.userId]); const writeId = Number((result as { insertId?: number }).insertId);
+    try {
+      const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sourceSpreadsheetId)}/values/${encodeURIComponent(`${sheet}!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS&includeValuesInResponse=false`;
+      await google(token, endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ majorDimension: 'ROWS', values: [values] }) });
+      await pool.execute('UPDATE frontline_sheet_writes SET status = ?, written_at = CURRENT_TIMESTAMP WHERE id = ?', ['written', writeId]);
+      void writeAuditLog({ actorUserId: req.user!.userId, action: 'frontline.sheet_entry_written', resourceType: 'frontline_sheet_write', resourceId: String(writeId), metadata: { sheet, columnCount: headers.length } });
+      res.status(201).json({ message: 'Entry added to the approved worksheet.' });
+    } catch (error) { await pool.execute('UPDATE frontline_sheet_writes SET status = ?, error_message = ? WHERE id = ?', ['failed', (error as Error).message.slice(0, 500), writeId]); res.status(502).json({ error: 'Entry saved locally, but Google Sheets rejected the append. No existing sheet data was changed.' }); }
+  } catch (error) { res.status(400).json({ error: (error as Error).message }); }
+});
+
 router.get('/status', async (_req, res) => {
   await ensureFrontlineTables();
   const [connectionRows] = await getDbPool().query('SELECT id FROM frontline_google_connections LIMIT 1');
@@ -267,16 +312,18 @@ router.get('/spreadsheets/:id/sheets', requireAdmin, async (req, res) => {
 
 router.get('/source', requireAdmin, async (_req, res) => {
   await ensureFrontlineTables();
-  const [rows] = await getDbPool().query('SELECT id, spreadsheet_id, spreadsheet_name, selected_sheets, last_synced_at, last_sync_status, last_sync_error FROM frontline_sources ORDER BY id DESC LIMIT 1');
+  const [rows] = await getDbPool().query('SELECT id, spreadsheet_id, spreadsheet_name, selected_sheets, write_sheet_name, last_synced_at, last_sync_status, last_sync_error FROM frontline_sources ORDER BY id DESC LIMIT 1');
   const source = (rows as Array<Record<string, unknown>>)[0];
   res.json(source ? { ...source, last_synced_at: isoTimestamp(source.last_synced_at), selected_sheets: JSON.parse(String(source.selected_sheets || '[]')) } : null);
 });
 
 router.post('/source', requireAdmin, async (req, res) => {
   const spreadsheetId = text(req.body?.spreadsheetId); const spreadsheetName = text(req.body?.spreadsheetName); const sheets = Array.isArray(req.body?.sheets) ? req.body.sheets.map(text).filter(Boolean) : [];
-  if (!spreadsheetId || !spreadsheetName || sheets.length === 0) { res.status(400).json({ error: 'Spreadsheet and at least one worksheet are required' }); return; }
+  const writeSheetName = text(req.body?.writeSheetName);
+  if (!spreadsheetId || !spreadsheetName || sheets.length === 0 || !writeSheetName) { res.status(400).json({ error: 'Spreadsheet, source worksheets, and a separate website entry worksheet are required.' }); return; }
+  if (sheets.includes(writeSheetName)) { res.status(400).json({ error: 'The website entry worksheet must be separate from source worksheets.' }); return; }
   await ensureFrontlineTables();
-  await getDbPool().execute(`INSERT INTO frontline_sources (spreadsheet_id, spreadsheet_name, selected_sheets, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE spreadsheet_name = VALUES(spreadsheet_name), selected_sheets = VALUES(selected_sheets), updated_by = VALUES(updated_by)`, [spreadsheetId, spreadsheetName, JSON.stringify(sheets), req.user!.userId]);
+  await getDbPool().execute(`INSERT INTO frontline_sources (spreadsheet_id, spreadsheet_name, selected_sheets, write_sheet_name, updated_by) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE spreadsheet_name = VALUES(spreadsheet_name), selected_sheets = VALUES(selected_sheets), write_sheet_name = VALUES(write_sheet_name), updated_by = VALUES(updated_by)`, [spreadsheetId, spreadsheetName, JSON.stringify(sheets), writeSheetName, req.user!.userId]);
   res.json({ message: 'Frontline source saved' });
 });
 
@@ -337,6 +384,14 @@ router.post('/sync', requireAdmin, async (req, res) => {
     await getDbPool().execute('UPDATE frontline_sources SET last_sync_status = ?, last_sync_error = ? WHERE id = ?', ['error', (error as Error).message.slice(0, 500), sourceId]);
     res.status(502).json({ error: (error as Error).message });
   }
+});
+
+router.get('/device-models', async (req, res) => {
+  await ensureFrontlineTables();
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  if (!access) { res.status(403).json({ error: 'Frontline Monitor access required' }); return; }
+  const [rows] = await getDbPool().query('SELECT model_name FROM frontline_device_models WHERE active = 1 ORDER BY model_name ASC');
+  res.json((rows as Array<{ model_name: string }>).map((row) => row.model_name));
 });
 
 router.get('/report', async (req, res) => {

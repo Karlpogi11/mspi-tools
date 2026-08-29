@@ -8,12 +8,19 @@ const router = Router();
 router.use(authenticateToken);
 
 function text(value: unknown) { return String(value ?? '').trim(); }
+function canonicalEngineerName(value: string) { const name = text(value); return name.toLowerCase() === 'k' ? 'Karl' : name; }
 function todayManila() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date()); }
 function isEngineer(req: Request) { return req.user?.roleName === 'ENGR'; }
 function canEndorse(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'CSO'; }
 function canView(req: Request) { return canEndorse(req) || canManageRoster(req) || isEngineer(req); }
 function canManageRoster(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG'; }
 function forbidden(res: Response) { res.status(403).json({ error: 'Engineer Endorsements access required' }); }
+function endorsementDivision(deviceModel: string, sourceDivision: string) {
+  if (/^MacBook\b/i.test(deviceModel)) return 'MacBook';
+  if (/^iMac\b/i.test(deviceModel)) return 'iMac';
+  if (/^(iPhone|iPad|Apple Watch)\b/i.test(deviceModel)) return 'iOS/ACCS';
+  return sourceDivision;
+}
 
 router.post('/availability/join', async (req, res) => {
   if (!isEngineer(req)) { forbidden(res); return; }
@@ -21,8 +28,9 @@ router.post('/availability/join', async (req, res) => {
   const pool = getDbPool();
   const [userRows] = await pool.query('SELECT full_name FROM users WHERE id = ? LIMIT 1', [req.user!.userId]);
   const engineerName = text((userRows as Array<{ full_name: string }>)[0]?.full_name || req.user!.email);
-  const [existing] = await pool.query('SELECT id FROM engineer_daily_availability WHERE user_id = ? AND availability_date = ? LIMIT 1', [req.user!.userId, todayManila()]);
-  if ((existing as Array<Record<string, unknown>>).length) await pool.execute("UPDATE engineer_daily_availability SET status = 'active', left_at = NULL WHERE id = ?", [Number((existing as Array<Record<string, unknown>>)[0].id)]);
+  await pool.execute(`INSERT INTO engineer_roster (user_id, engineer_name, active) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), active = 1`, [req.user!.userId, engineerName]);
+  const [existing] = await pool.query('SELECT id FROM engineer_daily_availability WHERE (user_id = ? OR engineer_name = ?) AND availability_date = ? LIMIT 1', [req.user!.userId, engineerName, todayManila()]);
+  if ((existing as Array<Record<string, unknown>>).length) await pool.execute("UPDATE engineer_daily_availability SET user_id = ?, engineer_name = ?, status = 'active', left_at = NULL WHERE id = ?", [req.user!.userId, engineerName, Number((existing as Array<Record<string, unknown>>)[0].id)]);
   else await pool.execute(`INSERT INTO engineer_daily_availability (user_id, engineer_name, availability_date, status, left_at) VALUES (?, ?, ?, 'active', NULL)`, [req.user!.userId, engineerName, todayManila()]);
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.availability_joined', resourceType: 'engineer_daily_availability', metadata: { date: todayManila() } });
   res.json({ message: 'You are available for endorsements today.' });
@@ -45,10 +53,27 @@ router.post('/availability/skip', async (req, res) => {
   res.json({ message: 'Your next turn was skipped. The next available Engineer is now up.' });
 });
 
+router.post('/availability/pass-next', async (req, res) => {
+  if (!canEndorse(req) && !canManageRoster(req)) { forbidden(res); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query(`SELECT id, engineer_name FROM engineer_daily_availability WHERE availability_date = ? AND status = 'active' ORDER BY last_assigned_at IS NOT NULL ASC, last_assigned_at ASC, assignment_count ASC, joined_at ASC, id ASC LIMIT 1 FOR UPDATE`, [todayManila()]);
+    const next = (rows as Array<{ id: number; engineer_name: string }>)[0];
+    if (!next) { await connection.rollback(); res.status(409).json({ error: 'No Engineer is currently available.' }); return; }
+    await connection.execute('UPDATE engineer_daily_availability SET last_assigned_at = CURRENT_TIMESTAMP WHERE id = ?', [next.id]);
+    await connection.commit();
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.availability_passed', resourceType: 'engineer_daily_availability', resourceId: String(next.id), metadata: { engineerName: next.engineer_name, date: todayManila() } });
+    res.json({ message: `${next.engineer_name} was passed. The next available Engineer is now up.` });
+  } catch (error) { await connection.rollback(); console.error('pass-next error:', error); res.status(500).json({ error: 'Unable to pass to the next Engineer.' }); } finally { connection.release(); }
+});
+
 router.post('/availability/add', async (req, res) => {
   if (!canManageRoster(req)) { forbidden(res); return; }
-  const name = text(req.body?.name); if (!name || name.length > 150) { res.status(400).json({ error: 'Engineer name is required.' }); return; }
+  const name = canonicalEngineerName(text(req.body?.name)); if (!name || name.length > 150) { res.status(400).json({ error: 'Engineer name is required.' }); return; }
   await ensureFrontlineTables(); const pool = getDbPool();
+  await pool.execute(`INSERT INTO engineer_roster (user_id, engineer_name, active) VALUES (NULL, ?, 1) ON DUPLICATE KEY UPDATE active = 1`, [name]);
   await pool.execute(`INSERT INTO engineer_daily_availability (user_id, engineer_name, availability_date, status) VALUES (NULL, ?, ?, 'active') ON DUPLICATE KEY UPDATE status = 'active', left_at = NULL`, [name, todayManila()]);
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.roster_added', resourceType: 'engineer_daily_availability', metadata: { name, date: todayManila() } });
   res.json({ message: `${name} is available for endorsements today.` });
@@ -65,38 +90,135 @@ router.post('/availability/remove', async (req, res) => {
 router.get('/available', async (req, res) => {
   if (!canEndorse(req) && !canManageRoster(req) && !isEngineer(req)) { forbidden(res); return; }
   await ensureFrontlineTables();
-  const [rows] = await getDbPool().query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.assignment_count, a.joined_at, a.last_assigned_at
+  const pool = getDbPool();
+  await pool.query(`INSERT INTO engineer_daily_availability (user_id, engineer_name, availability_date, status)
+    SELECT r.user_id, r.engineer_name, ?, 'active' FROM engineer_roster r WHERE r.active = 1
+    ON DUPLICATE KEY UPDATE engineer_name = VALUES(engineer_name), user_id = COALESCE(engineer_daily_availability.user_id, VALUES(user_id))`, [todayManila()]);
+  const [rows] = await pool.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.assignment_count, a.joined_at, a.last_assigned_at
     FROM engineer_daily_availability a LEFT JOIN users u ON u.id = a.user_id
     WHERE a.availability_date = ?
-    ORDER BY a.status = 'active' DESC, a.assignment_count ASC, a.last_assigned_at IS NOT NULL ASC, a.last_assigned_at ASC, a.joined_at ASC, a.id ASC`, [todayManila()]);
+    ORDER BY a.status = 'active' DESC, a.last_assigned_at IS NOT NULL ASC, a.last_assigned_at ASC, a.assignment_count ASC, a.joined_at ASC, a.id ASC`, [todayManila()]);
   const roster = rows as Array<Record<string, unknown>>;
   const engineers = roster.filter((engineer) => engineer.status === 'active');
   res.json({ date: todayManila(), engineers, roster, nextEngineer: engineers[0] || null });
 });
 
+router.get('/calendar', async (req, res) => {
+  if (!canView(req)) { forbidden(res); return; }
+  await ensureFrontlineTables();
+  const requestedMonth = text(req.query.month);
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth) ? requestedMonth : todayManila().slice(0, 7);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const nextMonthDate = new Date(Date.UTC(year, monthNumber, 1));
+  const nextMonth = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
+  const pool = getDbPool();
+  const engineerFilter = isEngineer(req) ? ' AND (engineer_user_id = ? OR (engineer_user_id IS NULL AND engineer_name = (SELECT engineer_name FROM engineer_roster WHERE user_id = ? ORDER BY id DESC LIMIT 1)))' : '';
+  const engineerArgs = isEngineer(req) ? [req.user!.userId, req.user!.userId] : [];
+  const [divisionRows] = await pool.query(`SELECT DISTINCT NULLIF(TRIM(product_division), '') AS product_division FROM engineer_endorsements WHERE created_at >= ? AND created_at < ?${engineerFilter}`, [`${month}-01`, nextMonth, ...engineerArgs]);
+  const [detailRows] = await pool.query(`SELECT id, DATE_FORMAT(created_at, '%Y-%m-%d') AS endorsement_date, ar_number, device_model, issue, product_division, status, engineer_name, created_at FROM engineer_endorsements WHERE created_at >= ? AND created_at < ?${engineerFilter} ORDER BY created_at ASC`, [`${month}-01`, nextMonth, ...engineerArgs]);
+  const [manualRows] = await pool.query(`SELECT id, DATE_FORMAT(entry_date, '%Y-%m-%d') AS endorsement_date, entry_count AS manual_count, details, product_division, engineer_name, created_at FROM engineer_calendar_entries WHERE entry_date >= ? AND entry_date < ?`, [`${month}-01`, nextMonth]);
+  const preferredDivisions = ['iOS/ACCS', 'MacBook', 'iMac']; const canonicalDivision = (value: string) => ['iphone', 'ipad', 'watch', 'iphone accs', 'ios/accs'].includes(value.trim().toLowerCase()) ? 'iOS/ACCS' : preferredDivisions.find((division) => division.toLowerCase() === value.toLowerCase()) || value; const observedDivisions = (divisionRows as Array<{ product_division: string | null }>).map((row) => canonicalDivision(row.product_division || 'Unspecified')); const modelDivisions = (detailRows as Array<Record<string, unknown>>).map((row) => endorsementDivision(text(row.device_model), canonicalDivision(text(row.product_division) || 'Unspecified'))); const manualDivisions = (manualRows as Array<Record<string, unknown>>).map((row) => canonicalDivision(text(row.product_division) || 'Unspecified')); const divisions = [...preferredDivisions, ...[...observedDivisions, ...modelDivisions, ...manualDivisions].filter((division, index, values) => !preferredDivisions.includes(division) && values.indexOf(division) === index)];
+  const [rosterRows] = await pool.query(`SELECT DISTINCT NULLIF(TRIM(engineer_name), '') AS engineer_name FROM engineer_roster WHERE active = 1`);
+  const knownEngineers = new Set<string>((rosterRows as Array<{ engineer_name: string | null }>).map((row) => row.engineer_name || '').filter(Boolean));
+  const counts = new Map<string, Record<string, Record<string, Array<Record<string, unknown>>>>>(); const totals: Record<string, number> = {}; const engineerTotals: Record<string, number> = {}; const divisionEngineers = new Map<string, Set<string>>(divisions.map((division) => [division, new Set(knownEngineers)]));
+  const details = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of detailRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = endorsementDivision(text(row.device_model), canonicalDivision(text(row.product_division) || 'Unspecified')); const engineer = text(row.engineer_name) || 'Unassigned'; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), { ...row, product_division: division }]; counts.set(date, day); totals[division] = (totals[division] || 0) + 1; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + 1; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); details.set(date, [...(details.get(date) || []), { ...row, product_division: division }]); }
+  for (const row of manualRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = canonicalDivision(text(row.product_division) || 'Unspecified'); const engineer = canonicalEngineerName(text(row.engineer_name) || 'Unassigned'); const entry = { ...row, product_division: division, engineer_name: engineer, is_manual: true }; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), entry]; counts.set(date, day); const count = Number(row.manual_count) || 0; totals[division] = (totals[division] || 0) + count; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + count; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); }
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const days = Array.from({ length: daysInMonth }, (_, index) => { const day = String(index + 1).padStart(2, '0'); const date = `${month}-${day}`; return { date, day: new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`)), counts: counts.get(date) || {}, endorsements: details.get(date) || [] }; });
+  const columns = divisions.flatMap((division) => Array.from(divisionEngineers.get(division) || []).sort((a, b) => a.localeCompare(b)).map((engineer) => ({ division, engineer, total: engineerTotals[`${division}::${engineer}`] || 0 })));
+  res.json({ month, divisions, columns, totals, days });
+});
+
 router.post('/', async (req, res) => {
   if (!canEndorse(req)) { forbidden(res); return; }
   const arNumber = text(req.body?.arNumber); const deviceModelOverride = text(req.body?.deviceModel); const recordId = Number(req.body?.frontlineRecordId) || null;
-  if (!arNumber) { res.status(400).json({ error: 'AR number is required.' }); return; }
+  if (!arNumber || arNumber.toUpperCase() === 'N/A') { res.status(400).json({ error: 'Enter the actual AR number before endorsing this record.' }); return; }
   await ensureFrontlineTables();
   const pool = getDbPool(); const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [existingRows] = await connection.query(`SELECT e.id, e.ar_number, e.status, u.full_name AS engineer_name FROM engineer_endorsements e INNER JOIN users u ON u.id = e.engineer_user_id WHERE e.ar_number = ? FOR UPDATE`, [arNumber]);
-    if ((existingRows as Array<Record<string, unknown>>).length) { await connection.rollback(); res.status(409).json({ error: `AR ${arNumber} has already been endorsed to ${(existingRows as Array<Record<string, unknown>>)[0].engineer_name}.` }); return; }
     const [recordRows] = await connection.query(`SELECT id, ar_number, device_model, serial_number, issue, product_division FROM frontline_records WHERE ${recordId ? 'id = ?' : 'ar_number = ?'} ORDER BY id DESC LIMIT 1`, [recordId || arNumber]);
     const record = (recordRows as Array<Record<string, unknown>>)[0];
     if (!record) { await connection.rollback(); res.status(404).json({ error: 'Frontline record not found for this AR number.' }); return; }
-    const [engineerRows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.assignment_count FROM engineer_daily_availability a WHERE a.availability_date = ? AND a.status = 'active' ORDER BY a.assignment_count ASC, a.last_assigned_at IS NOT NULL ASC, a.last_assigned_at ASC, a.joined_at ASC, a.id ASC FOR UPDATE`, [todayManila()]);
+    const duplicateClause = recordId || arNumber.toUpperCase() === 'N/A' ? 'e.frontline_record_id = ?' : 'e.ar_number = ?';
+    const [existingRows] = await connection.query(`SELECT e.id, e.ar_number, e.status, COALESCE(u.full_name, e.engineer_name) AS engineer_name FROM engineer_endorsements e LEFT JOIN users u ON u.id = e.engineer_user_id WHERE ${duplicateClause} FOR UPDATE`, [recordId || Number(record.id)]);
+    if ((existingRows as Array<Record<string, unknown>>).length) { await connection.rollback(); res.status(409).json({ error: `AR ${arNumber} has already been endorsed to ${(existingRows as Array<Record<string, unknown>>)[0].engineer_name}.` }); return; }
+    const [engineerRows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.assignment_count FROM engineer_daily_availability a WHERE a.availability_date = ? AND a.status = 'active' ORDER BY a.last_assigned_at IS NOT NULL ASC, a.last_assigned_at ASC, a.assignment_count ASC, a.joined_at ASC, a.id ASC FOR UPDATE`, [todayManila()]);
     const engineer = (engineerRows as Array<Record<string, unknown>>)[0];
     if (!engineer) { await connection.rollback(); res.status(409).json({ error: 'No Engineer is available today. Ask an Engineer to join the morning availability list.' }); return; }
     const engineerId = engineer.user_id == null ? null : Number(engineer.user_id); const availabilityId = Number(engineer.id); const sourceRecordId = Number(record.id); const engineerName = text(engineer.full_name);
-    await connection.execute(`INSERT INTO engineer_endorsements (ar_number, frontline_record_id, cso_user_id, engineer_user_id, engineer_name, device_model, issue, product_division) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [arNumber, sourceRecordId, req.user!.userId, engineerId, engineerName, deviceModelOverride || text(record.device_model), text(record.issue), text(record.product_division)]);
+    const deviceModel = deviceModelOverride || text(record.device_model); const productDivision = endorsementDivision(deviceModel, text(record.product_division));
+    const [insertResult] = await connection.execute(`INSERT INTO engineer_endorsements (ar_number, frontline_record_id, cso_user_id, engineer_user_id, engineer_name, device_model, issue, product_division) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [arNumber, sourceRecordId, req.user!.userId, engineerId, engineerName, deviceModel, text(record.issue), productDivision]);
     await connection.execute(`UPDATE engineer_daily_availability SET assignment_count = assignment_count + 1, last_assigned_at = CURRENT_TIMESTAMP WHERE id = ?`, [availabilityId]);
     await connection.commit();
     void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsed', resourceType: 'engineer_endorsement', resourceId: arNumber, metadata: { engineerUserId: engineerId, productDivision: text(record.product_division) } });
-    res.status(201).json({ message: `AR ${arNumber} endorsed to ${engineerName}.`, engineer: { userId: engineerId, name: engineerName }, record: { arNumber, deviceModel: deviceModelOverride || text(record.device_model), issue: text(record.issue), productDivision: text(record.product_division) } });
+    res.status(201).json({ message: `AR ${arNumber} endorsed to ${engineerName}.`, endorsementId: Number((insertResult as { insertId?: number }).insertId), engineer: { userId: engineerId, name: engineerName }, record: { arNumber, deviceModel, issue: text(record.issue), productDivision } });
   } catch (error) { await connection.rollback(); console.error('endorsement error:', error); res.status(500).json({ error: 'Unable to endorse this record.' }); } finally { connection.release(); }
+});
+
+router.put('/calendar-entry', async (req, res) => {
+  if (!canManageRoster(req)) { forbidden(res); return; }
+  const date = text(req.body?.date); const division = text(req.body?.division); const engineer = canonicalEngineerName(text(req.body?.engineer)); const count = Number(req.body?.count); const details = text(req.body?.details);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !division || !engineer || !Number.isInteger(count) || count < 1 || count > 999) { res.status(400).json({ error: 'Date, category, Engineer, and a whole-number count are required.' }); return; }
+  await ensureFrontlineTables();
+  await getDbPool().execute(`INSERT INTO engineer_calendar_entries (entry_date, product_division, engineer_name, entry_count, details, created_by) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE entry_count=VALUES(entry_count), details=VALUES(details), created_by=VALUES(created_by)`, [date, division, engineer, count, details.slice(0, 1000), req.user!.userId]);
+  res.json({ message: 'Calendar entry saved.' });
+});
+
+router.post('/:id/pass', async (req, res) => {
+  if (!canEndorse(req)) { forbidden(res); return; }
+  const id = Number(req.params.id); if (!id) { res.status(400).json({ error: 'A valid endorsement is required.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [endorsementRows] = await connection.query(`SELECT id, engineer_user_id, engineer_name, created_at FROM engineer_endorsements WHERE id = ? FOR UPDATE`, [id]);
+    const endorsement = (endorsementRows as Array<Record<string, unknown>>)[0];
+    if (!endorsement) { await connection.rollback(); res.status(404).json({ error: 'Endorsement record not found.' }); return; }
+    const [latestRows] = await connection.query(`SELECT id FROM engineer_endorsements ORDER BY created_at DESC, id DESC LIMIT 1`);
+    if (Number((latestRows as Array<{ id: number }>)[0]?.id) !== id) { await connection.rollback(); res.status(409).json({ error: 'Only the newest endorsement can be passed.' }); return; }
+    const currentUserId = endorsement.engineer_user_id == null ? null : Number(endorsement.engineer_user_id); const currentName = text(endorsement.engineer_name);
+    const [engineerRows] = await connection.query(`SELECT id, user_id, engineer_name AS full_name FROM engineer_daily_availability WHERE availability_date = ? AND status = 'active' AND NOT (COALESCE(user_id, 0) = COALESCE(?, 0) AND engineer_name = ?) ORDER BY last_assigned_at IS NOT NULL ASC, last_assigned_at ASC, assignment_count ASC, joined_at ASC, id ASC LIMIT 1 FOR UPDATE`, [todayManila(), currentUserId, currentName]);
+    const next = (engineerRows as Array<Record<string, unknown>>)[0];
+    if (!next) { await connection.rollback(); res.status(409).json({ error: 'No other Engineer is currently available.' }); return; }
+    await connection.execute(`UPDATE engineer_endorsements SET engineer_user_id = ?, engineer_name = ? WHERE id = ?`, [next.user_id == null ? null : Number(next.user_id), text(next.full_name), id]);
+    await connection.execute(`UPDATE engineer_daily_availability SET assignment_count = GREATEST(assignment_count - 1, 0) WHERE availability_date = ? AND engineer_name = ? AND (COALESCE(user_id, 0) = COALESCE(?, 0))`, [todayManila(), currentName, currentUserId]);
+    await connection.execute(`UPDATE engineer_daily_availability SET assignment_count = assignment_count + 1, last_assigned_at = CURRENT_TIMESTAMP WHERE id = ?`, [Number(next.id)]);
+    await connection.commit();
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_passed', resourceType: 'engineer_endorsement', resourceId: String(id), metadata: { fromEngineer: currentName, toEngineer: text(next.full_name) } });
+    res.json({ message: `Endorsement passed to ${text(next.full_name)}.`, engineer: text(next.full_name) });
+  } catch (error) { await connection.rollback(); console.error('pass endorsement error:', error); res.status(500).json({ error: 'Unable to pass this endorsement.' }); } finally { connection.release(); }
+});
+
+router.post('/:id/cancel', async (req, res) => {
+  if (!canEndorse(req)) { forbidden(res); return; }
+  const id = Number(req.params.id); if (!id) { res.status(400).json({ error: 'A valid endorsement is required.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query(`SELECT id, engineer_user_id, engineer_name, created_at FROM engineer_endorsements WHERE id = ? AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 SECOND) FOR UPDATE`, [id]);
+    const endorsement = (rows as Array<Record<string, unknown>>)[0];
+    if (!endorsement) { await connection.rollback(); res.status(409).json({ error: 'The 5-second cancel window has expired.' }); return; }
+    const engineerUserId = endorsement.engineer_user_id == null ? null : Number(endorsement.engineer_user_id);
+    await connection.execute('DELETE FROM engineer_endorsements WHERE id = ?', [id]);
+    await connection.execute(`UPDATE engineer_daily_availability SET assignment_count = GREATEST(assignment_count - 1, 0) WHERE availability_date = ? AND engineer_name = ? AND COALESCE(user_id, 0) = COALESCE(?, 0)`, [todayManila(), text(endorsement.engineer_name), engineerUserId]);
+    await connection.commit();
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_cancelled', resourceType: 'engineer_endorsement', resourceId: String(id), metadata: { engineerName: text(endorsement.engineer_name) } });
+    res.json({ message: 'Endorsement cancelled.' });
+  } catch (error) { await connection.rollback(); console.error('cancel endorsement error:', error); res.status(500).json({ error: 'Unable to cancel this endorsement.' }); } finally { connection.release(); }
+});
+
+router.patch('/:id', async (req, res) => {
+  if (!canEndorse(req)) { forbidden(res); return; }
+  const id = Number(req.params.id); const deviceModel = text(req.body?.deviceModel);
+  if (!id || !deviceModel || deviceModel.length > 150) { res.status(400).json({ error: 'A valid device model is required.' }); return; }
+  await ensureFrontlineTables();
+  const [result] = await getDbPool().execute('UPDATE engineer_endorsements SET device_model = ? WHERE id = ?', [deviceModel, id]);
+  if (!Number((result as { affectedRows?: number }).affectedRows)) { res.status(404).json({ error: 'Endorsement record not found.' }); return; }
+  void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_device_model_updated', resourceType: 'engineer_endorsement', resourceId: String(id), metadata: { deviceModel } });
+  res.json({ message: 'Device model updated.', deviceModel });
 });
 
 router.get('/dashboard', async (req, res) => {
