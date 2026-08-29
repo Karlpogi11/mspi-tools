@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, type FrontlineAccessRequest, type FrontlineSheet, type FrontlineSource } from '../../lib/api';
+import { api, type FrontlineAccessRequest, type FrontlineOptionKey, type FrontlineOptionLists, type FrontlineSheet, type FrontlineSource } from '../../lib/api';
+
+const OPTION_LIST_META: Array<{ key: FrontlineOptionKey; title: string; description: string; placeholder: string }> = [
+  { key: 'product_division', title: 'Product divisions', description: 'Used for product division suggestions in the entry form.', placeholder: 'Add product division' },
+  { key: 'transaction_type', title: 'Service / transaction types', description: 'Used for service, status, and transaction suggestions.', placeholder: 'Add service or transaction type' },
+  { key: 'cso', title: 'CSO names', description: 'Used to identify the CSO handling the interaction.', placeholder: 'Add CSO name' },
+];
 
 export default function AdminFrontlinePage() {
   const [status, setStatus] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
@@ -17,7 +23,10 @@ export default function AdminFrontlinePage() {
   const [message, setMessage] = useState('');
   const [accessRequests, setAccessRequests] = useState<FrontlineAccessRequest[]>([]);
   const [approvalSettings, setApprovalSettings] = useState<Record<number, { scope: 'cso' | 'all'; csoName: string }>>({});
-  const [activeTab, setActiveTab] = useState<'source' | 'access'>('source');
+  const [activeTab, setActiveTab] = useState<'source' | 'options' | 'access'>('source');
+  const [optionLists, setOptionLists] = useState<FrontlineOptionLists>({ product_division: [], transaction_type: [], cso: [] });
+  const [newOptions, setNewOptions] = useState<Record<FrontlineOptionKey, string>>({ product_division: '', transaction_type: '', cso: '' });
+  const [editingOption, setEditingOption] = useState<{ key: FrontlineOptionKey; id: number; label: string } | null>(null);
   const [manualEmail, setManualEmail] = useState('');
   const [manualScope, setManualScope] = useState<'all' | 'cso'>('all');
   const [manualCsoName, setManualCsoName] = useState('');
@@ -25,9 +34,10 @@ export default function AdminFrontlinePage() {
   const messageStyle = messageTone(message);
 
   const load = async () => {
-    const [nextStatus, nextSource, nextRequests] = await Promise.all([api.admin.frontlineGoogleStatus(), api.admin.frontlineSource(), api.admin.getFrontlineAccessRequests()]);
+    const [nextStatus, nextSource, nextRequests, nextOptions] = await Promise.all([api.admin.frontlineGoogleStatus(), api.admin.frontlineSource(), api.admin.getFrontlineAccessRequests(), api.frontline.options()]);
     setStatus(nextStatus); setSource(nextSource);
     setAccessRequests(nextRequests);
+    setOptionLists(nextOptions);
     if (nextSource) { setSpreadsheetId(nextSource.spreadsheet_id); setSpreadsheetName(nextSource.spreadsheet_name); setSelectedSheets(nextSource.selected_sheets); setWriteSheetName(nextSource.write_sheet_name || ''); }
   };
 
@@ -67,6 +77,8 @@ export default function AdminFrontlinePage() {
   };
   const reviewRequest = async (id: number, decision: 'approved' | 'rejected') => { const setting = approvalSettings[id] || { scope: 'all' as const, csoName: '' }; setBusy(true); setMessage('Updating access request…'); try { await api.admin.updateFrontlineAccessRequest(id, decision, setting.scope, setting.csoName); setMessage(decision === 'approved' ? 'Frontline access updated.' : 'Frontline access removed.'); await load(); } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); } };
   const grantManualAccess = async () => { if (!manualEmail.trim() || (manualScope === 'cso' && !manualCsoName.trim())) return; setBusy(true); setMessage('Granting Frontline access…'); try { await api.admin.grantFrontlineAccess(manualEmail, manualScope, manualCsoName); setMessage('Frontline access granted.'); setManualEmail(''); setManualCsoName(''); setManualScope('all'); await load(); } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); } };
+  const addOption = async (key: FrontlineOptionKey) => { const label = newOptions[key].trim(); if (!label) return; setBusy(true); setMessage('Adding option…'); try { await api.frontline.addOption(key, label); setNewOptions((current) => ({ ...current, [key]: '' })); setMessage('Option added.'); await load(); } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); } };
+  const saveOption = async () => { if (!editingOption?.label.trim()) return; setBusy(true); setMessage('Updating option…'); try { await api.frontline.updateOption(editingOption.id, editingOption.label.trim()); setEditingOption(null); setMessage('Option updated.'); await load(); } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); } };
 
   return (
     <div className="space-y-8">
@@ -89,6 +101,7 @@ export default function AdminFrontlinePage() {
       <div className="border-b border-[#e5e5e7]">
         <div className="flex gap-5" role="tablist" aria-label="Frontline Monitor administration">
           <button type="button" role="tab" aria-selected={activeTab === 'source'} onClick={() => setActiveTab('source')} className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${activeTab === 'source' ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>Report source</button>
+          <button type="button" role="tab" aria-selected={activeTab === 'options'} onClick={() => setActiveTab('options')} className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${activeTab === 'options' ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>Entry lists</button>
           <button type="button" role="tab" aria-selected={activeTab === 'access'} onClick={() => setActiveTab('access')} className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${activeTab === 'access' ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>Access requests</button>
         </div>
       </div>
@@ -101,6 +114,18 @@ export default function AdminFrontlinePage() {
         <div className="mt-4 flex flex-col gap-2 sm:flex-row"><input value={spreadsheetId} onChange={(event) => setSpreadsheetId(event.target.value)} placeholder="Paste Google Sheet ID or URL" className="h-10 min-w-0 flex-1 rounded-lg border border-[#d2d2d7] bg-white px-3 text-[13px] text-[#1d1d1f]" /><button aria-label={loadingSheets ? 'Loading worksheets' : 'Load worksheets'} onClick={() => void chooseSpreadsheet(spreadsheetId)} disabled={busy || loadingSheets || !spreadsheetId.trim()} className="inline-flex h-10 min-w-[128px] shrink-0 items-center justify-center gap-2 rounded-lg border border-[#d2d2d7] px-4 text-[12px] font-medium text-[#3c3c43] disabled:opacity-40">{loadingSheets ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#3c3c43]/30 border-t-[#3c3c43]" aria-hidden="true" /> : 'Load worksheets'}</button></div>
         {sheets.length > 0 && <><div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{sheets.map((sheet) => <label key={sheet.title} className="flex items-center gap-2 rounded-lg border border-[#e5e5e7] px-3 py-2 text-[12px] text-[#3c3c43]"><input type="checkbox" checked={selectedSheets.includes(sheet.title)} onChange={(event) => { if (event.target.checked) { setSelectedSheets((current) => [...current, sheet.title]); if (writeSheetName === sheet.title) setWriteSheetName(''); } else setSelectedSheets((current) => current.filter((name) => name !== sheet.title)); }} />{sheet.title}</label>)}</div><div className="mt-5 max-w-md"><label className="block text-[11px] font-medium text-[#6e6e73]">Website entry destination<select value={writeSheetName} onChange={(event) => { const value = event.target.value; setWriteSheetName(value); setSelectedSheets((current) => current.filter((name) => name !== value)); }} className="mt-1.5 h-10 w-full rounded-lg border border-[#d2d2d7] bg-white px-3 text-[13px] text-[#1d1d1f]"><option value="">Select a separate worksheet</option>{sheets.filter((sheet) => !selectedSheets.includes(sheet.title)).map((sheet) => <option key={sheet.title} value={sheet.title}>{sheet.title}</option>)}</select></label><p className="mt-1.5 text-[11px] text-[#86868b]">This tab must have its own complete header row. Website entries append only to this tab.</p></div></>}
         <div className="mt-5 flex flex-wrap items-center gap-2"><button aria-label={saving ? 'Saving source' : 'Save source'} disabled={busy || sheets.length === 0 || !spreadsheetId || selectedSheets.length === 0 || !writeSheetName} onClick={() => void save()} className="inline-flex h-[34px] min-w-[98px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-40">{saving ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/35 border-t-white" aria-hidden="true" /> : 'Save source'}</button><button disabled={busy || !source || sheets.length === 0 || source.spreadsheet_id !== spreadsheetId} onClick={() => void sync()} className="shrink-0 rounded-full border border-[#d2d2d7] px-4 py-2 text-[12px] font-medium text-[#3c3c43] disabled:opacity-40">Refresh data</button><span className="text-[11px] text-[#86868b]">{formatPhilippineTime(source?.last_synced_at || null)}</span></div>
+      </section>}
+
+      {activeTab === 'options' && <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">
+        <h2 className="text-[15px] font-semibold text-[#1d1d1f]">Entry lists</h2>
+        <p className="mt-1 text-[12px] text-[#6e6e73]">Maintain the suggestions shown while entering Frontline records. Start typing to search; use the pencil icon to update an item.</p>
+        <div className="mt-5 grid gap-5 lg:grid-cols-3">
+          {OPTION_LIST_META.map((list) => <div key={list.key} className="rounded-xl border border-[#e5e5e7] p-4">
+            <h3 className="text-[13px] font-semibold text-[#1d1d1f]">{list.title}</h3><p className="mt-1 min-h-8 text-[11px] leading-4 text-[#6e6e73]">{list.description}</p>
+            <div className="mt-3 flex gap-2"><input value={newOptions[list.key]} onChange={(event) => setNewOptions((current) => ({ ...current, [list.key]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') void addOption(list.key); }} placeholder={list.placeholder} className="h-9 min-w-0 flex-1 rounded-lg border border-[#d2d2d7] px-3 text-[12px] text-[#3c3c43]" /><button type="button" onClick={() => void addOption(list.key)} disabled={busy || !newOptions[list.key].trim()} className="h-9 rounded-lg bg-[#1d1d1f] px-3 text-[11px] font-semibold text-white disabled:opacity-40">Add</button></div>
+            <div className="mt-4 space-y-1.5">{optionLists[list.key].map((option) => editingOption?.id === option.id ? <div key={option.id} className="flex gap-2"><input autoFocus value={editingOption.label} onChange={(event) => setEditingOption({ ...editingOption, label: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') void saveOption(); if (event.key === 'Escape') setEditingOption(null); }} className="h-8 min-w-0 flex-1 rounded-lg border border-[#d2d2d7] px-2 text-[12px]" /><button type="button" onClick={() => void saveOption()} disabled={busy || !editingOption.label.trim()} className="rounded-lg bg-[#1d1d1f] px-2 text-[11px] font-semibold text-white">Save</button><button type="button" onClick={() => setEditingOption(null)} className="rounded-lg border border-[#d2d2d7] px-2 text-[11px] text-[#3c3c43]">Cancel</button></div> : <div key={option.id} className="flex items-center gap-2 rounded-lg bg-[#fafafa] px-2.5 py-2"><span className="min-w-0 flex-1 text-[12px] text-[#3c3c43]">{option.label}</span><button type="button" aria-label={`Edit ${option.label}`} onClick={() => setEditingOption({ key: list.key, id: option.id, label: option.label })} className="rounded-md p-1 text-[#6e6e73] hover:bg-white hover:text-[#1d1d1f]"><PencilIcon /></button></div>)}</div>
+          </div>)}
+        </div>
       </section>}
 
       {activeTab === 'access' && <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">
@@ -135,6 +160,8 @@ export default function AdminFrontlinePage() {
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 
 function Spinner() { return <span className="h-3 w-3 animate-spin rounded-full border-2 border-current/30 border-t-current" aria-hidden="true" />; }
+
+function PencilIcon() { return <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m11.8 2.2 2 2-7.7 7.7-2.7.7.7-2.7 7.7-7.7Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /><path d="m9.9 4.1 2 2" stroke="currentColor" strokeWidth="1.2" /></svg>; }
 
 function messageTone(value: string) {
   if (/invalid|expired|failed|error|unable|required/i.test(value)) return 'error';

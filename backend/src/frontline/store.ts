@@ -10,6 +10,24 @@ const APPLE_DEVICE_MODELS = [
   'Apple Watch Series 11', 'Apple Watch SE 3', 'Apple Watch Ultra 3', 'Apple Watch SE 2', 'Apple Watch Series 10', 'Apple Watch Ultra 2', 'Apple Watch Series 9', 'Apple Watch Ultra', 'Apple Watch Series 8', 'Apple Watch Series 7', 'Apple Watch Series 6', 'Apple Watch SE', 'Apple Watch Series 5', 'Apple Watch Series 4', 'Apple Watch Series 3', 'Apple Watch Series 2', 'Apple Watch Series 1',
 ];
 
+export const FRONTLINE_OPTION_KEYS = ['product_division', 'transaction_type', 'cso'] as const;
+export type FrontlineOptionKey = typeof FRONTLINE_OPTION_KEYS[number];
+
+export const FRONTLINE_DEFAULT_OPTIONS: Record<FrontlineOptionKey, string[]> = {
+  product_division: [
+    'DESKTOP', 'PORTABLE', 'MAC ACCS', 'SHUFFLE', 'IPHONE', 'IPAD', 'IPOD', 'IPHONE ACCS', 'IPAD ACCS', 'IPOD ACCS',
+    'BEATS', 'WATCH', 'WATCH ACCS', 'APPLE ID', 'ITUNES', 'ICLOUD', 'BACKUP', 'IMESSAGE',
+  ],
+  transaction_type: [
+    'RECEIVED (APPOINTMENT)', 'RECEIVED (WALK-IN)', 'RELEASED: SAF L1 (APPOINTMENT)', 'RELEASED: SAF L1 (WALK-IN)',
+    'RELEASED: REPLACED', 'RELEASED: REPAIRED', 'RELEASED: NRS', 'RELEASED: NTF', 'RELEASED: PULL OUT', 'RELEASED: IFS',
+    'PAYMENT CONCERNS', 'STATUS UPDATE', 'SERVICE INQUIRY (APPOINTMENT)', 'SERVICE INQUIRY (WALK-IN)',
+    'TECHNICAL ASSISTANCE (APPOINTMENT)', 'TECHNICAL ASSISTANCE (WALK-IN)', 'JOB ORDER (APPOINTMENT)',
+    'JOB ORDER (WALK-IN)', 'COMPLAINT', 'RE-DIAGNOSIS',
+  ],
+  cso: ['Albert Santos', 'Bernard Dugay', 'John Ray Ablaza', 'Learn Amper', 'Pat San Andres', 'Pia Silvano'],
+};
+
 async function initializeFrontlineTables(): Promise<void> {
   const pool = getDbPool();
   await pool.query(`CREATE TABLE IF NOT EXISTS frontline_google_connections (
@@ -149,6 +167,27 @@ async function initializeFrontlineTables(): Promise<void> {
     PRIMARY KEY (id), UNIQUE KEY frontline_device_model_name_unique (model_name)
   )`);
   await pool.query(`INSERT IGNORE INTO frontline_device_models (model_name) VALUES ${APPLE_DEVICE_MODELS.map(() => '(?)').join(',')}`, APPLE_DEVICE_MODELS);
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_option_lists (
+    id int AUTO_INCREMENT NOT NULL,
+    list_key varchar(40) NOT NULL,
+    label varchar(255) NOT NULL,
+    sort_order int NOT NULL DEFAULT 0,
+    active tinyint NOT NULL DEFAULT 1,
+    created_by int NULL,
+    updated_by int NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY frontline_option_list_unique (list_key, label),
+    KEY frontline_option_list_lookup_idx (list_key, active, sort_order),
+    CONSTRAINT frontline_option_list_creator_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT frontline_option_list_updater_fk FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+  )`);
+  for (const key of FRONTLINE_OPTION_KEYS) {
+    const values = FRONTLINE_DEFAULT_OPTIONS[key];
+    if (values.length) {
+      await pool.query(`INSERT IGNORE INTO frontline_option_lists (list_key, label, sort_order) VALUES ${values.map(() => '(?, ?, ?)').join(',')}`, values.flatMap((label, index) => [key, label, index]));
+    }
+  }
   await pool.query(`CREATE TABLE IF NOT EXISTS engineer_endorsements (
     id bigint AUTO_INCREMENT NOT NULL,
     ar_number varchar(100) NOT NULL,

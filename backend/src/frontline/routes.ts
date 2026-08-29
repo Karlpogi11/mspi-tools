@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { getDb, getDbPool } from '../db/index.js';
 import { authenticateToken, requireAdmin } from '../auth.js';
 import { writeAuditLog } from '../db/audit.js';
-import { ensureFrontlineTables } from './store.js';
+import { ensureFrontlineTables, FRONTLINE_OPTION_KEYS, type FrontlineOptionKey } from './store.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -225,6 +225,85 @@ router.post('/access-request', async (req, res) => {
 });
 
 router.use(requireFrontlineAccess);
+
+function isFrontlineOptionKey(value: string): value is FrontlineOptionKey {
+  return (FRONTLINE_OPTION_KEYS as readonly string[]).includes(value);
+}
+
+router.get('/options', async (_req, res) => {
+  await ensureFrontlineTables();
+  const [rows] = await getDbPool().query('SELECT id, list_key, label, sort_order FROM frontline_option_lists WHERE active = 1 ORDER BY list_key, sort_order, label');
+  const options: Record<FrontlineOptionKey, Array<{ id: number; label: string; sort_order: number }>> = {
+    product_division: [],
+    transaction_type: [],
+    cso: [],
+  };
+  for (const row of rows as Array<{ id: number; list_key: string; label: string; sort_order: number }>) {
+    if (isFrontlineOptionKey(row.list_key)) options[row.list_key].push({ id: row.id, label: row.label, sort_order: row.sort_order });
+  }
+  res.json(options);
+});
+
+router.post('/options', requireAdmin, async (req, res) => {
+  const listKey = text(req.body?.listKey);
+  const label = text(req.body?.label);
+  if (!isFrontlineOptionKey(listKey)) { res.status(400).json({ error: 'A valid option list is required.' }); return; }
+  if (!label || label.length > 255) { res.status(400).json({ error: 'Option text is required and must be 255 characters or fewer.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool();
+  try {
+    const [sortRows] = await pool.query('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM frontline_option_lists WHERE list_key = ?', [listKey]);
+    const sortOrder = Number((sortRows as Array<{ next_order: number }>)[0]?.next_order || 0);
+    const [result] = await pool.execute('INSERT INTO frontline_option_lists (list_key, label, sort_order, created_by, updated_by) VALUES (?, ?, ?, ?, ?)', [listKey, label, sortOrder, req.user!.userId, req.user!.userId]);
+    const id = Number((result as { insertId?: number }).insertId);
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'frontline.option_added', resourceType: 'frontline_option_list', resourceId: String(id), metadata: { listKey, label } });
+    res.status(201).json({ id, list_key: listKey, label, sort_order: sortOrder });
+  } catch (error) {
+    if (String((error as Error).message).toLowerCase().includes('duplicate')) { res.status(409).json({ error: 'That option already exists in this list.' }); return; }
+    throw error;
+  }
+});
+
+router.get('/entry-check', async (req, res) => {
+  const ar = text(req.query.ar);
+  const serial = text(req.query.serial);
+  const transactionType = text(req.query.transactionType);
+  const occurredDate = text(req.query.date);
+  const issue = text(req.query.issue);
+  if ((!ar && !serial) || !transactionType || !occurredDate) { res.status(400).json({ error: 'AR or Serial Number, transaction type, and date are required.' }); return; }
+  await ensureFrontlineTables();
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  const identifiers: string[] = []; const args: string[] = [];
+  if (ar && serial) { identifiers.push('(LOWER(TRIM(fr.ar_number)) = LOWER(TRIM(?)) AND LOWER(TRIM(fr.serial_number)) = LOWER(TRIM(?)))'); args.push(ar, serial); }
+  else if (ar) { identifiers.push('LOWER(TRIM(fr.ar_number)) = LOWER(TRIM(?))'); args.push(ar); }
+  else { identifiers.push('LOWER(TRIM(fr.serial_number)) = LOWER(TRIM(?))'); args.push(serial); }
+  const where = [`${identifiers[0]}`, 'fr.transaction_type = ?', 'fr.occurred_date = ?', 'LOWER(TRIM(fr.issue)) = LOWER(TRIM(?))']; args.push(transactionType, occurredDate, issue);
+  if (access?.scope === 'cso' && access.cso) { where.push('fr.cso = ?'); args.push(access.cso); }
+  const [rows] = await getDbPool().query(`SELECT fr.id, fr.ar_number, fr.serial_number, fr.transaction_type, fr.occurred_date FROM frontline_records fr WHERE ${where.join(' AND ')} ORDER BY fr.id DESC LIMIT 5`, args);
+  res.json({ duplicate: (rows as unknown[]).length > 0, matches: rows });
+});
+
+router.get('/serial-history', async (req, res) => {
+  const serial = text(req.query.serial);
+  if (!serial) { res.status(400).json({ error: 'Serial Number is required.' }); return; }
+  await ensureFrontlineTables();
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  const args: string[] = [serial];
+  const where = ['LOWER(TRIM(fr.serial_number)) = LOWER(TRIM(?))'];
+  if (access?.scope === 'cso' && access.cso) { where.push('fr.cso = ?'); args.push(access.cso); }
+  const [rows] = await getDbPool().query(`SELECT fr.id, fr.source_sheet, fr.occurred_date, fr.ar_number, fr.serial_number, fr.device_model, fr.product_division, fr.cso, fr.transaction_type, fr.issue FROM frontline_records fr WHERE ${where.join(' AND ')} ORDER BY fr.occurred_date DESC, fr.id DESC LIMIT 20`, args);
+  res.json(rows);
+});
+
+router.patch('/options/:id', requireAdmin, async (req, res) => {
+  const label = text(req.body?.label);
+  if (!label || label.length > 255) { res.status(400).json({ error: 'Option text is required and must be 255 characters or fewer.' }); return; }
+  await ensureFrontlineTables();
+  const [result] = await getDbPool().execute('UPDATE frontline_option_lists SET label = ?, updated_by = ? WHERE id = ? AND active = 1', [label, req.user!.userId, Number(req.params.id)]);
+  if ((result as { affectedRows: number }).affectedRows === 0) { res.status(404).json({ error: 'Option not found.' }); return; }
+  void writeAuditLog({ actorUserId: req.user!.userId, action: 'frontline.option_updated', resourceType: 'frontline_option_list', resourceId: req.params.id, metadata: { label } });
+  res.json({ message: 'Option updated.', id: Number(req.params.id), label });
+});
 
 async function approvedSheet(sheetName: string) {
   const [rows] = await getDbPool().query('SELECT id, spreadsheet_id, write_sheet_name, updated_by FROM frontline_sources ORDER BY id DESC LIMIT 1');

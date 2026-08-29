@@ -331,6 +331,10 @@ export interface FrontlineReport {
   records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; device_model: string; cso: string; issue: string; endorsement_status?: string | null; endorsed_engineer_name?: string | null; endorsed_at?: string | null }>;
 }
 export interface FrontlineStatus { connected: boolean; sourceName: string | null; lastSyncedAt: string | null; syncStatus: string; syncError: string | null }
+export interface FrontlineSerialHistory { id: number; source_sheet: string; occurred_date: string | null; ar_number: string; serial_number: string; device_model: string; product_division: string; cso: string; transaction_type: string; issue: string }
+export type FrontlineOptionKey = 'product_division' | 'transaction_type' | 'cso';
+export interface FrontlineOption { id: number; label: string; sort_order: number }
+export type FrontlineOptionLists = Record<FrontlineOptionKey, FrontlineOption[]>;
 export interface FrontlineAccessRequest { id: number; user_id: number; email?: string; full_name?: string; reason: string; status: 'pending' | 'approved' | 'rejected'; created_at: string; reviewed_at: string | null; access_scope?: 'all' | 'cso' | null; cso_name?: string | null }
 export interface EndorsementEngineer { id: number; user_id: number | null; full_name: string; email?: string; assignment_count: number; status?: 'active' | 'left'; joined_at?: string; last_assigned_at?: string | null }
 export interface EngineerDashboard { date: string; availability: { user_id: number; status: 'active' | 'left'; joined_at: string; left_at: string | null; assignment_count: number } | null; totals: { total: number; pending: number }; divisions: Array<{ product_division: string; total: number }>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; created_at: string; engineer_name: string }> }
@@ -432,6 +436,11 @@ export const api = {
     access: () => request<{ allowed: boolean; scope: 'all' | 'cso' | null; cso: string | null; request: FrontlineAccessRequest | null }>('/frontline/access'),
     requestAccess: (reason: string) => request<{ message: string }>('/frontline/access-request', { method: 'POST', body: JSON.stringify({ reason }) }),
     status: () => request<FrontlineStatus>('/frontline/status'),
+    options: () => request<FrontlineOptionLists>('/frontline/options'),
+    addOption: (listKey: FrontlineOptionKey, label: string) => request<FrontlineOption>('/frontline/options', { method: 'POST', body: JSON.stringify({ listKey, label }) }),
+    updateOption: (id: number, label: string) => request<{ message: string; id: number; label: string }>(`/frontline/options/${id}`, { method: 'PATCH', body: JSON.stringify({ label }) }),
+    checkEntry: (payload: { ar: string; serial: string; transactionType: string; date: string; issue: string }) => request<{ duplicate: boolean; matches: Array<{ id: number; ar_number: string; serial_number: string; transaction_type: string; occurred_date: string }> }>(`/frontline/entry-check?${new URLSearchParams(payload).toString()}`),
+    serialHistory: (serial: string) => request<FrontlineSerialHistory[]>(`/frontline/serial-history?serial=${encodeURIComponent(serial)}`),
     deviceModels: () => request<string[]>('/frontline/device-models'),
     report: (params: { start?: string; end?: string; ar?: string; cso?: string[]; type?: string[]; division?: string[] } = {}) => {
       const queryParams = new URLSearchParams();
