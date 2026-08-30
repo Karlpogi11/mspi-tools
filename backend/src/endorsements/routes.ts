@@ -132,17 +132,20 @@ router.get('/calendar', async (req, res) => {
 
 router.post('/', async (req, res) => {
   if (!canEndorse(req)) { forbidden(res); return; }
-  const arNumber = text(req.body?.arNumber); const deviceModelOverride = text(req.body?.deviceModel); const recordId = Number(req.body?.frontlineRecordId) || null;
+  const arNumber = text(req.body?.arNumber); const deviceModelOverride = text(req.body?.deviceModel); const recordId = Number(req.body?.frontlineRecordId) || null; const sourceSheet = text(req.body?.sourceSheet); const sourceRow = Number(req.body?.sourceRow) || null; const serialNumber = text(req.body?.serialNumber);
   if (!arNumber || arNumber.toUpperCase() === 'N/A') { res.status(400).json({ error: 'Enter the actual AR number before endorsing this record.' }); return; }
   await ensureFrontlineTables();
   const pool = getDbPool(); const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [recordRows] = await connection.query(`SELECT id, ar_number, device_model, serial_number, issue, product_division FROM frontline_records WHERE ${recordId ? 'id = ?' : 'ar_number = ?'} ORDER BY id DESC LIMIT 1`, [recordId || arNumber]);
+    const recordLookup = recordId
+      ? { clause: 'id = ? OR (source_sheet = ? AND source_row = ?) OR (serial_number = ? AND serial_number <> \'\')', args: [recordId, sourceSheet, sourceRow, serialNumber] }
+      : { clause: 'ar_number = ?', args: [arNumber] };
+    const [recordRows] = await connection.query(`SELECT id, ar_number, device_model, serial_number, issue, product_division FROM frontline_records WHERE ${recordLookup.clause} ORDER BY id = ? DESC, id DESC LIMIT 1`, [...recordLookup.args, recordId || 0]);
     const record = (recordRows as Array<Record<string, unknown>>)[0];
     if (!record) { await connection.rollback(); res.status(404).json({ error: 'Frontline record not found for this AR number.' }); return; }
     const duplicateClause = recordId || arNumber.toUpperCase() === 'N/A' ? 'e.frontline_record_id = ?' : 'e.ar_number = ?';
-    const [existingRows] = await connection.query(`SELECT e.id, e.ar_number, e.status, COALESCE(u.full_name, e.engineer_name) AS engineer_name FROM engineer_endorsements e LEFT JOIN users u ON u.id = e.engineer_user_id WHERE ${duplicateClause} FOR UPDATE`, [recordId || Number(record.id)]);
+    const [existingRows] = await connection.query(`SELECT e.id, e.ar_number, e.status, COALESCE(u.full_name, e.engineer_name) AS engineer_name FROM engineer_endorsements e LEFT JOIN users u ON u.id = e.engineer_user_id WHERE ${duplicateClause} FOR UPDATE`, [recordId ? Number(record.id) : arNumber]);
     if ((existingRows as Array<Record<string, unknown>>).length) { await connection.rollback(); res.status(409).json({ error: `AR ${arNumber} has already been endorsed to ${(existingRows as Array<Record<string, unknown>>)[0].engineer_name}.` }); return; }
     const [engineerRows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.assignment_count FROM engineer_daily_availability a WHERE a.availability_date = ? AND a.status = 'active' ORDER BY a.last_assigned_at IS NOT NULL ASC, a.last_assigned_at ASC, a.assignment_count ASC, a.joined_at ASC, a.id ASC FOR UPDATE`, [todayManila()]);
     const engineer = (engineerRows as Array<Record<string, unknown>>)[0];

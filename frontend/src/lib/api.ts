@@ -472,7 +472,7 @@ export const api = {
     addEngineer: (name: string) => request<{ message: string }>('/endorsements/availability/add', { method: 'POST', body: JSON.stringify({ name }) }),
     removeEngineer: (id: number) => request<{ message: string }>('/endorsements/availability/remove', { method: 'POST', body: JSON.stringify({ id }) }),
     available: () => request<{ date: string; engineers: EndorsementEngineer[]; roster: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null }>('/endorsements/available'),
-    create: (payload: { arNumber: string; frontlineRecordId: number; deviceModel?: string }) => request<{ message: string; endorsementId: number; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
+    create: (payload: { arNumber: string; frontlineRecordId: number; sourceSheet?: string; sourceRow?: number; serialNumber?: string; deviceModel?: string }) => request<{ message: string; endorsementId: number; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
     updateDeviceModel: (id: number, deviceModel: string) => request<{ message: string; deviceModel: string }>(`/endorsements/${id}`, { method: 'PATCH', body: JSON.stringify({ deviceModel }) }),
     dashboard: (engineerUserId?: number) => request<EngineerDashboard>(`/endorsements/dashboard${engineerUserId ? `?engineerUserId=${engineerUserId}` : ''}`),
     calendar: (month: string) => request<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
