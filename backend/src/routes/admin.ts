@@ -91,19 +91,28 @@ router.get('/users', async (_req: Request, res: Response) => {
 
 router.patch('/users/:id/role', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const { roleId } = req.body;
+    const id = Number(req.params.id);
+    const roleId = Number(req.body?.roleId);
 
-    if (roleId === undefined || roleId === null) {
+    if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(roleId) || roleId <= 0) {
       res.status(400).json({ error: 'roleId is required' });
       return;
     }
 
     const db = getDb();
-    await db.update(users).set({ role_id: roleId }).where(eq(users.id, Number(id)));
-    void writeAuditLog({ actorUserId: req.user!.userId, action: 'admin.user_role_changed', resourceType: 'user', resourceId: id, metadata: { roleId } });
+    const role = await db.select({ id: roles.id, name: roles.name }).from(roles).where(eq(roles.id, roleId)).limit(1);
+    if (!role.length) {
+      res.status(404).json({ error: 'Role not found' });
+      return;
+    }
+    const result = await db.update(users).set({ role_id: roleId }).where(eq(users.id, id));
+    if (!result) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'admin.user_role_changed', resourceType: 'user', resourceId: String(id), metadata: { roleId, roleName: role[0].name } });
 
-    res.json({ message: 'Role updated' });
+    res.json({ message: 'Role updated', userId: id, roleId, roleName: role[0].name });
   } catch (error) {
     console.error('admin update role error:', error);
     res.status(500).json({ error: 'Internal server error' });

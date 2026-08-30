@@ -80,12 +80,16 @@ async function initializeFrontlineTables(): Promise<void> {
     error_message varchar(500) NULL,
     created_by int NOT NULL,
     written_at timestamp NULL,
+    dedupe_fingerprint varchar(64) NULL,
     created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY frontline_sheet_writes_status_idx (status),
+    UNIQUE KEY frontline_sheet_writes_dedupe_unique (dedupe_fingerprint),
     CONSTRAINT frontline_sheet_writes_source_fk FOREIGN KEY (source_id) REFERENCES frontline_sources(id) ON DELETE RESTRICT,
     CONSTRAINT frontline_sheet_writes_user_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT
   )`);
+  try { await pool.query("ALTER TABLE frontline_sheet_writes ADD COLUMN dedupe_fingerprint varchar(64) NULL AFTER written_at"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
+  try { await pool.query("ALTER TABLE frontline_sheet_writes ADD UNIQUE KEY frontline_sheet_writes_dedupe_unique (dedupe_fingerprint)"); } catch (error) { if (!String((error as Error).message).includes('Duplicate key name')) throw error; }
   await pool.query(`CREATE TABLE IF NOT EXISTS frontline_records (
     id bigint AUTO_INCREMENT NOT NULL,
     source_id int NOT NULL,

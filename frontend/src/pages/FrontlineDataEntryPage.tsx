@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, type FrontlineOptionLists, type FrontlineReport, type FrontlineSerialHistory } from '../lib/api';
 
 type FieldKind = 'date' | 'startTime' | 'endTime' | 'aht' | 'transaction' | 'division' | 'cso' | 'ar' | 'serial' | 'device' | 'notes' | 'other';
+type LookupRecord = { ar_number: string; serial_number: string; product_division: string; device_model: string; cso: string; issue: string; transaction_type: string };
 
 const EMPTY_OPTIONS: FrontlineOptionLists = { product_division: [], transaction_type: [], cso: [] };
 
@@ -16,6 +17,7 @@ export default function FrontlineDataEntryPage() {
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [toast, setToast] = useState('');
   const [dirty, setDirty] = useState(false);
   const [schemaChanged, setSchemaChanged] = useState(false);
   const [autoFillMessage, setAutoFillMessage] = useState('');
@@ -57,6 +59,12 @@ export default function FrontlineDataEntryPage() {
     return () => { disposed = true; window.clearInterval(interval); };
   }, [headers, sheet]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(''), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
   const startIndex = headers.findIndex((header) => fieldKind(header) === 'startTime');
   const endIndex = headers.findIndex((header) => fieldKind(header) === 'endTime');
   const ahtIndex = headers.findIndex((header) => fieldKind(header) === 'aht');
@@ -95,23 +103,22 @@ export default function FrontlineDataEntryPage() {
     const serial = serialOverride?.trim() || values[serialIndex]?.trim() || '';
     if (!serial) { setSerialHistory([]); return; }
     setLoadingSerialHistory(true);
-    try { setSerialHistory(await api.frontline.serialHistory(serial)); }
+    try { const history = await api.frontline.serialHistory(serial); setSerialHistory(history); return history; }
     catch { setSerialHistory([]); }
     finally { setLoadingSerialHistory(false); }
   };
 
-  const lookupArRecords = async () => {
+  const lookupArRecords = async (arOverride?: string, serialOverride?: string) => {
     const transactionType = values[transactionIndex]?.trim() || '';
-    const ar = values[arIndex]?.trim() || '';
-    const serial = values[serialIndex]?.trim() || '';
+    const ar = arOverride?.trim() || values[arIndex]?.trim() || '';
+    const serial = serialOverride?.trim() || values[serialIndex]?.trim() || '';
     if (!ar) { setArMismatchMessage(''); return [] as FrontlineReport['records']; }
     const lookupKey = `${transactionType.toLowerCase()}|${ar.toLowerCase()}|${serial.toLowerCase()}`;
     if (lastArLookupKey.current === lookupKey) return [] as FrontlineReport['records'];
     lastArLookupKey.current = lookupKey;
     setCheckingEntry(true);
     try {
-      const result = await api.frontline.report({ ar });
-      const records = result.records.filter((item) => item.ar_number.trim().toLowerCase() === ar.toLowerCase());
+      const records = await api.frontline.lookup({ ar });
       if (!records.length || !serial || records.some((record) => record.serial_number.trim().toLowerCase() === serial.toLowerCase())) setArMismatchMessage('');
       else {
         const knownSerials = [...new Set(records.map((record) => record.serial_number.trim()).filter(Boolean))];
@@ -122,11 +129,43 @@ export default function FrontlineDataEntryPage() {
     finally { setCheckingEntry(false); }
   };
 
-  const maybeAutofill = async () => {
+  const fillFromRecord = (record: LookupRecord, source: 'AR' | 'Serial') => {
+    const fillable = source === 'Serial'
+      ? [[arIndex, record.ar_number, 'AR Number'], [divisionIndex, record.product_division, 'Product Division'], [deviceIndex, record.device_model, 'Device Model'], [csoIndex, record.cso, 'CSO'], [notesIndex, record.issue, 'Issue / Remarks']]
+      : [[serialIndex, record.serial_number, 'Serial Number'], [divisionIndex, record.product_division, 'Product Division'], [deviceIndex, record.device_model, 'Device Model'], [csoIndex, record.cso, 'CSO'], [notesIndex, record.issue, 'Issue / Remarks']];
+    const fields = fillable as Array<[number, string, string]>;
+    const filled: string[] = [];
+    const filledIndices: number[] = [];
+    setValues((current) => {
+      const next = [...current];
+      for (const [index, value, label] of fields) if (index >= 0 && !next[index]?.trim() && value?.trim()) { next[index] = value; filled.push(label); filledIndices.push(index); }
+      return next;
+    });
+    if (filledIndices.length) { setDirty(true); setAutoFilledFields((current) => new Set([...current, ...filledIndices])); setArRecordFields((current) => new Set([...current, ...filledIndices])); setAutoFillTransactionType(record.transaction_type?.trim().toLowerCase() || ''); setAutoFillMessage(`${source} record found. Filled: ${filled.join(', ')}.`); }
+    else setAutoFillMessage(`${source} record found. Existing values were kept.`);
+  };
+
+  const maybeAutofill = async (arOverride?: string, serialOverride?: string) => {
     const transactionType = values[transactionIndex]?.trim() || '';
-    const ar = values[arIndex]?.trim() || '';
-    if (!ar) return;
-    const records = await lookupArRecords();
+    const ar = arOverride?.trim() || values[arIndex]?.trim() || '';
+    const serial = serialOverride?.trim() || values[serialIndex]?.trim() || '';
+    if (!ar && !serial) return;
+    if (!ar) {
+      const lookupKey = `serial|${serial.toLowerCase()}`;
+      if (lastAutofillKey.current === lookupKey) return;
+      lastAutofillKey.current = lookupKey;
+      setCheckingEntry(true);
+      try {
+        const history = await loadSerialHistory(serial);
+        const record = history?.[0];
+        if (!record) { setAutoFillMessage('No matching serial record was found.'); return; }
+        setArMismatchMessage('');
+        fillFromRecord(record, 'Serial');
+      } catch { setAutoFillMessage('Previous serial details could not be loaded. You can continue manually.'); }
+      finally { setCheckingEntry(false); }
+      return;
+    }
+    const records = await lookupArRecords(ar, serial);
     const lookupKey = `${transactionType.toLowerCase()}|${ar.toLowerCase()}`;
     if (lastAutofillKey.current === lookupKey) return;
     lastAutofillKey.current = lookupKey;
@@ -135,16 +174,7 @@ export default function FrontlineDataEntryPage() {
       const record = records.find((item) => item.ar_number.trim().toLowerCase() === ar.toLowerCase());
       if (!record) { setArRecordFields(new Set()); return; }
       if (record.serial_number?.trim()) void loadSerialHistory(record.serial_number);
-      const fillable = [[serialIndex, record.serial_number, 'Serial Number'], [divisionIndex, record.product_division, 'Product Division'], [deviceIndex, record.device_model, 'Device Model'], [csoIndex, record.cso, 'CSO'], [notesIndex, record.issue, 'Issue / Remarks']] as Array<[number, string, string]>;
-      const filled: string[] = [];
-      const filledIndices: number[] = [];
-      setValues((current) => {
-        const next = [...current];
-        for (const [index, value, label] of fillable) if (index >= 0 && !next[index]?.trim() && value?.trim()) { next[index] = value; filled.push(label); filledIndices.push(index); }
-        return next;
-      });
-      if (filledIndices.length) { setDirty(true); setAutoFilledFields((current) => new Set([...current, ...filledIndices])); setArRecordFields((current) => new Set([...current, ...filledIndices])); setAutoFillTransactionType(record.transaction_type?.trim().toLowerCase() || ''); setAutoFillMessage(`AR record found. Filled: ${filled.join(', ')}.`); }
-      else setAutoFillMessage('AR record found. Existing values were kept.');
+      fillFromRecord(record, 'AR');
     } catch { setAutoFillMessage('Previous AR details could not be loaded. You can continue manually.'); }
   };
 
@@ -167,7 +197,7 @@ export default function FrontlineDataEntryPage() {
         if (check.duplicate) { setMessage('This exact AR, Serial Number, transaction type, date, and issue already has a record. A returning client with a new AR or a different issue is allowed.'); setSaving(false); return; }
       }
       const result = await api.frontline.writeEntry({ sheet, headers, values: entryValues });
-      setMessage(result.message); setValues(initialValues(headers)); setDirty(false); setSerialHistory([]); setAutoFillMessage(''); setArMismatchMessage(''); setAutoFilledFields(new Set()); setArRecordFields(new Set()); setAutoFillTransactionType(''); lastAutofillKey.current = ''; lastArLookupKey.current = '';
+      setMessage(''); setToast(result.message); setValues(initialValues(headers)); setDirty(false); setSerialHistory([]); setAutoFillMessage(''); setArMismatchMessage(''); setAutoFilledFields(new Set()); setArRecordFields(new Set()); setAutoFillTransactionType(''); lastAutofillKey.current = ''; lastArLookupKey.current = '';
     } catch (error) { const errorMessage = (error as Error).message; if (errorMessage.includes('Worksheet columns changed')) setSchemaChanged(true); setMessage(errorMessage.includes('Worksheet columns changed') ? `${errorMessage} Your entered values are still here. Copy them if needed, reload the form, then enter the record again.` : errorMessage); }
     finally { setSaving(false); }
   };
@@ -190,29 +220,30 @@ export default function FrontlineDataEntryPage() {
           {schemaChanged && <div role="alert" className="mt-4 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-4 py-3 text-[12px] leading-5 text-[#92400e]"><span className="font-semibold">Worksheet columns changed.</span> Do not submit this entry yet. Your current values are preserved; reload the form before continuing.</div>}
           {autoFillMessage && <p role="status" className="mt-4 text-[12px] text-[#3c3c43]">{checkingEntry ? 'Looking up the previous record…' : autoFillMessage}</p>}
           {loadingSchema ? <p className="py-12 text-[13px] text-[#6e6e73]">Reading worksheet columns…</p> : headers.length ? <>
-            {groups.map((group) => <section key={group.title} className="border-b border-[#f0f0f0] py-6 last:border-b-0"><div className="mb-4"><h2 className="text-[15px] font-semibold text-[#1d1d1f]">{group.title}</h2></div><div className="grid grid-cols-1 gap-x-10 gap-y-6 md:grid-cols-2">{group.fields.map(({ header, index, kind }) => <SmartField key={`${header}-${index}`} header={header} kind={kind} value={values[index] || ''} options={kind === 'division' ? options.product_division.map((option) => option.label) : kind === 'transaction' ? options.transaction_type.map((option) => option.label) : kind === 'cso' ? options.cso.map((option) => option.label) : kind === 'device' ? deviceModels : []} onChange={(value) => { handleFieldChange(index, kind, value); if (kind === 'serial' || kind === 'ar') { setSerialHistory([]); setArMismatchMessage(''); lastArLookupKey.current = ''; } }} onBlur={kind === 'ar' || kind === 'transaction' || kind === 'serial' ? () => { if (kind === 'serial') void loadSerialHistory(); void maybeAutofill(); } : undefined} extra={kind === 'serial' ? <><SerialHistory history={serialHistory} loading={loadingSerialHistory} />{arMismatchMessage && <p role="alert" className="mt-2 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] leading-5 text-[#92400e]">{arMismatchMessage}</p>}</> : undefined} onStop={kind === 'endTime' ? stop : undefined} readOnly={kind === 'aht' || (autoFilledFields.has(index) && (!autoFillTransactionType || !values[transactionIndex]?.trim() || values[transactionIndex].trim().toLowerCase() === autoFillTransactionType))} />)}</div></section>)}
+            {groups.map((group) => <section key={group.title} className="border-b border-[#f0f0f0] py-6 last:border-b-0"><div className="mb-4"><h2 className="text-[15px] font-semibold text-[#1d1d1f]">{group.title}</h2></div><div className="grid grid-cols-1 gap-x-10 gap-y-6 md:grid-cols-2">{group.fields.map(({ header, index, kind }) => <SmartField key={`${header}-${index}`} header={header} kind={kind} value={values[index] || ''} options={kind === 'division' ? options.product_division.map((option) => option.label) : kind === 'transaction' ? options.transaction_type.map((option) => option.label) : kind === 'cso' ? options.cso.map((option) => option.label) : kind === 'device' ? deviceModels : []} onChange={(value) => { handleFieldChange(index, kind, value); if (kind === 'serial' || kind === 'ar') { setSerialHistory([]); setArMismatchMessage(''); lastArLookupKey.current = ''; } }} onBlur={(fieldValue) => { if (kind === 'serial') void loadSerialHistory(fieldValue); void maybeAutofill(kind === 'ar' ? fieldValue : undefined, kind === 'serial' ? fieldValue : undefined); }} extra={kind === 'serial' ? <><SerialHistory history={serialHistory} loading={loadingSerialHistory} />{arMismatchMessage && <p role="alert" className="mt-2 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] leading-5 text-[#92400e]">{arMismatchMessage}</p>}</> : undefined} onStop={kind === 'endTime' ? stop : undefined} readOnly={kind === 'aht' || (autoFilledFields.has(index) && (!autoFillTransactionType || !values[transactionIndex]?.trim() || values[transactionIndex].trim().toLowerCase() === autoFillTransactionType))} />)}</div></section>)}
             <div className="flex justify-end gap-3 border-t border-[#f0f0f0] pt-6"><button type="button" onClick={clearForm} disabled={saving || checkingEntry} className="h-9 rounded-lg border border-[#e8e8e8] bg-white px-5 text-[13px] text-[#3c3c43] hover:bg-[#fafafa] disabled:opacity-40">Clear</button><button type="submit" disabled={saving || checkingEntry || !canSubmit} className="h-9 rounded-lg bg-[#0071c8] px-5 text-[13px] font-medium text-white hover:bg-[#0067b9] disabled:cursor-not-allowed disabled:opacity-40">{checkingEntry ? 'Checking…' : saving ? 'Saving…' : 'Save record'}</button></div>
           </> : <p className="py-12 text-[13px] text-[#6e6e73]">{sheet ? 'The website-entry worksheet must contain a complete header row.' : 'Ask an Admin to configure a separate website-entry worksheet.'}</p>}
         </form>
       </section>
     </div>
+    {toast && <div role="status" aria-live="polite" className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-xl border border-[#d9eadf] bg-white px-4 py-3 text-[13px] text-[#245b36] shadow-lg shadow-black/10"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#e9f6ed] text-[12px]">✓</span><span className="flex-1">{toast}</span><button type="button" onClick={() => setToast('')} aria-label="Dismiss notification" className="rounded-md px-1 text-[16px] leading-none text-[#6e6e73] hover:bg-[#f5f5f7]">×</button></div>}
   </div>;
 }
 
-function SmartField({ header, kind, value, options, onChange, onBlur, extra, onStop, readOnly }: { header: string; kind: FieldKind; value: string; options: string[]; onChange: (value: string) => void; onBlur?: () => void; extra?: ReactNode; onStop?: () => void; readOnly?: boolean }) {
+function SmartField({ header, kind, value, options, onChange, onBlur, extra, onStop, readOnly }: { header: string; kind: FieldKind; value: string; options: string[]; onChange: (value: string) => void; onBlur?: (value?: string) => void; extra?: ReactNode; onStop?: () => void; readOnly?: boolean }) {
   const key = header.toLowerCase();
   const multiline = kind === 'notes' || /remark|comment|description|note|detail|inspire/.test(key);
   const isTime = kind === 'startTime' || kind === 'endTime' || (/time/.test(key) && !/date/.test(key));
   const required = !['endTime', 'aht', 'notes'].includes(kind);
   const type = /date/.test(key) && !isTime ? 'date' : isTime ? 'time' : /email/.test(key) ? 'email' : /phone|contact/.test(key) ? 'tel' : 'text';
-  const placeholder = kind === 'aht' ? 'Auto' : kind === 'ar' || kind === 'serial' ? 'Enter reference number' : kind === 'device' ? 'Search or type device model' : kind === 'notes' ? 'Enter details (optional)' : '';
+  const placeholder = kind === 'aht' ? 'Auto' : kind === 'serial' ? 'Enter Serial Number' : kind === 'ar' ? 'Enter reference number' : kind === 'device' ? 'Search or type device model' : kind === 'notes' ? 'Enter details (optional)' : '';
   const setCurrentTime = (event: KeyboardEvent<HTMLInputElement>) => { if (isTime && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key === ';') { event.preventDefault(); onChange(currentTime()); } };
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => { setCurrentTime(event); if (event.key === 'Enter' && !event.shiftKey && !multiline) { event.preventDefault(); focusNextField(event); } };
-  const input = multiline ? <textarea rows={4} value={value} placeholder={placeholder} aria-label={header} required={required} readOnly={readOnly} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} className={`mt-2 block w-full resize-y rounded-lg border border-[#e8e8e8] px-3 py-2 text-[13px] leading-5 text-[#1d1d1f] outline-none placeholder:text-[#a1a1a6] focus:border-[#0071c8] focus:ring-2 focus:ring-[#0071c8]/10 ${readOnly ? 'bg-[#f5f5f7] text-[#6e6e73]' : ''}`} /> : options.length ? <SmartListInput ariaLabel={header} value={value} options={options} placeholder={placeholder || 'Search or select'} required={required} readOnly={readOnly} onBlur={onBlur} onChange={onChange} /> : <input type={type} value={value} placeholder={placeholder} aria-label={header} required={required} readOnly={readOnly} autoComplete="off" enterKeyHint="next" onKeyDown={handleKeyDown} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} className={`mt-2 block h-9 w-full rounded-lg border border-[#e8e8e8] px-3 text-[13px] text-[#1d1d1f] outline-none placeholder:text-[#a1a1a6] focus:border-[#0071c8] focus:ring-2 focus:ring-[#0071c8]/10 ${readOnly ? 'bg-[#f5f5f7] text-[#6e6e73]' : ''}`} />;
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => { setCurrentTime(event); if (event.key === 'Enter' && !event.shiftKey && !multiline) { event.preventDefault(); onBlur?.(event.currentTarget.value); focusNextField(event); } };
+  const input = multiline ? <textarea rows={4} value={value} placeholder={placeholder} aria-label={header} required={required} readOnly={readOnly} onBlur={(event) => onBlur?.(event.currentTarget.value)} onChange={(event) => onChange(event.target.value)} className={`mt-2 block w-full resize-y rounded-lg border border-[#e8e8e8] px-3 py-2 text-[13px] leading-5 text-[#1d1d1f] outline-none placeholder:text-[#a1a1a6] focus:border-[#0071c8] focus:ring-2 focus:ring-[#0071c8]/10 ${readOnly ? 'bg-[#f5f5f7] text-[#6e6e73]' : ''}`} /> : options.length ? <SmartListInput ariaLabel={header} value={value} options={options} placeholder={placeholder || 'Search or select'} required={required} readOnly={readOnly} onBlur={onBlur} onChange={onChange} /> : <input type={type} value={value} placeholder={placeholder} aria-label={header} required={required} readOnly={readOnly} autoComplete="off" enterKeyHint="next" onKeyDown={handleKeyDown} onBlur={(event) => onBlur?.(event.currentTarget.value)} onChange={(event) => onChange(event.target.value)} className={`mt-2 block h-9 w-full rounded-lg border border-[#e8e8e8] px-3 py-2 text-[13px] leading-5 text-[#1d1d1f] outline-none placeholder:text-[#a1a1a6] focus:border-[#0071c8] focus:ring-2 focus:ring-[#0071c8]/10 ${readOnly ? 'bg-[#f5f5f7] text-[#6e6e73]' : ''}`} />;
   return <label className="block min-w-0 text-[13px] text-[#3c3c43]"><span className="block min-h-[18px]">{header}{required && <span className="ml-1 text-[#b91c1c]" aria-hidden="true">*</span>}</span><div className={onStop ? 'flex items-start gap-2' : ''}>{input}{onStop && <button type="button" onClick={onStop} disabled={Boolean(value) || !onChange} className="mt-2 h-9 shrink-0 rounded-lg border border-[#d2d2d7] bg-white px-3 text-[12px] font-medium text-[#3c3c43] hover:bg-[#f5f5f7] disabled:cursor-not-allowed disabled:opacity-60">{value ? 'Stopped' : 'Stop now'}</button>}</div>{extra}</label>;
 }
 
-function SmartListInput({ ariaLabel, value, options, placeholder, required, readOnly, onBlur, onChange }: { ariaLabel: string; value: string; options: string[]; placeholder: string; required: boolean; readOnly?: boolean; onBlur?: () => void; onChange: (value: string) => void }) {
+function SmartListInput({ ariaLabel, value, options, placeholder, required, readOnly, onBlur, onChange }: { ariaLabel: string; value: string; options: string[]; placeholder: string; required: boolean; readOnly?: boolean; onBlur?: (value?: string) => void; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
   const query = value.trim().toLowerCase();
@@ -222,10 +253,10 @@ function SmartListInput({ ariaLabel, value, options, placeholder, required, read
     if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); setHighlighted((index) => Math.min(index + 1, Math.max(filtered.length - 1, 0))); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); setHighlighted((index) => Math.max(index - 1, 0)); }
     else if (event.key === 'Enter' && open && filtered[highlighted]) { event.preventDefault(); choose(filtered[highlighted]); }
-    else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); focusNextField(event); }
+    else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onBlur?.(); focusNextField(event); }
     else if (event.key === 'Escape') setOpen(false);
   };
-  return <div className="relative mt-2"><input role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={`${ariaLabel.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-suggestions`} value={value} placeholder={placeholder} aria-label={ariaLabel} required={required} readOnly={readOnly} autoComplete="off" enterKeyHint="next" onFocus={() => { if (!readOnly) setOpen(true); }} onBlur={() => { window.setTimeout(() => setOpen(false), 120); onBlur?.(); }} onKeyDown={handleKeyDown} onChange={(event) => { onChange(event.target.value); setOpen(true); setHighlighted(0); }} className={`block h-9 w-full rounded-lg border border-[#e8e8e8] px-3 text-[13px] text-[#1d1d1f] outline-none placeholder:text-[#a1a1a6] focus:border-[#0071c8] focus:ring-2 focus:ring-[#0071c8]/10 ${readOnly ? 'bg-[#f5f5f7] text-[#6e6e73]' : ''}`} />{open && <div id={`${ariaLabel.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-suggestions`} role="listbox" className="absolute left-0 right-0 top-11 z-20 max-h-56 overflow-y-auto rounded-xl border border-[#d2d2d7] bg-white p-1 shadow-lg">{filtered.length ? filtered.map((option, index) => <button key={option} type="button" role="option" aria-selected={index === highlighted} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)} className={`block w-full rounded-lg px-3 py-2 text-left text-[12px] ${index === highlighted ? 'bg-[#f5f5f7] text-[#1d1d1f]' : 'text-[#3c3c43] hover:bg-[#fafafa]'}`}>{option}</button>) : <p className="px-3 py-2 text-[12px] text-[#6e6e73]">No matching option. You can continue with a custom value.</p>}</div>}</div>;
+  return <div className="relative mt-2"><input role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={`${ariaLabel.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-suggestions`} value={value} placeholder={placeholder} aria-label={ariaLabel} required={required} readOnly={readOnly} autoComplete="off" enterKeyHint="next" onFocus={() => { if (!readOnly) setOpen(true); }} onBlur={(event) => { window.setTimeout(() => setOpen(false), 120); onBlur?.(event.currentTarget.value); }} onKeyDown={handleKeyDown} onChange={(event) => { onChange(event.target.value); setOpen(true); setHighlighted(0); }} className={`block h-9 w-full rounded-lg border border-[#e8e8e8] px-3 text-[13px] text-[#3c3c43] outline-none placeholder:text-[#a1a1a6] focus:border-[#0071c8] focus:ring-2 focus:ring-[#0071c8]/10 ${readOnly ? 'bg-[#f5f5f7] text-[#6e6e73]' : ''}`} />{open && <div id={`${ariaLabel.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-suggestions`} role="listbox" className="absolute left-0 right-0 top-11 z-20 max-h-56 overflow-y-auto rounded-xl border border-[#d2d2d7] bg-white p-1 shadow-lg">{filtered.length ? filtered.map((option, index) => <button key={option} type="button" role="option" aria-selected={index === highlighted} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)} className={`block w-full rounded-lg px-3 py-2 text-left text-[12px] ${index === highlighted ? 'bg-[#f5f5f7] text-[#1d1d1f]' : 'text-[#3c3c43] hover:bg-[#fafafa]'}`}>{option}</button>) : <p className="px-3 py-2 text-[12px] text-[#6e6e73]">No matching option. You can continue with a custom value.</p>}</div>}</div>;
 }
 
 function SerialHistory({ history, loading }: { history: FrontlineSerialHistory[]; loading: boolean }) {

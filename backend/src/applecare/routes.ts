@@ -221,10 +221,10 @@ async function performSyncConnection(connection: typeof applecareGmailConnection
       // Re-read old Excel records imported by the initial generic parser so
       // the structured PartNo/Description/SerialNo/Qty parser can populate them.
       if (existingItem && existingAttachmentPath) {
-        if (!existing.received_by || (!existing.site_id && existingSite?.id)) {
+        if (existing.received_by !== connection.gmail_email || (!existing.site_id && existingSite?.id)) {
           await db.update(applecarePackingLists)
             .set({
-              received_by: existing.received_by || connection.gmail_email,
+              received_by: connection.gmail_email,
               ...(existing.site_id || !existingSite?.id ? {} : { site_id: existingSite.id }),
             })
             .where(eq(applecarePackingLists.id, existing.id));
@@ -270,7 +270,7 @@ async function performSyncConnection(connection: typeof applecareGmailConnection
       gmail_thread_id: message.threadId || '',
       subject: subject.slice(0, 500),
       sender: header(message, 'From').slice(0, 500),
-      received_by: existing?.received_by || connection.gmail_email,
+      received_by: connection.gmail_email,
       ship_to: parsed.shipTo,
       site_id: site[0]?.id || null,
       packing_date: parsed.packingDate,
@@ -328,7 +328,8 @@ router.get('/gmail/callback', async (req: Request, res: Response) => {
     const profile = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
     const profileData = await profile.json() as { emailAddress?: string };
     const db = getDb();
-    await db.insert(applecareGmailConnections).values({ user_id: userId, gmail_email: profileData.emailAddress || 'connected Gmail', refresh_token_encrypted: encrypt(tokens.refresh_token, c.key) }).onDuplicateKeyUpdate({ set: { gmail_email: profileData.emailAddress || 'connected Gmail', refresh_token_encrypted: encrypt(tokens.refresh_token, c.key) } });
+    const gmailEmail = (profileData.emailAddress || 'connected Gmail').trim().toLowerCase();
+    await db.insert(applecareGmailConnections).values({ user_id: userId, gmail_email: gmailEmail, refresh_token_encrypted: encrypt(tokens.refresh_token, c.key) }).onDuplicateKeyUpdate({ set: { gmail_email: gmailEmail, refresh_token_encrypted: encrypt(tokens.refresh_token, c.key) } });
     void writeAuditLog({ actorUserId: userId, action: 'applecare.gmail_connected', resourceType: 'gmail_connection' });
     res.redirect(`${frontendUrl}/applecare?connected=1`);
   } catch (error) { res.redirect(`${frontendUrl}/applecare?error=${encodeURIComponent((error as Error).message)}`); }
@@ -375,7 +376,7 @@ router.get('/lists', async (req: Request, res: Response) => {
     if (!connection) { res.json([]); return; }
     accountFilter = connection.email;
   }
-  const visibility = accountFilter ? eq(applecarePackingLists.received_by, accountFilter) : undefined;
+  const visibility = accountFilter ? sql`LOWER(${applecarePackingLists.received_by}) = LOWER(${accountFilter})` : undefined;
   const rows = await db.select({
     list: applecarePackingLists,
     siteName: applecareSites.site_name,
@@ -392,7 +393,7 @@ router.get('/lists/:id', async (req: Request, res: Response) => {
       .from(applecareGmailConnections)
       .where(eq(applecareGmailConnections.user_id, req.user!.userId))
       .limit(1);
-    if (!connection || list.received_by !== connection.email) { res.status(404).json({ error: 'Packing list not found' }); return; }
+    if (!connection || (list.received_by || '').toLowerCase() !== connection.email.toLowerCase()) { res.status(404).json({ error: 'Packing list not found' }); return; }
   }
   const items = await getDb().select().from(applecarePackingListItems).where(eq(applecarePackingListItems.packing_list_id, list.id));
   res.json({ ...list, items: items.map((item) => ({ ...item, po_no: item.po_no || purchaseNumberFromStoredRow(item.raw_text, list.attachment_name) })) });
@@ -406,7 +407,7 @@ router.get('/lists/:id/attachment', async (req: Request, res: Response) => {
       .from(applecareGmailConnections)
       .where(eq(applecareGmailConnections.user_id, req.user!.userId))
       .limit(1);
-    if (!connection || list.received_by !== connection.email) { res.status(404).json({ error: 'Attachment not found' }); return; }
+    if (!connection || (list.received_by || '').toLowerCase() !== connection.email.toLowerCase()) { res.status(404).json({ error: 'Attachment not found' }); return; }
   }
   const attachmentPath = await findAttachmentPath(list.attachment_path, list.attachment_name);
   if (!attachmentPath) { res.status(404).json({ error: 'Attachment is no longer available. Sync Gmail to download it again.' }); return; }

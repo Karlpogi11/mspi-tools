@@ -50,7 +50,32 @@ export default function ApplecarePage() {
     const [status, rows, siteRows] = await Promise.all([api.applecare.status(), api.applecare.lists(), api.applecare.sites()]);
     setConnected(status.connected); setGmail(status.email); setLastSyncedAt(status.lastSyncedAt); setLists(rows); setSites(siteRows);
   };
-  useEffect(() => { void refresh().catch((error) => setMessage(error.message)); }, []);
+  useEffect(() => {
+    let mounted = true;
+    const connectedFromOAuth = new URLSearchParams(window.location.search).get('connected') === '1';
+    if (connectedFromOAuth) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('connected');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+    const load = async () => {
+      await refresh();
+      if (!connectedFromOAuth || !mounted) return;
+      setBusy(true);
+      setMessage('Checking Gmail for AppleCare packing lists…');
+      try {
+        const result = await api.applecare.sync();
+        await refresh();
+        if (mounted) setMessage(`${result.imported} packing list${result.imported === 1 ? '' : 's'} available`);
+      } catch (error) {
+        if (mounted) setMessage((error as Error).message);
+      } finally {
+        if (mounted) setBusy(false);
+      }
+    };
+    void load().catch((error) => { if (mounted) setMessage((error as Error).message); });
+    return () => { mounted = false; };
+  }, []);
 
   const filtered = useMemo(() => lists.filter((row) => {
     const haystack = `${row.subject} ${row.ship_to} ${row.site_name || ''} ${row.attachment_name}`.toLowerCase();

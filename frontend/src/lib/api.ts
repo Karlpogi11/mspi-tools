@@ -139,6 +139,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return requestPromise;
 }
 
+async function requestFresh<T>(path: string, options?: RequestInit): Promise<T> {
+  return fetchJson<T>(path, options);
+}
+
 export interface User {
   id: number;
   email: string;
@@ -156,6 +160,7 @@ export interface Tool {
   description: string;
   roleIds?: number[];
   roleNames?: string[];
+  canAccess?: boolean;
 }
 
 export interface Role {
@@ -436,11 +441,13 @@ export const api = {
     access: () => request<{ allowed: boolean; scope: 'all' | 'cso' | null; cso: string | null; request: FrontlineAccessRequest | null }>('/frontline/access'),
     requestAccess: (reason: string) => request<{ message: string }>('/frontline/access-request', { method: 'POST', body: JSON.stringify({ reason }) }),
     status: () => request<FrontlineStatus>('/frontline/status'),
+    sync: () => request<{ imported: number; skipped?: boolean }>('/frontline/sync', { method: 'POST' }),
     options: () => request<FrontlineOptionLists>('/frontline/options'),
     addOption: (listKey: FrontlineOptionKey, label: string) => request<FrontlineOption>('/frontline/options', { method: 'POST', body: JSON.stringify({ listKey, label }) }),
     updateOption: (id: number, label: string) => request<{ message: string; id: number; label: string }>(`/frontline/options/${id}`, { method: 'PATCH', body: JSON.stringify({ label }) }),
-    checkEntry: (payload: { ar: string; serial: string; transactionType: string; date: string; issue: string }) => request<{ duplicate: boolean; matches: Array<{ id: number; ar_number: string; serial_number: string; transaction_type: string; occurred_date: string }> }>(`/frontline/entry-check?${new URLSearchParams(payload).toString()}`),
-    serialHistory: (serial: string) => request<FrontlineSerialHistory[]>(`/frontline/serial-history?serial=${encodeURIComponent(serial)}`),
+    checkEntry: (payload: { ar: string; serial: string; transactionType: string; date: string; issue: string }) => requestFresh<{ duplicate: boolean; matches: Array<{ id: number; ar_number: string; serial_number: string; transaction_type: string; occurred_date: string }> }>(`/frontline/entry-check?${new URLSearchParams(payload).toString()}`),
+    lookup: (payload: { ar?: string; serial?: string }) => requestFresh<FrontlineReport['records']>(`/frontline/lookup?${new URLSearchParams(payload).toString()}`),
+    serialHistory: (serial: string) => requestFresh<FrontlineSerialHistory[]>(`/frontline/serial-history?serial=${encodeURIComponent(serial)}`),
     deviceModels: () => request<string[]>('/frontline/device-models'),
     report: (params: { start?: string; end?: string; ar?: string; cso?: string[]; type?: string[]; division?: string[] } = {}) => {
       const queryParams = new URLSearchParams();
@@ -451,7 +458,7 @@ export const api = {
       for (const value of params.type || []) queryParams.append('type', value);
       for (const value of params.division || []) queryParams.append('division', value);
       const query = queryParams.toString();
-      return request<FrontlineReport>(`/frontline/report${query ? `?${query}` : ''}`);
+      return requestFresh<FrontlineReport>(`/frontline/report${query ? `?${query}` : ''}`);
     },
     writeSchema: (sheet: string) => request<{ sheet: string; headers: string[] }>(`/frontline/write-schema?sheet=${encodeURIComponent(sheet)}`),
     writeEntry: (payload: { sheet: string; headers: string[]; values: string[] }) => request<{ message: string }>('/frontline/write-entry', { method: 'POST', body: JSON.stringify(payload) }),
