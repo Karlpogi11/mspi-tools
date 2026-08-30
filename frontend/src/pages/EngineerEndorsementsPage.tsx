@@ -22,6 +22,7 @@ export default function EngineerEndorsementsPage() {
   const [deviceModelDraft, setDeviceModelDraft] = useState('');
   const [savingDeviceModel, setSavingDeviceModel] = useState(false);
   const [passingEndorsementId, setPassingEndorsementId] = useState<number | null>(null);
+  const [deletingEndorsementId, setDeletingEndorsementId] = useState<number | null>(null);
 
   const isEngineer = user?.roleName === 'ENGR';
   const canManageRoster = user?.roleName === 'Admin' || user?.roleName === 'PMG';
@@ -192,6 +193,7 @@ export default function EngineerEndorsementsPage() {
   const beginDeviceModelEdit = (id: number, value: string | null) => { setEditingEndorsementId(id); setDeviceModelDraft(value || ''); };
   const saveDeviceModel = async (id: number) => { const value = deviceModelDraft.trim(); if (!value) return; setSavingDeviceModel(true); setMessage(''); try { await api.endorsements.updateDeviceModel(id, value); setEditingEndorsementId(null); setDeviceModelDraft(''); await load(); setMessage('Device model updated.'); } catch (error) { setMessage((error as Error).message); } finally { setSavingDeviceModel(false); } };
   const passEndorsement = async (id: number) => { setPassingEndorsementId(id); setMessage(''); try { await api.endorsements.passEndorsement(id); void Promise.all([load(true), loadRoster()]); } catch (error) { setMessage((error as Error).message); } finally { setPassingEndorsementId(null); } };
+  const deleteEndorsement = async (id: number) => { if (!window.confirm('Delete this endorsement only? The original Frontline record will not be changed.')) return; setDeletingEndorsementId(id); setMessage(''); try { const result = await api.endorsements.delete(id); setSelectedDay(null); await Promise.all([load(true), loadRoster()]); setMessage(result.message); } catch (error) { setMessage((error as Error).message); } finally { setDeletingEndorsementId(null); } };
 
   return (
     <div className="min-h-[calc(100vh-128px)] bg-[#f4f3f6]">
@@ -280,7 +282,15 @@ export default function EngineerEndorsementsPage() {
                   )) : <p className="text-[12px] text-[#6e6e73]">No endorsements yet.</p>}
                 </div>
               </section>
-            </div></>}
+            <div className="mt-5">
+              <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">
+                <div className="flex items-center justify-between gap-3"><div><h2 className="text-[13px] font-semibold text-[#1d1d1f]">Recent endorsements</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Delete an endorsement without deleting the original Frontline record.</p></div><span className="text-[11px] text-[#6e6e73]">{dashboard.endorsements.length}</span></div>
+                <div className="mt-4 space-y-2">
+                  {dashboard.endorsements.length ? dashboard.endorsements.map((row) => <div key={row.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#f5f5f7] px-3 py-2.5"><div className="min-w-0"><p className="truncate text-[12px] font-medium text-[#1d1d1f]">AR {row.ar_number} <span className="font-normal text-[#6e6e73]">· {row.engineer_name}</span></p><p className="mt-0.5 truncate text-[11px] text-[#6e6e73]">{row.device_model || 'Device not specified'} · {row.issue || 'No issue provided'}</p></div>{canEditEndorsement && <button type="button" onClick={() => void deleteEndorsement(row.id)} disabled={deletingEndorsementId === row.id} className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium text-[#b42318] hover:bg-[#feeceb] disabled:cursor-not-allowed disabled:opacity-40">{deletingEndorsementId === row.id ? 'Deleting…' : 'Delete'}</button>}</div>) : <p className="text-[12px] text-[#6e6e73]">No endorsements yet.</p>}
+                </div>
+              </section>
+            </div>
+          </div></>}
           </>
         )}
       </div>

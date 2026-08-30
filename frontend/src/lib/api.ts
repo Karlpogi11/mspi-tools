@@ -333,7 +333,7 @@ export interface FrontlineReport {
   csos: Array<[string, number]>;
   types: Array<[string, number]>;
   divisions: Array<[string, number]>;
-  records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; device_model: string; cso: string; issue: string; endorsement_status?: string | null; endorsed_engineer_name?: string | null; endorsed_at?: string | null }>;
+  records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; device_model: string; cso: string; issue: string; endorsement_id?: number | null; endorsement_status?: string | null; endorsed_engineer_name?: string | null; endorsed_at?: string | null }>;
 }
 export interface FrontlineStatus { connected: boolean; sourceName: string | null; lastSyncedAt: string | null; syncStatus: string; syncError: string | null }
 export interface FrontlineSerialHistory { id: number; source_sheet: string; occurred_date: string | null; ar_number: string; serial_number: string; device_model: string; product_division: string; cso: string; transaction_type: string; issue: string }
@@ -342,6 +342,7 @@ export interface FrontlineOption { id: number; label: string; sort_order: number
 export type FrontlineOptionLists = Record<FrontlineOptionKey, FrontlineOption[]>;
 export interface FrontlineAccessRequest { id: number; user_id: number; email?: string; full_name?: string; reason: string; status: 'pending' | 'approved' | 'rejected'; created_at: string; reviewed_at: string | null; access_scope?: 'all' | 'cso' | null; cso_name?: string | null }
 export interface EndorsementEngineer { id: number; user_id: number | null; full_name: string; email?: string; assignment_count: number; status?: 'active' | 'left'; joined_at?: string; last_assigned_at?: string | null }
+export interface EndorsementNotification { id: number; ar_number: string; device_model: string; issue: string; engineer_name: string; cso_user_id: number | null; created_at: string }
 export interface EngineerDashboard { date: string; availability: { user_id: number; status: 'active' | 'left'; joined_at: string; left_at: string | null; assignment_count: number } | null; totals: { total: number; pending: number }; divisions: Array<{ product_division: string; total: number }>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; created_at: string; engineer_name: string }> }
  export interface EngineerCalendar { month: string; divisions: string[]; columns: Array<{ division: string; engineer: string; total: number }>; totals: Record<string, number>; days: Array<{ date: string; day: string; counts: Record<string, Record<string, Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; engineer_name: string; created_at: string; manual_count?: number; details?: string; is_manual?: boolean }>>>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; engineer_name: string; created_at: string }> }> }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
@@ -472,8 +473,10 @@ export const api = {
     addEngineer: (name: string) => request<{ message: string }>('/endorsements/availability/add', { method: 'POST', body: JSON.stringify({ name }) }),
     removeEngineer: (id: number) => request<{ message: string }>('/endorsements/availability/remove', { method: 'POST', body: JSON.stringify({ id }) }),
     available: () => request<{ date: string; engineers: EndorsementEngineer[]; roster: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null }>('/endorsements/available'),
+    notifications: (afterId = 0) => requestFresh<EndorsementNotification[]>(`/endorsements/notifications?afterId=${afterId}`),
     create: (payload: { arNumber: string; frontlineRecordId: number; sourceSheet?: string; sourceRow?: number; serialNumber?: string; deviceModel?: string }) => request<{ message: string; endorsementId: number; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
     updateDeviceModel: (id: number, deviceModel: string) => request<{ message: string; deviceModel: string }>(`/endorsements/${id}`, { method: 'PATCH', body: JSON.stringify({ deviceModel }) }),
+    delete: (id: number) => request<{ message: string }>(`/endorsements/${id}`, { method: 'DELETE' }),
     dashboard: (engineerUserId?: number) => request<EngineerDashboard>(`/endorsements/dashboard${engineerUserId ? `?engineerUserId=${engineerUserId}` : ''}`),
     calendar: (month: string) => request<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
     saveCalendarEntry: (payload: { date: string; division: string; engineer: string; count: number; details?: string }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'PUT', body: JSON.stringify(payload) }),

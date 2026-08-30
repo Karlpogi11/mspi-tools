@@ -10,6 +10,7 @@ router.use(authenticateToken);
 function text(value: unknown) { return String(value ?? '').trim(); }
 function canonicalEngineerName(value: string) { const name = text(value); return name.toLowerCase() === 'k' ? 'Karl' : name; }
 function todayManila() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date()); }
+function isoTimestamp(value: unknown) { if (!value) return null; const date = value instanceof Date ? value : new Date(String(value)); return Number.isNaN(date.getTime()) ? String(value) : date.toISOString(); }
 function isEngineer(req: Request) { return req.user?.roleName === 'ENGR'; }
 function canEndorse(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'CSO'; }
 function canView(req: Request) { return canEndorse(req) || canManageRoster(req) || isEngineer(req); }
@@ -103,6 +104,18 @@ router.get('/available', async (req, res) => {
   res.json({ date: todayManila(), engineers, roster, nextEngineer: engineers[0] || null });
 });
 
+router.get('/notifications', async (req, res) => {
+  if (!canView(req)) { forbidden(res); return; }
+  const afterId = Math.max(0, Number(req.query.afterId) || 0);
+  await ensureFrontlineTables();
+  const engineerFilter = isEngineer(req)
+    ? ' AND (e.engineer_user_id = ? OR (e.engineer_user_id IS NULL AND e.engineer_name = (SELECT engineer_name FROM engineer_roster WHERE user_id = ? ORDER BY id DESC LIMIT 1)))'
+    : '';
+  const engineerArgs = isEngineer(req) ? [req.user!.userId, req.user!.userId] : [];
+  const [rows] = await getDbPool().query(`SELECT e.id, e.ar_number, e.device_model, e.issue, e.engineer_name, e.cso_user_id, e.created_at FROM engineer_endorsements e WHERE e.id > ?${engineerFilter} ORDER BY e.id ASC LIMIT 25`, [afterId, ...engineerArgs]);
+  res.json((rows as Array<Record<string, unknown>>).map((row) => ({ ...row, created_at: isoTimestamp(row.created_at) })));
+});
+
 router.get('/calendar', async (req, res) => {
   if (!canView(req)) { forbidden(res); return; }
   await ensureFrontlineTables();
@@ -144,8 +157,9 @@ router.post('/', async (req, res) => {
     const [recordRows] = await connection.query(`SELECT id, ar_number, device_model, serial_number, issue, product_division FROM frontline_records WHERE ${recordLookup.clause} ORDER BY id = ? DESC, id DESC LIMIT 1`, [...recordLookup.args, recordId || 0]);
     const record = (recordRows as Array<Record<string, unknown>>)[0];
     if (!record) { await connection.rollback(); res.status(404).json({ error: 'Frontline record not found for this AR number.' }); return; }
-    const duplicateClause = recordId || arNumber.toUpperCase() === 'N/A' ? 'e.frontline_record_id = ?' : 'e.ar_number = ?';
-    const [existingRows] = await connection.query(`SELECT e.id, e.ar_number, e.status, COALESCE(u.full_name, e.engineer_name) AS engineer_name FROM engineer_endorsements e LEFT JOIN users u ON u.id = e.engineer_user_id WHERE ${duplicateClause} FOR UPDATE`, [recordId ? Number(record.id) : arNumber]);
+    const duplicateClause = recordId || arNumber.toUpperCase() === 'N/A' ? '(e.frontline_record_id = ? OR e.ar_number = ?)' : 'e.ar_number = ?';
+    const duplicateArgs = recordId || arNumber.toUpperCase() === 'N/A' ? [Number(record.id), arNumber] : [arNumber];
+    const [existingRows] = await connection.query(`SELECT e.id, e.ar_number, e.status, COALESCE(u.full_name, e.engineer_name) AS engineer_name FROM engineer_endorsements e LEFT JOIN users u ON u.id = e.engineer_user_id WHERE ${duplicateClause} FOR UPDATE`, duplicateArgs);
     if ((existingRows as Array<Record<string, unknown>>).length) { await connection.rollback(); res.status(409).json({ error: `AR ${arNumber} has already been endorsed to ${(existingRows as Array<Record<string, unknown>>)[0].engineer_name}.` }); return; }
     const [engineerRows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.assignment_count FROM engineer_daily_availability a WHERE a.availability_date = ? AND a.status = 'active' ORDER BY a.last_assigned_at IS NOT NULL ASC, a.last_assigned_at ASC, a.assignment_count ASC, a.joined_at ASC, a.id ASC FOR UPDATE`, [todayManila()]);
     const engineer = (engineerRows as Array<Record<string, unknown>>)[0];
@@ -211,6 +225,25 @@ router.post('/:id/cancel', async (req, res) => {
     void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_cancelled', resourceType: 'engineer_endorsement', resourceId: String(id), metadata: { engineerName: text(endorsement.engineer_name) } });
     res.json({ message: 'Endorsement cancelled.' });
   } catch (error) { await connection.rollback(); console.error('cancel endorsement error:', error); res.status(500).json({ error: 'Unable to cancel this endorsement.' }); } finally { connection.release(); }
+});
+
+router.delete('/:id', async (req, res) => {
+  if (!canEndorse(req)) { forbidden(res); return; }
+  const id = Number(req.params.id); if (!id) { res.status(400).json({ error: 'A valid endorsement is required.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT id, engineer_user_id, engineer_name FROM engineer_endorsements WHERE id = ? FOR UPDATE', [id]);
+    const endorsement = (rows as Array<Record<string, unknown>>)[0];
+    if (!endorsement) { await connection.rollback(); res.status(404).json({ error: 'Endorsement record not found.' }); return; }
+    const engineerUserId = endorsement.engineer_user_id == null ? null : Number(endorsement.engineer_user_id);
+    await connection.execute('DELETE FROM engineer_endorsements WHERE id = ?', [id]);
+    await connection.execute(`UPDATE engineer_daily_availability SET assignment_count = GREATEST(assignment_count - 1, 0) WHERE availability_date = ? AND engineer_name = ? AND COALESCE(user_id, 0) = COALESCE(?, 0)`, [todayManila(), text(endorsement.engineer_name), engineerUserId]);
+    await connection.commit();
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_deleted', resourceType: 'engineer_endorsement', resourceId: String(id), metadata: { engineerName: text(endorsement.engineer_name) } });
+    res.json({ message: 'Endorsement deleted. The Frontline record was not changed.' });
+  } catch (error) { await connection.rollback(); console.error('delete endorsement error:', error); res.status(500).json({ error: 'Unable to delete this endorsement.' }); } finally { connection.release(); }
 });
 
 router.patch('/:id', async (req, res) => {

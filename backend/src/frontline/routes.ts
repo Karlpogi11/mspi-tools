@@ -576,7 +576,7 @@ router.get('/report', async (req, res) => {
   if (!access) { res.status(403).json({ error: 'Frontline Monitor access required' }); return; }
   const where: string[] = []; const args: string[] = [];
   const addIn = (column: string, selected: string[]) => { if (selected.length) { where.push(`${column} IN (${selected.map(() => '?').join(',')})`); args.push(...selected); } };
-  if (start) { where.push('fr.occurred_date >= ?'); args.push(start); } if (end) { where.push('fr.occurred_date <= ?'); args.push(end); } if (ar) { where.push('fr.ar_number LIKE ?'); args.push(`%${ar}%`); } addIn('fr.cso', csos); addIn('fr.transaction_type', types); addIn('fr.product_division', divisions);
+  if (start) { where.push('fr.occurred_date >= ?'); args.push(start); } if (end) { where.push('fr.occurred_date <= ?'); args.push(end); } if (ar) { where.push('(LOWER(TRIM(COALESCE(fr.ar_number, \'\'))) LIKE LOWER(?) OR LOWER(TRIM(COALESCE(fr.serial_number, \'\'))) LIKE LOWER(?))'); args.push(`%${ar}%`, `%${ar}%`); } addIn('fr.cso', csos); addIn('fr.transaction_type', types); addIn('fr.product_division', divisions);
   if (access.scope === 'cso' && access.cso) { where.push('fr.cso = ?'); args.push(access.cso); }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const [sourceRows] = await getDbPool().query('SELECT write_sheet_name FROM frontline_sources ORDER BY id DESC LIMIT 1');
@@ -585,7 +585,7 @@ router.get('/report', async (req, res) => {
     ? 'ORDER BY fr.occurred_date DESC, CASE WHEN fr.source_sheet = ? THEN 1 ELSE 0 END ASC, fr.id DESC'
     : 'ORDER BY fr.occurred_date DESC, fr.id DESC';
   const queryArgs = writeSheet ? [...args, writeSheet] : args;
-  const pool = getDbPool(); const [rows] = await pool.query(`SELECT fr.id, fr.source_sheet, fr.source_row, fr.occurred_date, fr.aht_minutes, fr.transaction_type, fr.product_division, fr.ar_number, fr.serial_number, fr.device_model, fr.cso, fr.issue, ee.status AS endorsement_status, ee.engineer_name AS endorsed_engineer_name, ee.created_at AS endorsed_at FROM frontline_records fr LEFT JOIN engineer_endorsements ee ON ee.frontline_record_id = fr.id ${clause} ${orderBy} LIMIT 10000`, queryArgs);
+  const pool = getDbPool(); const [rows] = await pool.query(`SELECT fr.id, fr.source_sheet, fr.source_row, fr.occurred_date, fr.aht_minutes, fr.transaction_type, fr.product_division, fr.ar_number, fr.serial_number, fr.device_model, fr.cso, fr.issue, ee.id AS endorsement_id, ee.status AS endorsement_status, ee.engineer_name AS endorsed_engineer_name, ee.created_at AS endorsed_at FROM frontline_records fr LEFT JOIN engineer_endorsements ee ON ee.frontline_record_id = fr.id OR (ee.frontline_record_id IS NULL AND ee.ar_number = fr.ar_number) ${clause} ${orderBy} LIMIT 10000`, queryArgs);
   const records = rows as Array<Record<string, unknown>>; const aht = records.map((row) => Number(row.aht_minutes)).filter(Number.isFinite);
   const countBy = (key: string) => Object.entries(records.reduce<Record<string, number>>((acc, row) => { const value = String(row[key] || 'Unspecified'); acc[value] = (acc[value] || 0) + 1; return acc; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 10);
   res.json({ total: records.length, averageAht: aht.length ? Math.round(aht.reduce((sum, value) => sum + value, 0) / aht.length * 100) / 100 : 0, csos: countBy('cso'), types: countBy('transaction_type'), divisions: countBy('product_division'), records });

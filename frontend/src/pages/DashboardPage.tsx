@@ -41,8 +41,8 @@ export default function DashboardPage() {
   return (
     <div className="flex min-h-[calc(100vh-128px)] w-full flex-col bg-[#F4F3F6]">
       <div className="mb-8">
-        <h1 className="text-[28px] font-semibold leading-[1.1] tracking-[-0.022em] text-[#1d1d1f]">Tools</h1>
-        <p className="mt-1.5 text-[14px] leading-[1.4] tracking-[-0.005em] text-[#6e6e73]">
+        <h1 className="text-[42px] font-semibold leading-[1.05] tracking-[-0.04em] text-[#1d1d1f] sm:text-[48px]">Tools</h1>
+        <p className="mt-3 text-[17px] leading-[1.35] tracking-[-0.01em] text-[#6e6e73]">
           Welcome back, {user?.fullName || user?.email}
         </p>
       </div>

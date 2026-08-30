@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { api } from '../lib/api';
+import { api, type EndorsementNotification } from '../lib/api';
 
 export default function Layout() {
   const location = useLocation();
@@ -14,12 +14,17 @@ export default function Layout() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [endorsementNotice, setEndorsementNotice] = useState<EndorsementNotification | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
   const menuRef = useRef<HTMLDivElement>(null);
+  const endorsementCursorRef = useRef(0);
+  const endorsementInitializedRef = useRef(false);
   const isToolPage = location.pathname !== '/' && !location.pathname.startsWith('/admin');
   const isFrontlineDataEntryPage = location.pathname === '/frontline/data-entry';
   const isPcountSessionPage = location.pathname.startsWith('/pcount/session/');
   const isAdmin = location.pathname.startsWith('/admin');
   const isWideEndorsementsPage = location.pathname === '/endorsements';
+  const isWideFrontlinePage = location.pathname === '/frontline';
   const displayName = user?.fullName || user?.email || 'Account';
   const initials = displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
@@ -34,6 +39,54 @@ export default function Layout() {
     document.addEventListener('mousedown', closeMenu);
     return () => document.removeEventListener('mousedown', closeMenu);
   }, []);
+
+  useEffect(() => {
+    endorsementCursorRef.current = readEndorsementCursor(user?.id);
+    endorsementInitializedRef.current = false;
+    setEndorsementNotice(null);
+    if (!user || !['Admin', 'CSO', 'PMG', 'ENGR'].includes(user.roleName || '')) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const rows = await api.endorsements.notifications(endorsementCursorRef.current);
+        if (!active) return;
+        if (!endorsementInitializedRef.current) {
+          if (rows.length) {
+            const latestId = Math.max(...rows.map((row) => row.id));
+            endorsementCursorRef.current = latestId;
+            writeEndorsementCursor(user.id, latestId);
+          }
+          endorsementInitializedRef.current = true;
+          return;
+        }
+        if (!rows.length) return;
+        for (const row of rows) {
+          if (row.id <= Math.max(endorsementCursorRef.current, readEndorsementCursor(user.id))) continue;
+          endorsementCursorRef.current = row.id;
+          writeEndorsementCursor(user.id, row.id);
+          if (row.cso_user_id === user.id) continue;
+          setEndorsementNotice(row);
+          if (document.visibilityState !== 'visible' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            const browserNotification = new Notification('New endorsement received', { body: `AR ${row.ar_number} · ${row.device_model || 'Device'} · ${row.engineer_name || 'Engineer'}`, tag: `endorsement-${row.id}` });
+            browserNotification.onclick = () => { window.focus(); navigate('/endorsements'); browserNotification.close(); };
+          }
+        }
+      } catch {
+        // Notifications are optional and must not interrupt the current page.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 15_000);
+    const refreshOnReturn = () => { if (document.visibilityState === 'visible') void poll(); };
+    document.addEventListener('visibilitychange', refreshOnReturn);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshOnReturn); };
+  }, [navigate, user]);
+
+  const enableBrowserNotifications = async () => {
+    if (typeof Notification === 'undefined') { setNotificationPermission('unsupported'); return; }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+  };
 
   async function changePassword(event: React.FormEvent) {
     event.preventDefault();
@@ -147,7 +200,18 @@ export default function Layout() {
           </div>
         </div>
       )}
-      <main className={isWideEndorsementsPage ? 'mx-auto w-full max-w-none px-[clamp(1rem,3vw,3rem)] py-8 lg:py-10' : 'mx-auto w-full max-w-[1200px] px-6 py-10'}>
+      {endorsementNotice && (
+        <div role="status" aria-live="polite" className="fixed right-5 top-16 z-[70] w-[min(360px,calc(100vw-2rem))] rounded-2xl bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.16)] ring-1 ring-black/10">
+          <button type="button" aria-label="Dismiss notification" onClick={() => setEndorsementNotice(null)} className="absolute right-3 top-3 cursor-pointer text-[18px] leading-none text-[#86868b] hover:text-[#1d1d1f]">×</button>
+          <p className="text-[12px] font-semibold text-[#1d1d1f]">New endorsement received</p>
+          <p className="mt-1 text-[12px] text-[#6e6e73]">AR {endorsementNotice.ar_number} · {endorsementNotice.device_model || 'Device'} · {endorsementNotice.engineer_name || 'Engineer'}</p>
+          <div className="mt-3 flex items-center gap-3">
+            <button type="button" onClick={() => { setEndorsementNotice(null); navigate('/endorsements'); }} className="cursor-pointer text-[12px] font-medium text-[#0071e3] hover:underline">View endorsement</button>
+            {notificationPermission === 'default' && <button type="button" onClick={() => void enableBrowserNotifications()} className="cursor-pointer text-[12px] font-medium text-[#6e6e73] hover:text-[#1d1d1f]">Enable browser alerts</button>}
+          </div>
+        </div>
+      )}
+      <main className={isWideEndorsementsPage || isWideFrontlinePage ? 'mx-auto w-full max-w-none px-[clamp(1rem,3vw,3rem)] py-8 lg:py-10' : 'mx-auto w-full max-w-[1200px] px-6 py-10'}>
         {isToolPage && !isFrontlineDataEntryPage && (
           <Link to={isPcountSessionPage ? '/pcount' : '/'} className="print:hidden inline-flex items-center gap-1.5 mb-5 text-[12px] font-medium text-[#6e6e73] hover:text-[#2563eb] transition-colors">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -160,4 +224,13 @@ export default function Layout() {
       </main>
     </div>
   );
+}
+
+function readEndorsementCursor(userId?: number) {
+  if (!userId) return 0;
+  try { return Number(window.localStorage.getItem(`mspi-endorsement-cursor-${userId}`)) || 0; } catch { return 0; }
+}
+
+function writeEndorsementCursor(userId: number, cursor: number) {
+  try { window.localStorage.setItem(`mspi-endorsement-cursor-${userId}`, String(cursor)); } catch { /* Local storage is optional. */ }
 }
