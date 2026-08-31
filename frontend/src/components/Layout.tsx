@@ -16,6 +16,7 @@ export default function Layout() {
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [endorsementNotice, setEndorsementNotice] = useState<EndorsementNotification | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const endorsementCursorRef = useRef(0);
   const endorsementInitializedRef = useRef(false);
@@ -27,6 +28,11 @@ export default function Layout() {
   const isWideFrontlinePage = location.pathname === '/frontline';
   const displayName = user?.fullName || user?.email || 'Account';
   const initials = displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+
+  useEffect(() => {
+    if (user?.roleName !== 'Admin') return;
+    void api.admin.getUsers().then((users) => setPendingApprovals(users.filter((candidate) => !candidate.roleId).length)).catch(() => undefined);
+  }, [user?.roleName]);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -131,7 +137,7 @@ export default function Layout() {
                 to="/admin"
                 className={`text-[12px] transition-colors ${isAdmin ? 'text-[#1d1d1f] font-medium' : 'text-[#6e6e73] hover:text-[#1d1d1f]'}`}
               >
-                Manage
+                <span className="relative inline-flex items-center">Manage{pendingApprovals > 0 && <span className="absolute -right-3 -top-2 inline-flex min-w-3.5 items-center justify-center rounded-full bg-[#f5f5f7] px-1 py-0.5 text-[9px] font-semibold leading-none text-[#6e6e73]" aria-label={`${pendingApprovals} pending user approvals`}>{pendingApprovals}</span>}</span>
               </Link>
             )}
           </div>

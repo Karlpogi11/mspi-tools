@@ -127,6 +127,7 @@ export default function AdminUsersPage() {
                   <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Name</th>
                   <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Email</th>
                   <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Role</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Date joined</th>
                   <th className="min-w-[170px] text-right px-4 py-2.5 font-medium text-[#6e6e73] text-[12px] uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -148,6 +149,7 @@ export default function AdminUsersPage() {
                         <span className="text-[#6e6e73]">&mdash;</span>
                       )}
                     </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-[#6e6e73]">{formatJoinedDate(u.createdAt)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <div className="relative">
@@ -292,4 +294,10 @@ export default function AdminUsersPage() {
       )}
     </div>
   );
+}
+
+function formatJoinedDate(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' }).format(date);
 }

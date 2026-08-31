@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { getDb } from './index.js';
 import { roles, tools, roleToolAccess } from './schema.js';
 
@@ -17,7 +17,7 @@ const BUILTIN_TOOLS = [
 const BUILTIN_ROLE_NAMES = ['Admin', 'PMG', 'CSO', 'ENGR'];
 const REMOVED_BUILTIN_URLS = ['/permit-tracker'];
 
-/** Add missing built-ins without overwriting tools configured in Admin. */
+/** Register missing built-ins without overwriting tools or access configured in Admin. */
 export async function syncBuiltinToolCatalog() {
   const db = getDb();
   const roleRows = await db.select().from(roles).where(inArray(roles.name, BUILTIN_ROLE_NAMES));
@@ -32,20 +32,18 @@ export async function syncBuiltinToolCatalog() {
 
   for (const definition of BUILTIN_TOOLS) {
     let [tool] = await db.select().from(tools).where(eq(tools.url, definition.url)).limit(1);
+    let isNewTool = false;
     if (!tool) {
       const { roles: _roleNames, ...toolValues } = definition;
       const [inserted] = await db.insert(tools).values(toolValues).$returningId();
       [tool] = await db.select().from(tools).where(eq(tools.id, inserted.id)).limit(1);
+      isNewTool = true;
       console.log(`Registered built-in tool: ${definition.name}`);
     }
 
-    const existing = await db.select({ roleId: roleToolAccess.role_id }).from(roleToolAccess).where(eq(roleToolAccess.tool_id, tool.id));
-    const existingRoleIds = new Set(existing.map((row) => row.roleId));
-    if (definition.name === 'Frontline Monitor') {
-      const nonAdminRoleIds = roleRows.filter((role) => role.name !== 'Admin').map((role) => role.id);
-      if (nonAdminRoleIds.length > 0) await db.delete(roleToolAccess).where(and(eq(roleToolAccess.tool_id, tool.id), inArray(roleToolAccess.role_id, nonAdminRoleIds)));
+    if (isNewTool) {
+      const defaultAccess = roleRows.filter((role) => definition.roles.some((roleName) => roleName === role.name)).map((role) => ({ role_id: role.id, tool_id: tool.id }));
+      if (defaultAccess.length > 0) await db.insert(roleToolAccess).values(defaultAccess);
     }
-    const missingAccess = roleRows.filter((role) => definition.roles.some((roleName) => roleName === role.name) && !existingRoleIds.has(role.id)).map((role) => ({ role_id: role.id, tool_id: tool.id }));
-    if (missingAccess.length > 0) await db.insert(roleToolAccess).values(missingAccess);
   }
 }

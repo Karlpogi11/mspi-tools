@@ -80,10 +80,10 @@ function getSessionAuth(request: IncomingMessage): { userId: number } | null {
 
 ---
 
-## 🔒 Default Admin Account (Seeded)
-- **Email**: `admin@mspi.io`
-- **Password**: `admin123`
-- **Allowed email domain filter**: `ALLOWED_EMAIL_DOMAIN` env variable restricts self-registration to specific domain emails (e.g. `@mspi.io`).
+## 🔒 Admin Account (Seeded)
+- The seed script requires `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` environment variables.
+- The password must be at least 6 characters and is stored only as a bcrypt hash.
+- **Allowed email domain filter**: `ALLOWED_EMAIL_DOMAINS` env variable restricts self-registration to specific domain emails (e.g. `@mspi.io`).
 
 ---
 

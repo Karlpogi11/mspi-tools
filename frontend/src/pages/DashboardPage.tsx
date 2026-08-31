@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { api, type Tool } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useCachedQuery } from '../lib/queryCache';
@@ -27,6 +28,7 @@ function ToolIcon({ icon, active }: { icon: string; active: boolean }) {
 export default function DashboardPage() {
   const { user } = useAuth();
   const { data: tools = [], loading } = useCachedQuery<Tool[]>('my-tools', api.myTools);
+  const [restrictedTool, setRestrictedTool] = useState<Tool | null>(null);
 
   const visibleTools = tools.filter(tool => tool.name.trim().toLowerCase() !== 'site monitor');
 
@@ -66,7 +68,7 @@ export default function DashboardPage() {
               key={tool.id}
               href={tool.url}
               aria-disabled={tool.canAccess === false}
-              onClick={(event) => { if (tool.canAccess === false) event.preventDefault(); }}
+              onClick={(event) => { if (tool.canAccess === false) { event.preventDefault(); setRestrictedTool(tool); } }}
               className={`group relative flex h-full min-h-[clamp(150px,18vw,190px)] w-full flex-col rounded-[14px] border border-black/[0.06] bg-[#FFFFFF] p-4 no-underline transition-all duration-200 ${tool.canAccess === false ? 'cursor-not-allowed opacity-60' : 'hover:-translate-y-0.5 hover:border-black/[0.1]'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 focus-visible:ring-offset-2`}
             >
               <ToolIcon icon={tool.icon} active={false} />
@@ -94,6 +96,7 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
+      {restrictedTool && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4" role="dialog" aria-modal="true" aria-labelledby="restricted-tool-title"><div className="w-full max-w-sm rounded-2xl border border-[#e5e5e7] bg-white p-5 shadow-xl"><h2 id="restricted-tool-title" className="text-[15px] font-semibold text-[#1d1d1f]">Access unavailable</h2><p className="mt-2 text-[13px] leading-5 text-[#6e6e73]">You do not have access to {restrictedTool.name} with your current role.</p><button type="button" onClick={() => setRestrictedTool(null)} className="mt-5 rounded-full bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white">Close</button></div></div>}
     </div>
   );
 }

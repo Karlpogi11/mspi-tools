@@ -4,6 +4,10 @@ import { initDb, getDb } from './index.js';
 import { roles, users, tools, roleToolAccess } from './schema.js';
 
 async function seed() {
+  const adminEmail = String(process.env.SEED_ADMIN_EMAIL || '').trim().toLowerCase();
+  const adminPassword = String(process.env.SEED_ADMIN_PASSWORD || '');
+  if (!adminEmail || !adminPassword) throw new Error('SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD must be set before seeding.');
+  if (adminPassword.length < 6) throw new Error('SEED_ADMIN_PASSWORD must be at least 6 characters.');
   await initDb();
   const db = getDb();
 
@@ -16,15 +20,15 @@ async function seed() {
 
   console.log('Roles created: Admin, PMG, CSO, ENGR');
 
-  const hash = await bcrypt.hash('admin123', 12);
+  const hash = await bcrypt.hash(adminPassword, 12);
   await db.insert(users).values({
-    email: 'admin@mspi.io',
+    email: adminEmail,
     password_hash: hash,
     full_name: 'Admin User',
     role_id: adminRole.id,
   });
 
-  console.log('Admin user created: admin@mspi.io / admin123');
+  console.log(`Admin user created: ${adminEmail}`);
 
   const [rfpuTool] = await db.insert(tools).values({
     name: 'Site Monitor',

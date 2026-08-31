@@ -46,6 +46,8 @@ Configure `backend/.env`:
 ```env
 DATABASE_URL=mysql://user:password@host:port/database
 JWT_SECRET=replace-with-a-long-random-secret
+SEED_ADMIN_EMAIL=admin@example.com
+SEED_ADMIN_PASSWORD=use-a-unique-password-at-least-6-characters
 PORT=3001
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5173

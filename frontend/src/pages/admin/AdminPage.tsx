@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 
 const adminTools = [
@@ -36,6 +38,12 @@ const adminTools = [
 
 export default function AdminPage() {
   const { user } = useAuth();
+  const [pendingUsers, setPendingUsers] = useState(0);
+
+  useEffect(() => {
+    if (user?.roleName !== 'Admin') return;
+    void api.admin.getUsers().then((users) => setPendingUsers(users.filter((candidate) => !candidate.roleId).length)).catch(() => undefined);
+  }, [user?.roleName]);
 
   return (
     <div>
@@ -58,9 +66,7 @@ export default function AdminPage() {
                 <path d={tool.icon} />
               </svg>
             </div>
-            <h3 className="text-[15px] font-semibold text-[#1d1d1f] mt-4 group-hover:text-[#2563eb] transition-colors">
-              {tool.name}
-            </h3>
+            <div className="mt-4 flex items-center gap-2"><h3 className="text-[15px] font-semibold text-[#1d1d1f] group-hover:text-[#2563eb] transition-colors">{tool.name}</h3>{tool.to === '/admin/users' && pendingUsers > 0 && <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[#f5f5f7] px-1.5 py-0.5 text-[10px] font-semibold text-[#6e6e73]" aria-label={`${pendingUsers} pending user approvals`}>{pendingUsers}</span>}</div>
             <p className="text-[13px] text-[#6e6e73] mt-1.5 leading-relaxed">
               {tool.description}
             </p>

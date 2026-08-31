@@ -43,7 +43,8 @@ npm install
 # Push Drizzle schema mappings to MySQL
 npm run db:push
 
-# Populate roles, core tools dashboard entries, and default admin account
+# Populate roles, core tools dashboard entries, and the configured admin account
+# Requires SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in backend/.env
 npm run seed
 ```
 
