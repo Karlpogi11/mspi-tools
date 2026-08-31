@@ -88,6 +88,62 @@ router.post('/availability/remove', async (req, res) => {
   res.json({ message: 'Engineer removed from today’s queue.' });
 });
 
+router.get('/roster', async (req, res) => {
+  if (!canManageRoster(req)) { forbidden(res); return; }
+  await ensureFrontlineTables();
+  const [rows] = await getDbPool().query('SELECT id, user_id, engineer_name AS full_name, active, created_at, updated_at FROM engineer_roster WHERE active = 1 ORDER BY engineer_name ASC, id ASC');
+  res.json({ roster: rows });
+});
+
+router.post('/roster', async (req, res) => {
+  if (!canManageRoster(req)) { forbidden(res); return; }
+  const name = canonicalEngineerName(text(req.body?.name));
+  if (!name || name.length > 150) { res.status(400).json({ error: 'A valid Engineer name is required.' }); return; }
+  await ensureFrontlineTables();
+  try {
+    const [result] = await getDbPool().execute('INSERT INTO engineer_roster (user_id, engineer_name, active) VALUES (NULL, ?, 1)', [name]);
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.roster_created', resourceType: 'engineer_roster', resourceId: String((result as { insertId?: number }).insertId), metadata: { name } });
+    res.status(201).json({ message: `${name} added to the Engineer roster.`, name });
+  } catch (error) { if (String((error as Error).message).includes('Duplicate')) { res.status(409).json({ error: 'An Engineer with that name already exists.' }); return; } console.error('create engineer roster error:', error); res.status(500).json({ error: 'Unable to add the Engineer.' }); }
+});
+
+router.patch('/roster/:id', async (req, res) => {
+  if (!canManageRoster(req)) { forbidden(res); return; }
+  const id = Number(req.params.id); const name = canonicalEngineerName(text(req.body?.name));
+  if (!id || !name || name.length > 150) { res.status(400).json({ error: 'A valid Engineer name is required.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT id, engineer_name, user_id FROM engineer_roster WHERE id = ? AND active = 1 FOR UPDATE', [id]);
+    const current = (rows as Array<{ id: number; engineer_name: string; user_id: number | null }>)[0];
+    if (!current) { await connection.rollback(); res.status(404).json({ error: 'Engineer roster entry not found.' }); return; }
+    await connection.execute('UPDATE engineer_roster SET engineer_name = ? WHERE id = ?', [name, id]);
+    await connection.execute('UPDATE engineer_daily_availability SET engineer_name = ? WHERE engineer_name = ? AND user_id <=> ?', [name, current.engineer_name, current.user_id]);
+    await connection.commit();
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.roster_name_updated', resourceType: 'engineer_roster', resourceId: String(id), metadata: { fromName: current.engineer_name, toName: name } });
+    res.json({ message: `${name} updated.`, name });
+  } catch (error) { await connection.rollback(); if (String((error as Error).message).includes('Duplicate')) { res.status(409).json({ error: 'An Engineer with that name already exists.' }); return; } console.error('update engineer roster error:', error); res.status(500).json({ error: 'Unable to update the Engineer name.' }); } finally { connection.release(); }
+});
+
+router.delete('/roster/:id', async (req, res) => {
+  if (!canManageRoster(req)) { forbidden(res); return; }
+  const id = Number(req.params.id); if (!id) { res.status(400).json({ error: 'A valid Engineer is required.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT id, engineer_name, user_id FROM engineer_roster WHERE id = ? AND active = 1 FOR UPDATE', [id]);
+    const engineer = (rows as Array<Record<string, unknown>>)[0];
+    if (!engineer) { await connection.rollback(); res.status(404).json({ error: 'Engineer roster entry not found.' }); return; }
+    await connection.execute('UPDATE engineer_roster SET active = 0 WHERE id = ?', [id]);
+    await connection.execute('UPDATE engineer_daily_availability SET status = \'left\', left_at = CURRENT_TIMESTAMP WHERE availability_date = ? AND engineer_name = ? AND user_id <=> ?', [todayManila(), text(engineer.engineer_name), engineer.user_id == null ? null : Number(engineer.user_id)]);
+    await connection.commit();
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.roster_deactivated', resourceType: 'engineer_roster', resourceId: String(id), metadata: { name: text(engineer.engineer_name) } });
+    res.json({ message: `${text(engineer.engineer_name)} removed from the Engineer roster.` });
+  } catch (error) { await connection.rollback(); console.error('delete engineer roster error:', error); res.status(500).json({ error: 'Unable to remove the Engineer.' }); } finally { connection.release(); }
+});
+
 router.get('/available', async (req, res) => {
   if (!canEndorse(req) && !canManageRoster(req) && !isEngineer(req)) { forbidden(res); return; }
   await ensureFrontlineTables();

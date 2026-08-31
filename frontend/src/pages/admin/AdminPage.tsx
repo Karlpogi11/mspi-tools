@@ -26,6 +26,12 @@ const adminTools = [
     description: 'Connect Google Sheets and configure frontline monitoring reports.',
     icon: 'M3 3v18h18M7 16l3-4 3 2 5-7',
   },
+  {
+    to: '/admin/engineers',
+    name: 'Engineers',
+    description: 'Manage Engineer names for Engineer Endorsements.',
+    icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a6 6 0 0112 0M19 8v6M22 11h-6',
+  },
 ];
 
 export default function AdminPage() {

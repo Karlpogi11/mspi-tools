@@ -27,6 +27,7 @@ const loadApplecarePage = () => import('./pages/ApplecarePage');
 const loadFrontlinePage = () => import('./pages/FrontlinePage');
 const loadFrontlineDataEntryPage = () => import('./pages/FrontlineDataEntryPage');
 const loadAdminFrontlinePage = () => import('./pages/admin/AdminFrontlinePage');
+const loadAdminEngineersPage = () => import('./pages/admin/AdminEngineersPage');
 const loadEngineerEndorsementsPage = () => import('./pages/EngineerEndorsementsPage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
@@ -41,6 +42,7 @@ const ApplecarePage = lazy(loadApplecarePage);
 const FrontlinePage = lazy(loadFrontlinePage);
 const FrontlineDataEntryPage = lazy(loadFrontlineDataEntryPage);
 const AdminFrontlinePage = lazy(loadAdminFrontlinePage);
+const AdminEngineersPage = lazy(loadAdminEngineersPage);
 const EngineerEndorsementsPage = lazy(loadEngineerEndorsementsPage);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -84,6 +86,7 @@ function PrefetchCommonRoutes() {
         loadFrontlinePage(),
         loadFrontlineDataEntryPage(),
         loadAdminFrontlinePage(),
+        loadAdminEngineersPage(),
         loadEngineerEndorsementsPage(),
       ]).catch(() => undefined);
 
@@ -167,6 +170,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <AdminFrontlinePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/engineers"
+                element={
+                  <ProtectedRoute>
+                    <AdminEngineersPage />
                   </ProtectedRoute>
                 }
               />
