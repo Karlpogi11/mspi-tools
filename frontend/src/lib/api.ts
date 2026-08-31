@@ -497,6 +497,7 @@ export const api = {
     calendarFresh: (month: string) => requestFresh<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
     saveCalendarOrder: (month: string, division: string, engineerOrder: string[]) => request<{ message: string }>('/endorsements/calendar-order', { method: 'PUT', body: JSON.stringify({ month, division, engineerOrder }) }),
     saveCalendarEntry: (payload: { date: string; division: string; engineer: string; count: number; details?: string }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'PUT', body: JSON.stringify(payload) }),
+    deleteCalendarEntry: (payload: { date: string; division: string; engineer: string }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'DELETE', body: JSON.stringify(payload) }),
     passEndorsement: (id: number) => request<{ message: string; engineer: string }>(`/endorsements/${id}/pass`, { method: 'POST' }),
     cancelEndorsement: (id: number) => request<{ message: string }>(`/endorsements/${id}/cancel`, { method: 'POST' }),
   },

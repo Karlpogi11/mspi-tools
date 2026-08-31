@@ -264,6 +264,17 @@ router.put('/calendar-entry', async (req, res) => {
   res.json({ message: 'Calendar entry saved.' });
 });
 
+router.delete('/calendar-entry', async (req, res) => {
+  if (!canEditCalendar(req)) { forbidden(res); return; }
+  const date = text(req.body?.date); const division = text(req.body?.division); const engineer = canonicalEngineerName(text(req.body?.engineer));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !allowedCalendarDivisions.has(division) || !engineer) { res.status(400).json({ error: 'Date, category, and Engineer are required.' }); return; }
+  await ensureFrontlineTables();
+  const [result] = await getDbPool().execute('DELETE FROM engineer_calendar_entries WHERE entry_date = ? AND product_division = ? AND engineer_name = ?', [date, division, engineer]);
+  if (!Number((result as { affectedRows?: number }).affectedRows)) { res.status(404).json({ error: 'Manual calendar entry not found.' }); return; }
+  void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.calendar_entry_deleted', resourceType: 'engineer_calendar_entry', resourceId: `${date}:${division}:${engineer}`, metadata: { date, division, engineer } });
+  res.json({ message: 'Manual calendar entry deleted.' });
+});
+
 router.post('/:id/pass', async (req, res) => {
   if (!canEditCalendar(req)) { forbidden(res); return; }
   const id = Number(req.params.id); if (!id) { res.status(400).json({ error: 'A valid endorsement is required.' }); return; }
