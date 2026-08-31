@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from './db/index.js';
-import { users } from './db/schema.js';
+import { roles, users } from './db/schema.js';
 
 export interface JwtPayload {
   userId: number;
@@ -58,12 +58,24 @@ export async function verifyAccessToken(token: string): Promise<JwtPayload | nul
   }
   if (!Number.isInteger(payload.userId) || !Number.isInteger(payload.tokenVersion)) return null;
   const [user] = await getDb()
-    .select({ tokenVersion: users.token_version })
+    .select({
+      email: users.email,
+      roleId: users.role_id,
+      roleName: roles.name,
+      tokenVersion: users.token_version,
+    })
     .from(users)
+    .leftJoin(roles, eq(users.role_id, roles.id))
     .where(eq(users.id, payload.userId))
     .limit(1);
   if (!user || user.tokenVersion !== payload.tokenVersion) return null;
-  return payload;
+  return {
+    ...payload,
+    email: user.email,
+    roleId: user.roleId,
+    roleName: user.roleName,
+    tokenVersion: user.tokenVersion,
+  };
 }
 
 export function requireAdmin(

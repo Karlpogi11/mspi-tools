@@ -17,6 +17,7 @@ export default function EngineerEndorsementsPage() {
   const [rosterBusy, setRosterBusy] = useState(false);
   const [newEngineerName, setNewEngineerName] = useState('');
   const [message, setMessage] = useState('');
+  const [messageIsError, setMessageIsError] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [editingEndorsementId, setEditingEndorsementId] = useState<number | null>(null);
   const [deviceModelDraft, setDeviceModelDraft] = useState('');
@@ -24,7 +25,9 @@ export default function EngineerEndorsementsPage() {
   const [passingEndorsementId, setPassingEndorsementId] = useState<number | null>(null);
   const [deletingEndorsementId, setDeletingEndorsementId] = useState<number | null>(null);
 
-  const canManageRoster = user?.roleName === 'Admin' || user?.roleName === 'PMG';
+  const canManageRoster = user?.roleName === 'Admin' || user?.roleName === 'PMG' || user?.roleName === 'CSO';
+  const canManageAvailability = canManageRoster || user?.roleName === 'ENGR';
+  const showMessage = (text: string, isError = false) => { setMessage(text); setMessageIsError(isError); };
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -33,7 +36,7 @@ export default function EngineerEndorsementsPage() {
       setDashboard(nextDashboard);
       setCalendar(nextCalendar);
     } catch (error) {
-      setMessage((error as Error).message);
+      showMessage((error as Error).message, true);
     } finally {
       setLoading(false);
     }
@@ -45,7 +48,7 @@ export default function EngineerEndorsementsPage() {
       setRoster(result.roster);
       setNextEngineer(result.nextEngineer);
     } catch (error) {
-      setMessage((error as Error).message);
+      showMessage((error as Error).message, true);
     }
   };
 
@@ -68,7 +71,7 @@ export default function EngineerEndorsementsPage() {
       void Promise.all([load(true), loadRoster()]);
     } catch (error) {
       setNextEngineer(previousNext);
-      setMessage((error as Error).message);
+      showMessage((error as Error).message, true);
     } finally {
       setBusy(false);
     }
@@ -85,7 +88,7 @@ export default function EngineerEndorsementsPage() {
       await loadRoster();
       setMessage(`${name} added to today's Engineer roster.`);
     } catch (error) {
-      setMessage((error as Error).message);
+      showMessage((error as Error).message, true);
     } finally {
       setRosterBusy(false);
     }
@@ -105,7 +108,7 @@ export default function EngineerEndorsementsPage() {
     } catch (error) {
       setRoster(previousRoster);
       setNextEngineer(previousRoster?.find((engineer) => engineer.status === 'active') || null);
-      setMessage((error as Error).message);
+      showMessage((error as Error).message, true);
     } finally {
       setRosterBusy(false);
     }
@@ -125,14 +128,14 @@ export default function EngineerEndorsementsPage() {
     } catch (error) {
       setRoster(previousRoster);
       setNextEngineer(previousRoster?.find((engineer) => engineer.status === 'active') || null);
-      setMessage((error as Error).message);
+      showMessage((error as Error).message, true);
     } finally {
       setRosterBusy(false);
     }
   };
 
   const toggleAvailability = async (engineer: EndorsementEngineer) => {
-    if (!canManageRoster) return;
+    if (!canManageAvailability) return;
     if (engineer.status === 'active') await removeEngineer(engineer.id);
     else await markPresent(engineer.full_name);
   };
@@ -155,12 +158,12 @@ export default function EngineerEndorsementsPage() {
   const selectedEndorsementCount = selectedEndorsements.reduce((sum, entry) => sum + (entry.manual_count || 1), 0);
   const latestCalendarTimestamp = useMemo(() => { if (!calendar) return null; let latest = ''; for (const day of calendar.days) for (const division of Object.values(day.counts)) for (const entries of Object.values(division)) for (const entry of entries) if (entry.created_at > latest) latest = entry.created_at; return latest || null; }, [calendar]);
   const openCalendarEditor = (date: string, division: string, engineer: string) => { const entry = calendar?.days.find((day) => day.date === date)?.counts[division]?.[engineer]?.find((item) => item.is_manual); setEditingCell({ date, division, engineer, count: entry?.manual_count ? String(entry.manual_count) : '', details: entry?.details || '' }); };
-  const saveCalendarEntry = async () => { if (!editingCell) return; const count = Number(editingCell.count); if (!Number.isInteger(count) || count < 1) return; setSavingCell(true); setMessage(''); try { await api.endorsements.saveCalendarEntry({ ...editingCell, count }); setEditingCell(null); await load(); setMessage('Calendar entry saved.'); } catch (error) { setMessage((error as Error).message); } finally { setSavingCell(false); } };
+  const saveCalendarEntry = async () => { if (!editingCell) return; const count = Number(editingCell.count); if (!Number.isInteger(count) || count < 1) return; setSavingCell(true); setMessage(''); try { await api.endorsements.saveCalendarEntry({ ...editingCell, count }); setEditingCell(null); await load(); showMessage('Calendar entry saved.'); } catch (error) { showMessage((error as Error).message, true); } finally { setSavingCell(false); } };
   const canEditEndorsement = user?.roleName === 'Admin' || user?.roleName === 'CSO';
   const beginDeviceModelEdit = (id: number, value: string | null) => { setEditingEndorsementId(id); setDeviceModelDraft(value || ''); };
-  const saveDeviceModel = async (id: number) => { const value = deviceModelDraft.trim(); if (!value) return; setSavingDeviceModel(true); setMessage(''); try { await api.endorsements.updateDeviceModel(id, value); setEditingEndorsementId(null); setDeviceModelDraft(''); await load(); setMessage('Device model updated.'); } catch (error) { setMessage((error as Error).message); } finally { setSavingDeviceModel(false); } };
-  const passEndorsement = async (id: number) => { setPassingEndorsementId(id); setMessage(''); try { await api.endorsements.passEndorsement(id); void Promise.all([load(true), loadRoster()]); } catch (error) { setMessage((error as Error).message); } finally { setPassingEndorsementId(null); } };
-  const deleteEndorsement = async (id: number) => { if (!window.confirm('Delete this endorsement only? The original Frontline record will not be changed.')) return; setDeletingEndorsementId(id); setMessage(''); try { const result = await api.endorsements.delete(id); setSelectedDay(null); await Promise.all([load(true), loadRoster()]); setMessage(result.message); } catch (error) { setMessage((error as Error).message); } finally { setDeletingEndorsementId(null); } };
+  const saveDeviceModel = async (id: number) => { const value = deviceModelDraft.trim(); if (!value) return; setSavingDeviceModel(true); setMessage(''); try { await api.endorsements.updateDeviceModel(id, value); setEditingEndorsementId(null); setDeviceModelDraft(''); await load(); showMessage('Device model updated.'); } catch (error) { showMessage((error as Error).message, true); } finally { setSavingDeviceModel(false); } };
+  const passEndorsement = async (id: number) => { setPassingEndorsementId(id); setMessage(''); try { await api.endorsements.passEndorsement(id); void Promise.all([load(true), loadRoster()]); } catch (error) { showMessage((error as Error).message, true); } finally { setPassingEndorsementId(null); } };
+  const deleteEndorsement = async (id: number) => { if (!window.confirm('Delete this endorsement only? The original Frontline record will not be changed.')) return; setDeletingEndorsementId(id); setMessage(''); try { const result = await api.endorsements.delete(id); setSelectedDay(null); await Promise.all([load(true), loadRoster()]); showMessage(result.message); } catch (error) { showMessage((error as Error).message, true); } finally { setDeletingEndorsementId(null); } };
 
   return (
     <div className="min-h-[calc(100vh-128px)] bg-[#f4f3f6]">
@@ -172,7 +175,7 @@ export default function EngineerEndorsementsPage() {
 
         {message && (
           <div role="status" aria-live="polite" className="fixed right-4 top-16 z-30 flex max-w-sm items-center gap-3 rounded-2xl bg-white/95 px-3.5 py-3 text-[12px] text-[#3c3c43] shadow-[0_12px_32px_rgba(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#f5f5f7] text-[13px] text-[#3c3c43]" aria-hidden="true">✓</span>
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] ${messageIsError ? 'bg-[#fef2f2] text-[#b42318]' : 'bg-[#f5f5f7] text-[#3c3c43]'}`} aria-hidden="true">{messageIsError ? '!' : '✓'}</span>
             <span className="min-w-0 flex-1 leading-5">{message}</span>
             <button type="button" aria-label="Dismiss message" onClick={() => setMessage('')} className="cursor-pointer rounded-full px-1 text-[16px] leading-none text-[#6e6e73] hover:bg-[#f5f5f7]">×</button>
           </div>
@@ -198,7 +201,7 @@ export default function EngineerEndorsementsPage() {
               </form>}
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              {roster === null ? <p className="text-[12px] text-[#6e6e73]">Loading roster…</p> : roster.length ? <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{roster.map((engineer, index) => <button key={engineer.id} type="button" onClick={() => void toggleAvailability(engineer)} disabled={!canManageRoster} aria-pressed={engineer.status === 'active'} aria-label={`${engineer.full_name}: ${engineer.status === 'active' ? 'available' : 'unavailable'}. Click to change status.`} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${engineer.status === 'active' ? 'border-[#cfe8d6] bg-[#fbfefc] hover:bg-[#f4fbf6]' : 'border-[#e5e5e7] bg-[#fafafa] opacity-70 hover:bg-[#f5f5f7]'} ${canManageRoster ? 'cursor-pointer' : 'cursor-default'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${engineer.status === 'active' ? 'bg-[#e8f5eb] text-[#166534]' : 'bg-[#e8e8ed] text-[#86868b]'}`}>{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[#1d1d1f]">{engineer.full_name}</span><span className="mt-0.5 block text-[11px] text-[#6e6e73]">{engineer.assignment_count} assigned today</span></span><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${engineer.status === 'active' ? 'bg-[#ecfdf3] text-[#166534]' : 'bg-[#f0f0f2] text-[#6e6e73]'}`}>{engineer.status === 'active' ? 'Available' : 'Away'}</span></button>)}</div> : <p className="text-[12px] text-[#6e6e73]">No Engineers added for today yet.</p>}
+              {roster === null ? <p className="text-[12px] text-[#6e6e73]">Loading roster…</p> : roster.length ? <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{roster.map((engineer, index) => <button key={engineer.id} type="button" onClick={() => void toggleAvailability(engineer)} disabled={!canManageAvailability} aria-pressed={engineer.status === 'active'} aria-label={`${engineer.full_name}: ${engineer.status === 'active' ? 'available' : 'unavailable'}. Click to change status.`} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${engineer.status === 'active' ? 'border-[#cfe8d6] bg-[#fbfefc] hover:bg-[#f4fbf6]' : 'border-[#e5e5e7] bg-[#fafafa] opacity-70 hover:bg-[#f5f5f7]'} ${canManageAvailability ? 'cursor-pointer' : 'cursor-default'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${engineer.status === 'active' ? 'bg-[#e8f5eb] text-[#166534]' : 'bg-[#e8e8ed] text-[#86868b]'}`}>{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[#1d1d1f]">{engineer.full_name}</span><span className="mt-0.5 block text-[11px] text-[#6e6e73]">{engineer.assignment_count} assigned today</span></span><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${engineer.status === 'active' ? 'bg-[#ecfdf3] text-[#166534]' : 'bg-[#f0f0f2] text-[#6e6e73]'}`}>{engineer.status === 'active' ? 'Available' : 'Away'}</span></button>)}</div> : <p className="text-[12px] text-[#6e6e73]">No Engineers added for today yet.</p>}
             </div>
           </section>
         )}

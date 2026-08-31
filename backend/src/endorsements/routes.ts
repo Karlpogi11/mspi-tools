@@ -14,7 +14,8 @@ function isoTimestamp(value: unknown) { if (!value) return null; const date = va
 function isEngineer(req: Request) { return req.user?.roleName === 'ENGR'; }
 function canEndorse(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'CSO'; }
 function canView(req: Request) { return canEndorse(req) || canManageRoster(req) || isEngineer(req); }
-function canManageRoster(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG'; }
+function canManageRoster(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG' || req.user?.roleName === 'CSO'; }
+function canManageAvailability(req: Request) { return canManageRoster(req) || isEngineer(req); }
 function forbidden(res: Response) { res.status(403).json({ error: 'Engineer Endorsements access required' }); }
 function endorsementDivision(deviceModel: string, sourceDivision: string) {
   if (/^MacBook\b/i.test(deviceModel)) return 'MacBook';
@@ -55,7 +56,7 @@ router.post('/availability/skip', async (req, res) => {
 });
 
 router.post('/availability/pass-next', async (req, res) => {
-  if (!canEndorse(req) && !canManageRoster(req)) { forbidden(res); return; }
+  if (!canEndorse(req) && !canManageRoster(req) && !isEngineer(req)) { forbidden(res); return; }
   await ensureFrontlineTables();
   const pool = getDbPool(); const connection = await pool.getConnection();
   try {
@@ -71,9 +72,13 @@ router.post('/availability/pass-next', async (req, res) => {
 });
 
 router.post('/availability/add', async (req, res) => {
-  if (!canManageRoster(req)) { forbidden(res); return; }
+  if (!canManageAvailability(req)) { forbidden(res); return; }
   const name = canonicalEngineerName(text(req.body?.name)); if (!name || name.length > 150) { res.status(400).json({ error: 'Engineer name is required.' }); return; }
   await ensureFrontlineTables(); const pool = getDbPool();
+  if (isEngineer(req)) {
+    const [existingRoster] = await pool.query('SELECT id FROM engineer_roster WHERE engineer_name = ? AND active = 1 LIMIT 1', [name]);
+    if (!(existingRoster as Array<Record<string, unknown>>).length) { forbidden(res); return; }
+  }
   await pool.execute(`INSERT INTO engineer_roster (user_id, engineer_name, active) VALUES (NULL, ?, 1) ON DUPLICATE KEY UPDATE active = 1`, [name]);
   await pool.execute(`INSERT INTO engineer_daily_availability (user_id, engineer_name, availability_date, status) VALUES (NULL, ?, ?, 'active') ON DUPLICATE KEY UPDATE status = 'active', left_at = NULL`, [name, todayManila()]);
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.roster_added', resourceType: 'engineer_daily_availability', metadata: { name, date: todayManila() } });
@@ -81,7 +86,7 @@ router.post('/availability/add', async (req, res) => {
 });
 
 router.post('/availability/remove', async (req, res) => {
-  if (!canManageRoster(req)) { forbidden(res); return; }
+  if (!canManageAvailability(req)) { forbidden(res); return; }
   const id = Number(req.body?.id); if (!id) { res.status(400).json({ error: 'Engineer card is required.' }); return; }
   await ensureFrontlineTables(); const pool = getDbPool(); await pool.execute("UPDATE engineer_daily_availability SET status = 'left', left_at = CURRENT_TIMESTAMP WHERE id = ? AND availability_date = ?", [id, todayManila()]);
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.roster_removed', resourceType: 'engineer_daily_availability', resourceId: String(id), metadata: { date: todayManila() } });
