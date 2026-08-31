@@ -153,7 +153,7 @@ router.get('/available', async (req, res) => {
     ON DUPLICATE KEY UPDATE engineer_name = VALUES(engineer_name), user_id = COALESCE(engineer_daily_availability.user_id, VALUES(user_id))`, [todayManila()]);
   const [rows] = await pool.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.assignment_count, a.joined_at, a.last_assigned_at
     FROM engineer_daily_availability a LEFT JOIN users u ON u.id = a.user_id
-    WHERE a.availability_date = ?
+    WHERE a.availability_date = ? AND EXISTS (SELECT 1 FROM engineer_roster r WHERE r.active = 1 AND (r.engineer_name = a.engineer_name OR (r.user_id IS NOT NULL AND r.user_id = a.user_id)))
     ORDER BY a.status = 'active' DESC, a.last_assigned_at IS NOT NULL ASC, a.last_assigned_at ASC, a.assignment_count ASC, a.joined_at ASC, a.id ASC`, [todayManila()]);
   const roster = rows as Array<Record<string, unknown>>;
   const engineers = roster.filter((engineer) => engineer.status === 'active');
