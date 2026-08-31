@@ -1,7 +1,35 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
+import { and, eq } from 'drizzle-orm';
 import { initDb, getDb } from './index.js';
 import { roles, users, tools, roleToolAccess } from './schema.js';
+
+async function getOrCreateRole(name: string) {
+  const db = getDb();
+  const [existing] = await db.select({ id: roles.id }).from(roles).where(eq(roles.name, name)).limit(1);
+  if (existing) return existing.id;
+  const [created] = await db.insert(roles).values({ name }).$returningId();
+  return created.id;
+}
+
+async function getOrCreateTool(tool: { name: string; url: string; icon: string; description: string }) {
+  const db = getDb();
+  const [existing] = await db.select({ id: tools.id }).from(tools).where(eq(tools.url, tool.url)).limit(1);
+  if (existing) return existing.id;
+  const [created] = await db.insert(tools).values(tool).$returningId();
+  return created.id;
+}
+
+async function grantAccess(toolId: number, roleIds: number[]) {
+  const db = getDb();
+  for (const roleId of roleIds) {
+    const [existing] = await db.select({ roleId: roleToolAccess.role_id })
+      .from(roleToolAccess)
+      .where(and(eq(roleToolAccess.tool_id, toolId), eq(roleToolAccess.role_id, roleId)))
+      .limit(1);
+    if (!existing) await db.insert(roleToolAccess).values({ tool_id: toolId, role_id: roleId });
+  }
+}
 
 async function seed() {
   const adminEmail = String(process.env.SEED_ADMIN_EMAIL || '').trim().toLowerCase();
@@ -12,118 +40,35 @@ async function seed() {
   const db = getDb();
 
   console.log('Seeding database...');
+  const [adminRole, pmgRole, csoRole, engrRole] = await Promise.all(['Admin', 'PMG', 'CSO', 'ENGR'].map(getOrCreateRole));
 
-  const [adminRole] = await db.insert(roles).values({ name: 'Admin' }).$returningId();
-  const [pmgRole] = await db.insert(roles).values({ name: 'PMG' }).$returningId();
-  const [csoRole] = await db.insert(roles).values({ name: 'CSO' }).$returningId();
-  const [engrRole] = await db.insert(roles).values({ name: 'ENGR' }).$returningId();
+  const [existingSuperAdmin] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.is_super_admin, 1)).limit(1);
+  if (existingSuperAdmin) {
+    console.log(`Super Admin already configured: ${existingSuperAdmin.email}`);
+  } else {
+    const [existingAdmin] = await db.select({ id: users.id }).from(users).where(eq(users.email, adminEmail)).limit(1);
+    if (existingAdmin) {
+      await db.update(users).set({ is_super_admin: 1 }).where(eq(users.id, existingAdmin.id));
+      console.log(`Existing admin promoted to Super Admin: ${adminEmail}`);
+    } else {
+      await db.insert(users).values({ email: adminEmail, password_hash: await bcrypt.hash(adminPassword, 12), full_name: 'Admin User', role_id: adminRole, is_super_admin: 1 });
+      console.log(`Super Admin user created: ${adminEmail}`);
+    }
+  }
 
-  console.log('Roles created: Admin, PMG, CSO, ENGR');
+  const definitions = [
+    { name: 'Site Monitor', url: '/rfpu', icon: 'monitor', description: 'Real-time site monitoring and performance tracking for RFPU deployments.', roles: [pmgRole, csoRole, engrRole] },
+    { name: 'PCount', url: '/pcount', icon: 'clipboard', description: 'Product counting and inventory management tool.', roles: [pmgRole, csoRole] },
+    { name: 'ReFormat', url: '/reformat', icon: 'table', description: 'Import Excel/CSV files, map and rearrange columns, and export the reformatted result.', roles: [pmgRole, csoRole, engrRole] },
+    { name: 'Label Maker', url: '/consumables', icon: 'tag', description: 'Consumables label maker — log parts, auto-compute production/expiry from the 9D code, and print cut-out labels.', roles: [pmgRole, csoRole, engrRole] },
+    { name: 'PDF Extractor', url: '/pdf-extractor', icon: 'file', description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date.', roles: [pmgRole, csoRole, engrRole] },
+  ];
+  for (const definition of definitions) {
+    const toolId = await getOrCreateTool({ name: definition.name, url: definition.url, icon: definition.icon, description: definition.description });
+    await grantAccess(toolId, [adminRole, ...definition.roles]);
+  }
 
-  const hash = await bcrypt.hash(adminPassword, 12);
-  await db.insert(users).values({
-    email: adminEmail,
-    password_hash: hash,
-    full_name: 'Admin User',
-    role_id: adminRole.id,
-  });
-
-  console.log(`Admin user created: ${adminEmail}`);
-
-  const [rfpuTool] = await db.insert(tools).values({
-    name: 'Site Monitor',
-    url: '/rfpu',
-    icon: 'monitor',
-    description: 'Real-time site monitoring and performance tracking for RFPU deployments.',
-  }).$returningId();
-
-  console.log('Tool created: Site Monitor (/rfpu)');
-
-  await db.insert(roleToolAccess).values([
-    { role_id: pmgRole.id, tool_id: rfpuTool.id },
-    { role_id: csoRole.id, tool_id: rfpuTool.id },
-    { role_id: engrRole.id, tool_id: rfpuTool.id },
-  ]);
-
-  console.log('Site Monitor assigned to PMG, CSO, and ENGR roles');
-
-  const [pcountTool] = await db.insert(tools).values({
-    name: 'PCount',
-    url: '/pcount',
-    icon: 'clipboard',
-    description: 'Product counting and inventory management tool.',
-  }).$returningId();
-
-  console.log('Tool created: PCount (/pcount)');
-
-  await db.insert(roleToolAccess).values([
-    { role_id: pmgRole.id, tool_id: pcountTool.id },
-    { role_id: csoRole.id, tool_id: pcountTool.id },
-  ]);
-
-  console.log('PCount assigned to PMG and CSO roles');
-
-  await db.insert(roleToolAccess).values([
-    { role_id: adminRole.id, tool_id: rfpuTool.id },
-    { role_id: adminRole.id, tool_id: pcountTool.id },
-  ]);
-
-  console.log('Site Monitor and PCount assigned to Admin role');
-
-  const [reformatTool] = await db.insert(tools).values({
-    name: 'ReFormat',
-    url: '/reformat',
-    icon: 'table',
-    description: 'Import Excel/CSV files, map and rearrange columns, and export the reformatted result.',
-  }).$returningId();
-
-  console.log('Tool created: ReFormat (/reformat)');
-
-  await db.insert(roleToolAccess).values([
-    { role_id: pmgRole.id, tool_id: reformatTool.id },
-    { role_id: csoRole.id, tool_id: reformatTool.id },
-    { role_id: engrRole.id, tool_id: reformatTool.id },
-    { role_id: adminRole.id, tool_id: reformatTool.id },
-  ]);
-
-  console.log('ReFormat assigned to PMG, CSO, ENGR, and Admin roles');
-
-  const [consumablesTool] = await db.insert(tools).values({
-    name: 'Label Maker',
-    url: '/consumables',
-    icon: 'tag',
-    description: 'Consumables label maker — log parts, auto-compute production/expiry from the 9D code, and print cut-out labels.',
-  }).$returningId();
-
-  console.log('Tool created: Label Maker (/consumables)');
-
-  await db.insert(roleToolAccess).values([
-    { role_id: pmgRole.id, tool_id: consumablesTool.id },
-    { role_id: csoRole.id, tool_id: consumablesTool.id },
-    { role_id: engrRole.id, tool_id: consumablesTool.id },
-    { role_id: adminRole.id, tool_id: consumablesTool.id },
-  ]);
-
-  console.log('Label Maker assigned to PMG, CSO, ENGR, and Admin roles');
-
-  const [pdfExtractorTool] = await db.insert(tools).values({
-    name: 'PDF Extractor',
-    url: '/pdf-extractor',
-    icon: 'file',
-    description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date, files them by month, and logs every invoice.',
-  }).$returningId();
-
-  console.log('Tool created: PDF Extractor (/pdf-extractor)');
-
-  await db.insert(roleToolAccess).values([
-    { role_id: pmgRole.id, tool_id: pdfExtractorTool.id },
-    { role_id: csoRole.id, tool_id: pdfExtractorTool.id },
-    { role_id: engrRole.id, tool_id: pdfExtractorTool.id },
-    { role_id: adminRole.id, tool_id: pdfExtractorTool.id },
-  ]);
-
-  console.log('PDF Extractor assigned to PMG, CSO, ENGR, and Admin roles');
-  console.log('\nSeed complete!');
+  console.log('Seed complete!');
   process.exit(0);
 }
 

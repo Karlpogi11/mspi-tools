@@ -9,6 +9,7 @@ export interface JwtPayload {
   email: string;
   roleId: number | null;
   roleName: string | null;
+  isSuperAdmin: boolean;
   tokenVersion: number;
 }
 
@@ -62,6 +63,7 @@ export async function verifyAccessToken(token: string): Promise<JwtPayload | nul
       email: users.email,
       roleId: users.role_id,
       roleName: roles.name,
+      isSuperAdmin: users.is_super_admin,
       tokenVersion: users.token_version,
     })
     .from(users)
@@ -74,6 +76,7 @@ export async function verifyAccessToken(token: string): Promise<JwtPayload | nul
     email: user.email,
     roleId: user.roleId,
     roleName: user.roleName,
+    isSuperAdmin: Boolean(user.isSuperAdmin),
     tokenVersion: user.tokenVersion,
   };
 }
@@ -85,6 +88,18 @@ export function requireAdmin(
 ) {
   if (!req.user || req.user.roleName !== 'Admin') {
     res.status(403).json({ error: 'Admin access required' });
+    return;
+  }
+  next();
+}
+
+export function requireSuperAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  if (!req.user?.isSuperAdmin) {
+    res.status(403).json({ error: 'Super Admin access required' });
     return;
   }
   next();

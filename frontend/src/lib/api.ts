@@ -149,6 +149,7 @@ export interface User {
   fullName: string;
   roleId: number | null;
   roleName: string | null;
+  isSuperAdmin?: boolean;
   createdAt?: string;
 }
 

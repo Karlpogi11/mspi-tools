@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { eq, isNull, asc } from 'drizzle-orm';
 import { getDb, getDbPool } from '../db/index.js';
 import { users, roles, tools, roleToolAccess } from '../db/schema.js';
-import { authenticateToken, requireAdmin } from '../auth.js';
+import { authenticateToken, requireAdmin, requireSuperAdmin } from '../auth.js';
 import { passwordValidationError } from './auth.js';
 import { writeAuditLog } from '../db/audit.js';
 import { ensureFrontlineTables } from '../frontline/store.js';
@@ -76,6 +76,7 @@ router.get('/users', async (_req: Request, res: Response) => {
         fullName: users.full_name,
         roleId: users.role_id,
         roleName: roles.name,
+        isSuperAdmin: users.is_super_admin,
         createdAt: users.created_at,
       })
       .from(users)
@@ -105,11 +106,20 @@ router.patch('/users/:id/role', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Role not found' });
       return;
     }
-    const result = await db.update(users).set({ role_id: roleId }).where(eq(users.id, id));
-    if (!result) {
+    const [target] = await db.select({ id: users.id, isSuperAdmin: users.is_super_admin }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target) {
       res.status(404).json({ error: 'User not found' });
       return;
     }
+    if (target.isSuperAdmin && !req.user!.isSuperAdmin) {
+      res.status(403).json({ error: 'Only the Super Admin can modify the Super Admin account.' });
+      return;
+    }
+    if (target.isSuperAdmin && id === req.user!.userId && role[0].name !== 'Admin') {
+      res.status(400).json({ error: 'The Super Admin account must keep the Admin role.' });
+      return;
+    }
+    await db.update(users).set({ role_id: roleId }).where(eq(users.id, id));
     void writeAuditLog({ actorUserId: req.user!.userId, action: 'admin.user_role_changed', resourceType: 'user', resourceId: String(id), metadata: { roleId, roleName: role[0].name } });
 
     res.json({ message: 'Role updated', userId: id, roleId, roleName: role[0].name });
@@ -173,6 +183,15 @@ router.delete('/users/:id', async (req: Request, res: Response) => {
       return;
     }
     const db = getDb();
+    const [target] = await db.select({ isSuperAdmin: users.is_super_admin }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    if (target.isSuperAdmin && !req.user!.isSuperAdmin) {
+      res.status(403).json({ error: 'Only the Super Admin can delete the Super Admin account.' });
+      return;
+    }
     await db.delete(users).where(eq(users.id, id));
     void writeAuditLog({ actorUserId: req.user!.userId, action: 'admin.user_deleted', resourceType: 'user', resourceId: id });
     res.json({ message: 'User deleted' });
@@ -247,7 +266,7 @@ router.get('/tools', async (_req: Request, res: Response) => {
   }
 });
 
-router.post('/tools', async (req: Request, res: Response) => {
+router.post('/tools', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { name, url, icon, description, roleIds } = req.body;
 
@@ -276,7 +295,7 @@ router.post('/tools', async (req: Request, res: Response) => {
   }
 });
 
-router.put('/tools/:id', async (req: Request, res: Response) => {
+router.put('/tools/:id', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, url, icon, description, roleIds } = req.body;
@@ -303,7 +322,7 @@ router.put('/tools/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.delete('/tools/:id', async (req: Request, res: Response) => {
+router.delete('/tools/:id', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const db = getDb();

@@ -111,7 +111,7 @@ router.post('/signup', signupLimiter, authSlowDown, async (req: Request, res: Re
       .$returningId();
 
     const token = jwt.sign(
-      { userId: newUser.id, email, roleId: null, roleName: null, tokenVersion: 0 },
+      { userId: newUser.id, email, roleId: null, roleName: null, isSuperAdmin: false, tokenVersion: 0 },
       process.env.JWT_SECRET!,
       { expiresIn: '8h' }
     );
@@ -134,7 +134,7 @@ router.post('/signup', signupLimiter, authSlowDown, async (req: Request, res: Re
 
     res.status(201).json({
       message: 'Account created. An admin must assign your role before you can access tools.',
-      user: { id: newUser.id, email, fullName, roleId: null, roleName: null },
+      user: { id: newUser.id, email, fullName, roleId: null, roleName: null, isSuperAdmin: false },
     });
   } catch (error) {
     console.error('Signup error:', error);
@@ -193,6 +193,7 @@ router.post('/login', loginLimiter, authSlowDown, async (req: Request, res: Resp
         email: user.email,
         roleId: user.role_id,
         roleName: roleName ?? null,
+        isSuperAdmin: Boolean(user.is_super_admin),
         tokenVersion: user.token_version,
       },
       process.env.JWT_SECRET!,
@@ -218,6 +219,7 @@ router.post('/login', loginLimiter, authSlowDown, async (req: Request, res: Resp
         fullName: user.full_name,
         roleId: user.role_id,
         roleName,
+        isSuperAdmin: Boolean(user.is_super_admin),
       },
     });
   } catch (error) {
@@ -313,6 +315,7 @@ router.get('/me', authenticateToken, async (req: Request, res: Response) => {
     fullName: user.full_name,
     roleId: user.role_id,
     roleName,
+    isSuperAdmin: Boolean(user.is_super_admin),
     createdAt: user.created_at,
   });
 });

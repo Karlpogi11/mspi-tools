@@ -20,6 +20,7 @@ export const users = mysqlTable('users', {
   password_hash: varchar('password_hash', { length: 255 }).notNull(),
   full_name: varchar('full_name', { length: 255 }).notNull(),
   role_id: int('role_id').references(() => roles.id, { onDelete: 'set null' }),
+  is_super_admin: int('is_super_admin').default(0).notNull(),
   token_version: int('token_version').default(0).notNull(),
   created_at: timestamp('created_at').defaultNow().notNull(),
 });

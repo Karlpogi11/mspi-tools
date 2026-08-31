@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Tool, type Role } from '../lib/api';
 import { invalidateQuery, useCachedQuery } from '../lib/queryCache';
+import { useAuth } from '../lib/auth';
 
 interface ToolForm {
   name: string;
@@ -14,6 +15,8 @@ interface ToolForm {
 const emptyForm: ToolForm = { name: '', url: '', icon: 'default', description: '', roleIds: [] };
 
 export default function AdminToolsPage() {
+  const { user } = useAuth();
+  const canManageTools = Boolean(user?.isSuperAdmin);
   const toolsQuery = useCachedQuery<Tool[]>('admin-tools', api.admin.getTools);
   const rolesQuery = useCachedQuery<Role[]>('admin-roles', api.admin.getRoles);
   const tools = toolsQuery.data || [];
@@ -57,6 +60,8 @@ export default function AdminToolsPage() {
   };
 
   const deleteTool = async (id: number) => {
+    const tool = tools.find((item) => item.id === id);
+    if (!tool || !window.confirm(`Delete ${tool.name}? This will also remove its role access configuration.`)) return;
     await api.admin.deleteTool(id);
     invalidateQuery('admin-tools');
     loadData();
@@ -89,12 +94,12 @@ export default function AdminToolsPage() {
           <h1 className="text-[26px] font-semibold text-[#1d1d1f] tracking-tight">Tools</h1>
           <p className="text-[14px] text-[#6e6e73] mt-1">Configure internal tools and access</p>
         </div>
-        <button
+        {canManageTools && <button
           onClick={() => { resetForm(); setShowForm(true); }}
           className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] transition-colors cursor-pointer"
         >
           Add tool
-        </button>
+        </button>}
       </div>
 
       {showForm && (
@@ -227,18 +232,20 @@ export default function AdminToolsPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex gap-2 justify-end">
-                      <button
-                        onClick={() => editTool(tool)}
-                        className="text-[13px] text-[#2563eb] hover:text-[#1d4ed8] transition-colors cursor-pointer"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => deleteTool(tool.id)}
-                        className="text-[13px] text-[#6e6e73] hover:text-[#dc2626] transition-colors cursor-pointer"
-                      >
-                        Delete
-                      </button>
+                      {canManageTools && <>
+                        <button
+                          onClick={() => editTool(tool)}
+                          className="text-[13px] text-[#2563eb] hover:text-[#1d4ed8] transition-colors cursor-pointer"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteTool(tool.id)}
+                          className="text-[13px] text-[#6e6e73] hover:text-[#dc2626] transition-colors cursor-pointer"
+                        >
+                          Delete
+                        </button>
+                      </>}
                     </div>
                   </td>
                 </tr>

@@ -143,7 +143,7 @@ export default function AdminUsersPage() {
                     <td className="px-4 py-3">
                       {u.roleName ? (
                         <span className="inline-flex items-center text-[12px] font-medium text-[#1d1d1f]">
-                          {u.roleName}
+                          {u.isSuperAdmin ? 'Super Admin' : u.roleName}
                         </span>
                       ) : (
                         <span className="text-[#6e6e73]">&mdash;</span>
@@ -155,6 +155,7 @@ export default function AdminUsersPage() {
                         <div className="relative">
                           <select
                             value={u.roleId ? String(u.roleId) : ''}
+                            disabled={Boolean(u.isSuperAdmin)}
                             onChange={(e) => {
                               const nextRoleId = Number(e.target.value);
                               if (nextRoleId && nextRoleId !== u.roleId) assignRole(u.id, nextRoleId);
@@ -162,10 +163,16 @@ export default function AdminUsersPage() {
                             aria-label={`Change role for ${u.email}`}
                             className="h-8 appearance-none rounded-lg border border-[#d2d2d7] bg-white py-0 pl-2.5 pr-7 text-[12px] text-[#1d1d1f] outline-none transition-shadow cursor-pointer hover:border-[#b8b8bd] focus:border-[#8e8e93] focus:ring-2 focus:ring-[#1d1d1f]/10"
                           >
-                            {!u.roleId && <option value="">Assign role</option>}
-                            {roles.map((r) => (
-                              <option key={r.id} value={r.id}>{r.name}</option>
-                            ))}
+                            {u.isSuperAdmin ? (
+                              <option value={u.roleId ? String(u.roleId) : ''}>Super Admin</option>
+                            ) : (
+                              <>
+                                {!u.roleId && <option value="">Assign role</option>}
+                                {roles.map((r) => (
+                                  <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                              </>
+                            )}
                           </select>
                           <svg aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#6e6e73]" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="m3 4.5 3 3 3-3" />
