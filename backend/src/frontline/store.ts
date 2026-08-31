@@ -54,6 +54,22 @@ async function initializeFrontlineTables(): Promise<void> {
     KEY engineer_calendar_entry_date_idx (entry_date),
     CONSTRAINT engineer_calendar_entry_creator_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS engineer_calendar_orders (
+    id bigint AUTO_INCREMENT NOT NULL,
+    order_month char(7) NOT NULL,
+    product_division varchar(30) NOT NULL,
+    engineer_name varchar(150) NOT NULL,
+    sort_order int NOT NULL,
+    created_by int NOT NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY engineer_calendar_order_unique (order_month, product_division, engineer_name),
+    KEY engineer_calendar_order_month_idx (order_month, product_division, sort_order),
+    CONSTRAINT engineer_calendar_order_creator_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  try { await pool.query("ALTER TABLE engineer_calendar_orders ADD COLUMN product_division varchar(30) NOT NULL DEFAULT 'iOS/ACCS' AFTER order_month"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
+  try { await pool.query('ALTER TABLE engineer_calendar_orders DROP INDEX engineer_calendar_order_unique'); } catch (error) { if (!String((error as Error).message).includes('check that column/key exists') && !String((error as Error).message).includes('check that it exists')) throw error; }
+  try { await pool.query('ALTER TABLE engineer_calendar_orders ADD UNIQUE KEY engineer_calendar_order_unique (order_month, product_division, engineer_name)'); } catch (error) { if (!String((error as Error).message).includes('Duplicate key name')) throw error; }
   await pool.query(`CREATE TABLE IF NOT EXISTS frontline_sources (
     id int AUTO_INCREMENT NOT NULL,
     spreadsheet_id varchar(255) NOT NULL,

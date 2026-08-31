@@ -6,6 +6,7 @@ import { ensureFrontlineTables } from '../frontline/store.js';
 
 const router = Router();
 router.use(authenticateToken);
+const allowedCalendarDivisions = new Set(['iOS/ACCS', 'MacBook', 'iMac']);
 
 function text(value: unknown) { return String(value ?? '').trim(); }
 function canonicalEngineerName(value: string) { const name = text(value); return name.toLowerCase() === 'k' ? 'Karl' : name; }
@@ -17,6 +18,7 @@ function canView(req: Request) { return canEndorse(req) || canManageRoster(req) 
 function canManageRoster(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG' || req.user?.roleName === 'CSO'; }
 function canManageAvailability(req: Request) { return canManageRoster(req) || isEngineer(req); }
 function canEditCalendar(req: Request) { return req.user?.roleName === 'Admin' || isEngineer(req); }
+function canDeleteEndorsement(req: Request) { return canEndorse(req) || isEngineer(req); }
 function forbidden(res: Response) { res.status(403).json({ error: 'Engineer Endorsements access required' }); }
 function endorsementDivision(deviceModel: string, sourceDivision: string) {
   if (/^MacBook\b/i.test(deviceModel)) return 'MacBook';
@@ -190,17 +192,36 @@ router.get('/calendar', async (req, res) => {
   const [divisionRows] = await pool.query('SELECT DISTINCT NULLIF(TRIM(product_division), \'\') AS product_division FROM engineer_endorsements WHERE created_at >= ? AND created_at < ?', [`${month}-01`, nextMonth]);
   const [detailRows] = await pool.query(`SELECT id, DATE_FORMAT(created_at, '%Y-%m-%d') AS endorsement_date, ar_number, device_model, issue, product_division, status, engineer_name, created_at FROM engineer_endorsements WHERE created_at >= ? AND created_at < ? ORDER BY created_at ASC`, [`${month}-01`, nextMonth]);
   const [manualRows] = await pool.query(`SELECT id, DATE_FORMAT(entry_date, '%Y-%m-%d') AS endorsement_date, entry_count AS manual_count, details, product_division, engineer_name, created_at FROM engineer_calendar_entries WHERE entry_date >= ? AND entry_date < ?`, [`${month}-01`, nextMonth]);
-  const preferredDivisions = ['iOS/ACCS', 'MacBook', 'iMac']; const allowedDivisions = new Set(preferredDivisions); const canonicalDivision = (value: string) => { const normalized = value.trim().toLowerCase(); if (['iphone', 'ipad', 'watch', 'iphone accs', 'ios/accs'].includes(normalized)) return 'iOS/ACCS'; if (['macbook', 'mac accs'].includes(normalized)) return 'MacBook'; return preferredDivisions.find((division) => division.toLowerCase() === normalized) || value; }; const divisions = preferredDivisions;
+  const preferredDivisions = ['iOS/ACCS', 'MacBook', 'iMac']; const allowedDivisions = new Set(preferredDivisions); const canonicalDivision = (value: string) => { const normalized = value.trim().toLowerCase(); if (normalized.includes('accs') || ['iphone', 'ipad', 'watch', 'ipod', 'ios/accs'].includes(normalized)) return 'iOS/ACCS'; if (normalized === 'macbook') return 'MacBook'; if (normalized === 'imac') return 'iMac'; return value; }; const divisions = preferredDivisions;
   const [rosterRows] = await pool.query(`SELECT DISTINCT NULLIF(TRIM(engineer_name), '') AS engineer_name FROM engineer_roster WHERE active = 1`);
   const knownEngineers = new Set<string>((rosterRows as Array<{ engineer_name: string | null }>).map((row) => row.engineer_name || '').filter(Boolean));
-  const counts = new Map<string, Record<string, Record<string, Array<Record<string, unknown>>>>>(); const totals: Record<string, number> = {}; const engineerTotals: Record<string, number> = {}; const divisionEngineers = new Map<string, Set<string>>(divisions.map((division) => [division, new Set(knownEngineers)]));
+  const counts = new Map<string, Record<string, Record<string, Array<Record<string, unknown>>>>>(); const totals: Record<string, number> = {}; const engineerTotals: Record<string, number> = {}; const monthlyEngineerTotals: Record<string, Record<string, number>> = {}; const divisionEngineers = new Map<string, Set<string>>(divisions.map((division) => [division, new Set(knownEngineers)]));
   const details = new Map<string, Array<Record<string, unknown>>>();
-  for (const row of detailRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = endorsementDivision(text(row.device_model), canonicalDivision(text(row.product_division) || 'Unspecified')); if (!allowedDivisions.has(division)) continue; const engineer = text(row.engineer_name) || 'Unassigned'; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), { ...row, product_division: division }]; counts.set(date, day); totals[division] = (totals[division] || 0) + 1; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + 1; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); details.set(date, [...(details.get(date) || []), { ...row, product_division: division }]); }
+  for (const row of detailRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const sourceDivision = canonicalDivision(text(row.product_division) || 'Unspecified'); const division = sourceDivision === 'iOS/ACCS' && /accs/i.test(text(row.product_division)) ? 'iOS/ACCS' : endorsementDivision(text(row.device_model), sourceDivision); if (!allowedDivisions.has(division)) continue; const engineer = text(row.engineer_name) || 'Unassigned'; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), { ...row, product_division: division }]; counts.set(date, day); totals[division] = (totals[division] || 0) + 1; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + 1; monthlyEngineerTotals[division] = monthlyEngineerTotals[division] || {}; monthlyEngineerTotals[division][engineer] = (monthlyEngineerTotals[division][engineer] || 0) + 1; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); details.set(date, [...(details.get(date) || []), { ...row, product_division: division }]); }
   for (const row of manualRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = canonicalDivision(text(row.product_division) || 'Unspecified'); if (!allowedDivisions.has(division)) continue; const engineer = canonicalEngineerName(text(row.engineer_name) || 'Unassigned'); const entry = { ...row, product_division: division, engineer_name: engineer, is_manual: true }; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), entry]; counts.set(date, day); const count = Number(row.manual_count) || 0; totals[division] = (totals[division] || 0) + count; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + count; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); }
   const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
   const days = Array.from({ length: daysInMonth }, (_, index) => { const day = String(index + 1).padStart(2, '0'); const date = `${month}-${day}`; return { date, day: new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`)), counts: counts.get(date) || {}, endorsements: details.get(date) || [] }; });
-  const columns = divisions.flatMap((division) => Array.from(divisionEngineers.get(division) || []).sort((a, b) => a.localeCompare(b)).map((engineer) => ({ division, engineer, total: engineerTotals[`${division}::${engineer}`] || 0 })));
-  res.json({ month, divisions, columns, totals, days });
+  const [savedOrderRows] = await pool.query('SELECT product_division, engineer_name, sort_order FROM engineer_calendar_orders WHERE order_month = ? ORDER BY product_division ASC, sort_order ASC, engineer_name ASC', [month]);
+  const engineerOrder: Record<string, string[]> = {};
+  const columns = divisions.flatMap((division) => { const knownEngineerList = Array.from(divisionEngineers.get(division) || []); const savedOrder = (savedOrderRows as Array<{ product_division: string; engineer_name: string }>).filter((row) => row.product_division === division).map((row) => row.engineer_name).filter((name) => knownEngineerList.includes(name)); const defaultOrder = [...knownEngineerList].sort((a, b) => (monthlyEngineerTotals[division]?.[a] || 0) - (monthlyEngineerTotals[division]?.[b] || 0) || a.localeCompare(b)); const order = [...savedOrder, ...defaultOrder.filter((name) => !savedOrder.includes(name))]; engineerOrder[division] = order; const orderIndex = new Map(order.map((name, index) => [name, index])); return order.map((engineer) => ({ division, engineer, total: engineerTotals[`${division}::${engineer}`] || 0 })).sort((a, b) => (orderIndex.get(a.engineer) ?? 0) - (orderIndex.get(b.engineer) ?? 0)); });
+  res.json({ month, divisions, engineerOrder, columns, totals, days });
+});
+
+router.put('/calendar-order', async (req, res) => {
+  if (!canEditCalendar(req)) { forbidden(res); return; }
+  const month = text(req.body?.month); const division = text(req.body?.division); const rawNames: unknown = req.body?.engineerOrder; const names: string[] = Array.isArray(rawNames) ? rawNames.map((name: unknown) => canonicalEngineerName(text(name))).filter((name): name is string => Boolean(name)) : [];
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !allowedCalendarDivisions.has(division) || !names.length || new Set(names).size !== names.length) { res.status(400).json({ error: 'A valid month, category, and unique Engineer order are required.' }); return; }
+  const [year, monthNumber] = month.split('-').map(Number); const nextMonthDate = new Date(Date.UTC(year, monthNumber, 1)); const nextMonth = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
+  await ensureFrontlineTables(); const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [validRows] = await connection.query(`SELECT engineer_name FROM engineer_roster WHERE active = 1 AND engineer_name IN (${names.map(() => '?').join(',')}) UNION SELECT engineer_name FROM engineer_endorsements WHERE created_at >= ? AND created_at < ? AND engineer_name IN (${names.map(() => '?').join(',')})`, [ ...names, `${month}-01`, nextMonth, ...names ]);
+    const validNames = new Set((validRows as Array<{ engineer_name: string }>).map((row) => row.engineer_name));
+    if (names.some((name: string) => !validNames.has(name))) { await connection.rollback(); res.status(400).json({ error: 'Engineer order contains an unknown or inactive Engineer.' }); return; }
+    await connection.execute('DELETE FROM engineer_calendar_orders WHERE order_month = ? AND product_division = ?', [month, division]);
+    await connection.query(`INSERT INTO engineer_calendar_orders (order_month, product_division, engineer_name, sort_order, created_by) VALUES ${names.map(() => '(?, ?, ?, ?, ?)').join(',')}`, names.flatMap((name: string, index: number) => [month, division, name, index, req.user!.userId]));
+    await connection.commit(); res.json({ message: 'Calendar Engineer order saved.' });
+  } catch (error) { await connection.rollback(); console.error('calendar order error:', error); res.status(500).json({ error: 'Unable to save the calendar Engineer order.' }); } finally { connection.release(); }
 });
 
 router.post('/', async (req, res) => {
@@ -314,7 +335,7 @@ router.post('/:id/cancel', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  if (!canEndorse(req)) { forbidden(res); return; }
+  if (!canDeleteEndorsement(req)) { forbidden(res); return; }
   const id = Number(req.params.id); if (!id) { res.status(400).json({ error: 'A valid endorsement is required.' }); return; }
   await ensureFrontlineTables();
   const pool = getDbPool(); const connection = await pool.getConnection();

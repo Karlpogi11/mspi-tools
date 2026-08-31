@@ -8,7 +8,7 @@ export default function FrontlinePage() {
   const { user } = useAuth();
   const isAdmin = user?.roleName === 'Admin';
   const canEndorse = false;
-  const canDeleteEndorsement = user?.roleName === 'Admin' || user?.roleName === 'CSO';
+  const canDeleteEndorsement = user?.roleName === 'Admin' || user?.roleName === 'CSO' || user?.roleName === 'ENGR';
   const [report, setReport] = useState<FrontlineReport | null>(() => user?.id ? readFrontlineReportCache(user.id) : null); const [deviceModels, setDeviceModels] = useState<string[]>([]);
   const [status, setStatus] = useState<FrontlineStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
