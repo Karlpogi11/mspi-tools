@@ -5,6 +5,7 @@ import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import http from 'http';
 import { fileURLToPath } from 'url';
@@ -26,6 +27,7 @@ import { ensureApplecareTables } from './applecare/store.js';
 import frontlineRoutes from './frontline/routes.js';
 import { ensureFrontlineTables } from './frontline/store.js';
 import endorsementRoutes from './endorsements/routes.js';
+import storageLocatorRoutes from './storage-locator/routes.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -56,11 +58,34 @@ app.use(cors({
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 
+// Shared hosting protection: normal users can still poll comfortably, while
+// runaway clients and bots cannot consume the whole process pool.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please wait a few minutes and try again.' },
+});
+const expensiveApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'This operation is temporarily rate limited. Please try again later.' },
+});
+
+app.use('/api', apiLimiter);
+app.use('/api/frontline/sync', expensiveApiLimiter);
+app.use('/api/pdf-extractor/extract', expensiveApiLimiter);
+app.use('/api/pdf-extractor/extract-stream', expensiveApiLimiter);
+
 app.use('/api/auth', authRoutes);
 app.use('/api', toolsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/frontline', frontlineRoutes);
 app.use('/api/endorsements', endorsementRoutes);
+app.use('/api/storage-locator', storageLocatorRoutes);
 
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
@@ -143,6 +168,9 @@ async function start() {
     logger.info('AppleCare tables ready');
     await ensureFrontlineTables();
     logger.info('Frontline tables ready');
+    const { ensureStorageTables } = await import('./storage-locator/store.js');
+    await ensureStorageTables();
+    logger.info('Storage Locator tables ready');
     await syncBuiltinToolCatalog();
     logger.info('Built-in tool catalog synchronized');
   } catch (error) {

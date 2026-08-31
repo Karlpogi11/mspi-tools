@@ -103,8 +103,9 @@ export default function PcountSessionPage() {
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
       api.sessions.get(sessionId).then(s => setSession(s)).catch(() => {});
-    }, 5000);
+    }, 10000);
     return () => clearInterval(timer);
   }, [sessionId]);
 

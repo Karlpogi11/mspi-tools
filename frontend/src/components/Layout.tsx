@@ -82,7 +82,7 @@ export default function Layout() {
       }
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), 15_000);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void poll(); }, 30_000);
     const refreshOnReturn = () => { if (document.visibilityState === 'visible') void poll(); };
     document.addEventListener('visibilitychange', refreshOnReturn);
     return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshOnReturn); };

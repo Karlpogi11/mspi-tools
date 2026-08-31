@@ -169,6 +169,11 @@ export interface Role {
   name: string;
 }
 
+export interface StorageRule { family: 'IOS' | 'Mac'; status: string; numbers: number[] }
+export interface StorageEmployee { id: number; employeeNumber: string; fullName: string; active: number; createdAt?: string; updatedAt?: string }
+export interface StorageUnit { id: number; ar_number: string; family: string; status: string; cabinet_number: number; state: 'in' | 'out'; checked_in_at: string | null; checked_out_at: string | null; current_employee_name?: string | null }
+export interface StorageMovement { id: number; action: 'IN' | 'OUT'; family: string; status: string; cabinet_number: number | null; occurred_at: string; employee_number: string; full_name: string }
+
 export interface Session {
   id: number;
   name: string;
@@ -437,6 +442,9 @@ export const api = {
     getFrontlineAccessRequests: () => request<FrontlineAccessRequest[]>('/admin/frontline/access-requests'),
     grantFrontlineAccess: (email: string, scope: 'all' | 'cso', csoName?: string) => request<{ message: string }>('/admin/frontline/access', { method: 'POST', body: JSON.stringify({ email, scope, csoName }) }),
     updateFrontlineAccessRequest: (id: number, status: 'approved' | 'rejected', scope?: 'all' | 'cso', csoName?: string) => request<{ message: string }>(`/admin/frontline/access-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status, scope, csoName }) }),
+    getStorageEmployees: () => request<StorageEmployee[]>('/storage-locator/employees'),
+    addStorageEmployee: (employeeNumber: string, fullName: string) => request<StorageEmployee>('/storage-locator/employees', { method: 'POST', body: JSON.stringify({ employeeNumber, fullName }) }),
+    updateStorageEmployee: (id: number, payload: { employeeNumber: string; fullName: string; active: boolean }) => request<{ message: string }>(`/storage-locator/employees/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   },
 
     frontline: {
@@ -477,16 +485,28 @@ export const api = {
     notifications: (afterId = 0) => requestFresh<EndorsementNotification[]>(`/endorsements/notifications?afterId=${afterId}`),
     create: (payload: { arNumber: string; frontlineRecordId: number; sourceSheet?: string; sourceRow?: number; serialNumber?: string; deviceModel?: string }) => request<{ message: string; endorsementId: number; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
     updateDeviceModel: (id: number, deviceModel: string) => request<{ message: string; deviceModel: string }>(`/endorsements/${id}`, { method: 'PATCH', body: JSON.stringify({ deviceModel }) }),
+    updateEngineer: (id: number, engineerName: string) => request<{ message: string; engineer: string }>(`/endorsements/${id}/engineer`, { method: 'PATCH', body: JSON.stringify({ engineerName }) }),
     delete: (id: number) => request<{ message: string }>(`/endorsements/${id}`, { method: 'DELETE' }),
     roster: () => request<{ roster: EndorsementEngineer[] }>('/endorsements/roster'),
     addRosterEngineer: (name: string) => request<{ message: string; name: string }>('/endorsements/roster', { method: 'POST', body: JSON.stringify({ name }) }),
     updateRosterEngineer: (id: number, name: string) => request<{ message: string; name: string }>(`/endorsements/roster/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
     deleteRosterEngineer: (id: number) => request<{ message: string }>(`/endorsements/roster/${id}`, { method: 'DELETE' }),
     dashboard: (engineerUserId?: number) => request<EngineerDashboard>(`/endorsements/dashboard${engineerUserId ? `?engineerUserId=${engineerUserId}` : ''}`),
+    dashboardFresh: (engineerUserId?: number) => requestFresh<EngineerDashboard>(`/endorsements/dashboard${engineerUserId ? `?engineerUserId=${engineerUserId}` : ''}`),
     calendar: (month: string) => request<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
+    calendarFresh: (month: string) => requestFresh<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
     saveCalendarEntry: (payload: { date: string; division: string; engineer: string; count: number; details?: string }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'PUT', body: JSON.stringify(payload) }),
     passEndorsement: (id: number) => request<{ message: string; engineer: string }>(`/endorsements/${id}/pass`, { method: 'POST' }),
     cancelEndorsement: (id: number) => request<{ message: string }>(`/endorsements/${id}/cancel`, { method: 'POST' }),
+  },
+
+  storageLocator: {
+    rules: () => request<{ rules: StorageRule[] }>('/storage-locator/rules'),
+    overview: () => request<{ occupied: StorageUnit[]; rules: StorageRule[] }>('/storage-locator/overview'),
+    verifyEmployee: (employeeNumber: string) => request<{ employee: StorageEmployee }>(`/storage-locator/employees/verify?employeeNumber=${encodeURIComponent(employeeNumber)}`),
+    lookup: (arNumber: string) => request<{ unit: StorageUnit | null; history: StorageMovement[] }>(`/storage-locator/units/${encodeURIComponent(arNumber)}`),
+    checkIn: (payload: { employeeNumber: string; arNumber: string; family: string; status: string; cabinetNumber: number }) => request<{ message: string }>('/storage-locator/units/in', { method: 'POST', body: JSON.stringify(payload) }),
+    checkOut: (payload: { employeeNumber: string; arNumber: string }) => request<{ message: string }>('/storage-locator/units/out', { method: 'POST', body: JSON.stringify(payload) }),
   },
 
   sessions: {

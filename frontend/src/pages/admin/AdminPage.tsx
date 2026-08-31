@@ -34,6 +34,12 @@ const adminTools = [
     description: 'Manage Engineer names for Engineer Endorsements.',
     icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a6 6 0 0112 0M19 8v6M22 11h-6',
   },
+  {
+    to: '/admin/storage-locator',
+    name: 'Storage Locator',
+    description: 'Manage employee verification for customer unit storage operations.',
+    icon: 'M4 7h16v13H4zM7 7V5a5 5 0 0110 0v2M8 12h8M8 16h5',
+  },
 ];
 
 export default function AdminPage() {

@@ -16,6 +16,7 @@ function canEndorse(req: Request) { return req.user?.roleName === 'Admin' || req
 function canView(req: Request) { return canEndorse(req) || canManageRoster(req) || isEngineer(req); }
 function canManageRoster(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG' || req.user?.roleName === 'CSO'; }
 function canManageAvailability(req: Request) { return canManageRoster(req) || isEngineer(req); }
+function canEditCalendar(req: Request) { return req.user?.roleName === 'Admin' || isEngineer(req); }
 function forbidden(res: Response) { res.status(403).json({ error: 'Engineer Endorsements access required' }); }
 function endorsementDivision(deviceModel: string, sourceDivision: string) {
   if (/^MacBook\b/i.test(deviceModel)) return 'MacBook';
@@ -186,18 +187,16 @@ router.get('/calendar', async (req, res) => {
   const nextMonthDate = new Date(Date.UTC(year, monthNumber, 1));
   const nextMonth = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
   const pool = getDbPool();
-  const engineerFilter = isEngineer(req) ? ' AND (engineer_user_id = ? OR (engineer_user_id IS NULL AND engineer_name = (SELECT engineer_name FROM engineer_roster WHERE user_id = ? ORDER BY id DESC LIMIT 1)))' : '';
-  const engineerArgs = isEngineer(req) ? [req.user!.userId, req.user!.userId] : [];
-  const [divisionRows] = await pool.query(`SELECT DISTINCT NULLIF(TRIM(product_division), '') AS product_division FROM engineer_endorsements WHERE created_at >= ? AND created_at < ?${engineerFilter}`, [`${month}-01`, nextMonth, ...engineerArgs]);
-  const [detailRows] = await pool.query(`SELECT id, DATE_FORMAT(created_at, '%Y-%m-%d') AS endorsement_date, ar_number, device_model, issue, product_division, status, engineer_name, created_at FROM engineer_endorsements WHERE created_at >= ? AND created_at < ?${engineerFilter} ORDER BY created_at ASC`, [`${month}-01`, nextMonth, ...engineerArgs]);
+  const [divisionRows] = await pool.query('SELECT DISTINCT NULLIF(TRIM(product_division), \'\') AS product_division FROM engineer_endorsements WHERE created_at >= ? AND created_at < ?', [`${month}-01`, nextMonth]);
+  const [detailRows] = await pool.query(`SELECT id, DATE_FORMAT(created_at, '%Y-%m-%d') AS endorsement_date, ar_number, device_model, issue, product_division, status, engineer_name, created_at FROM engineer_endorsements WHERE created_at >= ? AND created_at < ? ORDER BY created_at ASC`, [`${month}-01`, nextMonth]);
   const [manualRows] = await pool.query(`SELECT id, DATE_FORMAT(entry_date, '%Y-%m-%d') AS endorsement_date, entry_count AS manual_count, details, product_division, engineer_name, created_at FROM engineer_calendar_entries WHERE entry_date >= ? AND entry_date < ?`, [`${month}-01`, nextMonth]);
-  const preferredDivisions = ['iOS/ACCS', 'MacBook', 'iMac']; const canonicalDivision = (value: string) => ['iphone', 'ipad', 'watch', 'iphone accs', 'ios/accs'].includes(value.trim().toLowerCase()) ? 'iOS/ACCS' : preferredDivisions.find((division) => division.toLowerCase() === value.toLowerCase()) || value; const observedDivisions = (divisionRows as Array<{ product_division: string | null }>).map((row) => canonicalDivision(row.product_division || 'Unspecified')); const modelDivisions = (detailRows as Array<Record<string, unknown>>).map((row) => endorsementDivision(text(row.device_model), canonicalDivision(text(row.product_division) || 'Unspecified'))); const manualDivisions = (manualRows as Array<Record<string, unknown>>).map((row) => canonicalDivision(text(row.product_division) || 'Unspecified')); const divisions = [...preferredDivisions, ...[...observedDivisions, ...modelDivisions, ...manualDivisions].filter((division, index, values) => !preferredDivisions.includes(division) && values.indexOf(division) === index)];
+  const preferredDivisions = ['iOS/ACCS', 'MacBook', 'iMac']; const allowedDivisions = new Set(preferredDivisions); const canonicalDivision = (value: string) => { const normalized = value.trim().toLowerCase(); if (['iphone', 'ipad', 'watch', 'iphone accs', 'ios/accs'].includes(normalized)) return 'iOS/ACCS'; if (['macbook', 'mac accs'].includes(normalized)) return 'MacBook'; return preferredDivisions.find((division) => division.toLowerCase() === normalized) || value; }; const divisions = preferredDivisions;
   const [rosterRows] = await pool.query(`SELECT DISTINCT NULLIF(TRIM(engineer_name), '') AS engineer_name FROM engineer_roster WHERE active = 1`);
   const knownEngineers = new Set<string>((rosterRows as Array<{ engineer_name: string | null }>).map((row) => row.engineer_name || '').filter(Boolean));
   const counts = new Map<string, Record<string, Record<string, Array<Record<string, unknown>>>>>(); const totals: Record<string, number> = {}; const engineerTotals: Record<string, number> = {}; const divisionEngineers = new Map<string, Set<string>>(divisions.map((division) => [division, new Set(knownEngineers)]));
   const details = new Map<string, Array<Record<string, unknown>>>();
-  for (const row of detailRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = endorsementDivision(text(row.device_model), canonicalDivision(text(row.product_division) || 'Unspecified')); const engineer = text(row.engineer_name) || 'Unassigned'; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), { ...row, product_division: division }]; counts.set(date, day); totals[division] = (totals[division] || 0) + 1; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + 1; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); details.set(date, [...(details.get(date) || []), { ...row, product_division: division }]); }
-  for (const row of manualRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = canonicalDivision(text(row.product_division) || 'Unspecified'); const engineer = canonicalEngineerName(text(row.engineer_name) || 'Unassigned'); const entry = { ...row, product_division: division, engineer_name: engineer, is_manual: true }; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), entry]; counts.set(date, day); const count = Number(row.manual_count) || 0; totals[division] = (totals[division] || 0) + count; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + count; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); }
+  for (const row of detailRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = endorsementDivision(text(row.device_model), canonicalDivision(text(row.product_division) || 'Unspecified')); if (!allowedDivisions.has(division)) continue; const engineer = text(row.engineer_name) || 'Unassigned'; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), { ...row, product_division: division }]; counts.set(date, day); totals[division] = (totals[division] || 0) + 1; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + 1; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); details.set(date, [...(details.get(date) || []), { ...row, product_division: division }]); }
+  for (const row of manualRows as Array<Record<string, unknown>>) { const date = String(row.endorsement_date).slice(0, 10); const division = canonicalDivision(text(row.product_division) || 'Unspecified'); if (!allowedDivisions.has(division)) continue; const engineer = canonicalEngineerName(text(row.engineer_name) || 'Unassigned'); const entry = { ...row, product_division: division, engineer_name: engineer, is_manual: true }; const day = counts.get(date) || {}; day[division] = day[division] || {}; day[division][engineer] = [...(day[division][engineer] || []), entry]; counts.set(date, day); const count = Number(row.manual_count) || 0; totals[division] = (totals[division] || 0) + count; engineerTotals[`${division}::${engineer}`] = (engineerTotals[`${division}::${engineer}`] || 0) + count; const names = divisionEngineers.get(division) || new Set<string>(); names.add(engineer); divisionEngineers.set(division, names); }
   const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
   const days = Array.from({ length: daysInMonth }, (_, index) => { const day = String(index + 1).padStart(2, '0'); const date = `${month}-${day}`; return { date, day: new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`)), counts: counts.get(date) || {}, endorsements: details.get(date) || [] }; });
   const columns = divisions.flatMap((division) => Array.from(divisionEngineers.get(division) || []).sort((a, b) => a.localeCompare(b)).map((engineer) => ({ division, engineer, total: engineerTotals[`${division}::${engineer}`] || 0 })));
@@ -236,7 +235,7 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/calendar-entry', async (req, res) => {
-  if (!canManageRoster(req)) { forbidden(res); return; }
+  if (!canEditCalendar(req)) { forbidden(res); return; }
   const date = text(req.body?.date); const division = text(req.body?.division); const engineer = canonicalEngineerName(text(req.body?.engineer)); const count = Number(req.body?.count); const details = text(req.body?.details);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !division || !engineer || !Number.isInteger(count) || count < 1 || count > 999) { res.status(400).json({ error: 'Date, category, Engineer, and a whole-number count are required.' }); return; }
   await ensureFrontlineTables();
@@ -245,7 +244,7 @@ router.put('/calendar-entry', async (req, res) => {
 });
 
 router.post('/:id/pass', async (req, res) => {
-  if (!canEndorse(req)) { forbidden(res); return; }
+  if (!canEditCalendar(req)) { forbidden(res); return; }
   const id = Number(req.params.id); if (!id) { res.status(400).json({ error: 'A valid endorsement is required.' }); return; }
   await ensureFrontlineTables();
   const pool = getDbPool(); const connection = await pool.getConnection();
@@ -267,6 +266,32 @@ router.post('/:id/pass', async (req, res) => {
     void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_passed', resourceType: 'engineer_endorsement', resourceId: String(id), metadata: { fromEngineer: currentName, toEngineer: text(next.full_name) } });
     res.json({ message: `Endorsement passed to ${text(next.full_name)}.`, engineer: text(next.full_name) });
   } catch (error) { await connection.rollback(); console.error('pass endorsement error:', error); res.status(500).json({ error: 'Unable to pass this endorsement.' }); } finally { connection.release(); }
+});
+
+router.patch('/:id/engineer', async (req, res) => {
+  if (!canEditCalendar(req)) { forbidden(res); return; }
+  const id = Number(req.params.id); const engineerName = canonicalEngineerName(text(req.body?.engineerName));
+  if (!id || !engineerName || engineerName.length > 150) { res.status(400).json({ error: 'A valid Engineer name is required.' }); return; }
+  await ensureFrontlineTables();
+  const pool = getDbPool(); const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [endorsementRows] = await connection.query('SELECT id, engineer_user_id, engineer_name FROM engineer_endorsements WHERE id = ? FOR UPDATE', [id]);
+    const endorsement = (endorsementRows as Array<Record<string, unknown>>)[0];
+    if (!endorsement) { await connection.rollback(); res.status(404).json({ error: 'Endorsement record not found.' }); return; }
+    const [rosterRows] = await connection.query('SELECT user_id, engineer_name FROM engineer_roster WHERE active = 1 AND engineer_name = ? LIMIT 1', [engineerName]);
+    const engineer = (rosterRows as Array<{ user_id: number | null; engineer_name: string }>)[0];
+    if (!engineer) { await connection.rollback(); res.status(404).json({ error: 'Engineer is not active in the roster.' }); return; }
+    const previousUserId = endorsement.engineer_user_id == null ? null : Number(endorsement.engineer_user_id);
+    const previousName = text(endorsement.engineer_name);
+    if (previousUserId === (engineer.user_id == null ? null : Number(engineer.user_id)) && previousName === engineer.engineer_name) { await connection.commit(); res.json({ message: 'Engineer assignment unchanged.', engineer: engineer.engineer_name }); return; }
+    await connection.execute('UPDATE engineer_endorsements SET engineer_user_id = ?, engineer_name = ? WHERE id = ?', [engineer.user_id == null ? null : Number(engineer.user_id), engineer.engineer_name, id]);
+    await connection.execute('UPDATE engineer_daily_availability SET assignment_count = GREATEST(assignment_count - 1, 0) WHERE availability_date = ? AND engineer_name = ? AND COALESCE(user_id, 0) = COALESCE(?, 0)', [todayManila(), previousName, previousUserId]);
+    await connection.execute('UPDATE engineer_daily_availability SET assignment_count = assignment_count + 1 WHERE availability_date = ? AND status = \'active\' AND engineer_name = ? AND COALESCE(user_id, 0) = COALESCE(?, 0)', [todayManila(), engineer.engineer_name, engineer.user_id == null ? null : Number(engineer.user_id)]);
+    await connection.commit();
+    void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_engineer_updated', resourceType: 'engineer_endorsement', resourceId: String(id), metadata: { fromEngineer: previousName, toEngineer: engineer.engineer_name } });
+    res.json({ message: `Endorsement assigned to ${engineer.engineer_name}.`, engineer: engineer.engineer_name });
+  } catch (error) { await connection.rollback(); console.error('update endorsement engineer error:', error); res.status(500).json({ error: 'Unable to update the Engineer assignment.' }); } finally { connection.release(); }
 });
 
 router.post('/:id/cancel', async (req, res) => {
@@ -308,7 +333,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 router.patch('/:id', async (req, res) => {
-  if (!canEndorse(req)) { forbidden(res); return; }
+  if (!canEditCalendar(req)) { forbidden(res); return; }
   const id = Number(req.params.id); const deviceModel = text(req.body?.deviceModel);
   if (!id || !deviceModel || deviceModel.length > 150) { res.status(400).json({ error: 'A valid device model is required.' }); return; }
   await ensureFrontlineTables();

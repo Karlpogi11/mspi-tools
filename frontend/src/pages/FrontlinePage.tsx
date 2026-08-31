@@ -37,7 +37,7 @@ export default function FrontlinePage() {
   const hasFilters = Boolean(ar || start || end || cso.length || type.length || division.length);
   useEffect(() => {
     if (!status?.connected) return;
-    const timer = window.setInterval(() => void api.frontline.sync().then(() => { if (!hasFilters) return load(); }).catch(() => undefined), 60_000);
+    const timer = window.setInterval(() => { if (document.visibilityState !== 'visible') return; void api.frontline.sync().then(() => { if (!hasFilters) return load(); }).catch(() => undefined); }, 300_000);
     return () => window.clearInterval(timer);
   }, [status?.connected, hasFilters]);
   useEffect(() => {

@@ -25,6 +25,45 @@ export const users = mysqlTable('users', {
   created_at: timestamp('created_at').defaultNow().notNull(),
 });
 
+export const storageEmployees = mysqlTable('storage_employees', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  employee_number: varchar('employee_number', { length: 50 }).notNull().unique(),
+  full_name: varchar('full_name', { length: 255 }).notNull(),
+  active: int('active').default(1).notNull(),
+  created_by: int('created_by').references(() => users.id, { onDelete: 'set null' }),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().onUpdateNow().notNull(),
+});
+
+export const storageUnits = mysqlTable('storage_units', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  ar_number: varchar('ar_number', { length: 100 }).notNull().unique(),
+  family: varchar('family', { length: 20 }).notNull(),
+  status: varchar('status', { length: 40 }).notNull(),
+  cabinet_number: int('cabinet_number'),
+  state: varchar('state', { length: 10 }).default('out').notNull(),
+  current_employee_id: int('current_employee_id').references(() => storageEmployees.id, { onDelete: 'set null' }),
+  checked_in_at: timestamp('checked_in_at'),
+  checked_out_at: timestamp('checked_out_at'),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  stateCabinetIdx: index('storage_units_state_cabinet_idx').on(table.state, table.family, table.cabinet_number),
+}));
+
+export const storageMovements = mysqlTable('storage_movements', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  unit_id: int('unit_id').notNull().references(() => storageUnits.id, { onDelete: 'cascade' }),
+  employee_id: int('employee_id').notNull().references(() => storageEmployees.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 10 }).notNull(),
+  family: varchar('family', { length: 20 }).notNull(),
+  status: varchar('status', { length: 40 }).notNull(),
+  cabinet_number: int('cabinet_number'),
+  occurred_at: timestamp('occurred_at').defaultNow().notNull(),
+}, (table) => ({
+  unitOccurredIdx: index('storage_movements_unit_occurred_idx').on(table.unit_id, table.occurred_at),
+}));
+
 export const auditLog = mysqlTable('audit_log', {
   id: int('id').autoincrement().notNull().primaryKey(),
   actor_user_id: int('actor_user_id').references(() => users.id, { onDelete: 'set null' }),

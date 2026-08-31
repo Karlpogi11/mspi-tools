@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, type Tool } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useCachedQuery } from '../lib/queryCache';
@@ -27,10 +28,39 @@ function ToolIcon({ icon, active }: { icon: string; active: boolean }) {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { data: tools = [], loading } = useCachedQuery<Tool[]>('my-tools', api.myTools);
   const [restrictedTool, setRestrictedTool] = useState<Tool | null>(null);
+  const [storageVerificationOpen, setStorageVerificationOpen] = useState(false);
+  const [storageEmployeeNumber, setStorageEmployeeNumber] = useState('');
+  const [storageVerificationError, setStorageVerificationError] = useState('');
+  const [storageVerificationBusy, setStorageVerificationBusy] = useState(false);
 
   const visibleTools = tools.filter(tool => tool.name.trim().toLowerCase() !== 'site monitor');
+
+  const openStorageLocator = (event: React.MouseEvent<HTMLAnchorElement>, tool: Tool) => {
+    if (tool.name.trim().toLowerCase() !== 'storage locator') return;
+    event.preventDefault();
+    setStorageEmployeeNumber('');
+    setStorageVerificationError('');
+    setStorageVerificationOpen(true);
+  };
+
+  const verifyStorageEmployee = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!storageEmployeeNumber.trim()) return;
+    setStorageVerificationBusy(true);
+    setStorageVerificationError('');
+    try {
+      const result = await api.storageLocator.verifyEmployee(storageEmployeeNumber.trim());
+      setStorageVerificationOpen(false);
+      navigate('/storage-locator', { state: { employee: result.employee } });
+    } catch (error) {
+      setStorageVerificationError(error instanceof Error ? error.message : 'Employee number could not be verified.');
+    } finally {
+      setStorageVerificationBusy(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -68,7 +98,7 @@ export default function DashboardPage() {
               key={tool.id}
               href={tool.url}
               aria-disabled={tool.canAccess === false}
-              onClick={(event) => { if (tool.canAccess === false) { event.preventDefault(); setRestrictedTool(tool); } }}
+              onClick={(event) => { if (tool.canAccess === false) { event.preventDefault(); setRestrictedTool(tool); } else { openStorageLocator(event, tool); } }}
               className={`group relative flex h-full min-h-[clamp(150px,18vw,190px)] w-full flex-col rounded-[14px] border border-black/[0.06] bg-[#FFFFFF] p-4 no-underline transition-all duration-200 ${tool.canAccess === false ? 'cursor-not-allowed opacity-60' : 'hover:-translate-y-0.5 hover:border-black/[0.1]'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 focus-visible:ring-offset-2`}
             >
               <ToolIcon icon={tool.icon} active={false} />
@@ -97,6 +127,7 @@ export default function DashboardPage() {
         </div>
       )}
       {restrictedTool && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4" role="dialog" aria-modal="true" aria-labelledby="restricted-tool-title"><div className="w-full max-w-sm rounded-2xl border border-[#e5e5e7] bg-white p-5 shadow-xl"><h2 id="restricted-tool-title" className="text-[15px] font-semibold text-[#1d1d1f]">Access unavailable</h2><p className="mt-2 text-[13px] leading-5 text-[#6e6e73]">You do not have access to {restrictedTool.name} with your current role.</p><button type="button" onClick={() => setRestrictedTool(null)} className="mt-5 rounded-full bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white">Close</button></div></div>}
+      {storageVerificationOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1d1d1f]/25 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="storage-verification-title"><form onSubmit={verifyStorageEmployee} className="w-full max-w-sm rounded-2xl border border-[#e5e5e7] bg-white p-6 shadow-[0_18px_60px_rgba(0,0,0,.16)]"><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]">Storage Locator</p><h2 id="storage-verification-title" className="mt-2 text-[22px] font-semibold tracking-tight text-[#1d1d1f]">Verify employee</h2><p className="mt-1.5 text-[13px] leading-5 text-[#6e6e73]">Enter your employee number before entering the tool.</p><label className="mt-5 block text-[11px] font-medium text-[#3c3c43]">Employee number<input autoFocus value={storageEmployeeNumber} onChange={(event) => { setStorageEmployeeNumber(event.target.value); setStorageVerificationError(''); }} placeholder="e.g. EMP-001" className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] px-3 text-[14px] outline-none focus:border-[#1d1d1f]" /></label>{storageVerificationError && <p role="alert" className="mt-3 text-[12px] text-[#a33a3a]">{storageVerificationError}</p>}<div className="mt-5 flex gap-2"><button type="button" onClick={() => setStorageVerificationOpen(false)} disabled={storageVerificationBusy} className="flex-1 rounded-xl bg-[#f5f5f7] py-3 text-[12px] font-semibold text-[#3c3c43] disabled:opacity-40">Cancel</button><button type="submit" disabled={storageVerificationBusy || !storageEmployeeNumber.trim()} className="flex-1 rounded-xl bg-[#1d1d1f] py-3 text-[12px] font-semibold text-white disabled:opacity-40">{storageVerificationBusy ? 'Checking…' : 'Continue'}</button></div></form></div>}
     </div>
   );
 }

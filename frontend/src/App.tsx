@@ -28,7 +28,9 @@ const loadFrontlinePage = () => import('./pages/FrontlinePage');
 const loadFrontlineDataEntryPage = () => import('./pages/FrontlineDataEntryPage');
 const loadAdminFrontlinePage = () => import('./pages/admin/AdminFrontlinePage');
 const loadAdminEngineersPage = () => import('./pages/admin/AdminEngineersPage');
+const loadAdminStorageLocatorPage = () => import('./pages/admin/AdminStorageLocatorPage');
 const loadEngineerEndorsementsPage = () => import('./pages/EngineerEndorsementsPage');
+const loadStorageLocatorPage = () => import('./pages/StorageLocatorPage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
 const PcountIndexPage = lazy(loadPcountIndexPage);
@@ -43,7 +45,9 @@ const FrontlinePage = lazy(loadFrontlinePage);
 const FrontlineDataEntryPage = lazy(loadFrontlineDataEntryPage);
 const AdminFrontlinePage = lazy(loadAdminFrontlinePage);
 const AdminEngineersPage = lazy(loadAdminEngineersPage);
+const AdminStorageLocatorPage = lazy(loadAdminStorageLocatorPage);
 const EngineerEndorsementsPage = lazy(loadEngineerEndorsementsPage);
+const StorageLocatorPage = lazy(loadStorageLocatorPage);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -87,18 +91,12 @@ function PrefetchCommonRoutes() {
         loadFrontlineDataEntryPage(),
         loadAdminFrontlinePage(),
         loadAdminEngineersPage(),
+        loadAdminStorageLocatorPage(),
         loadEngineerEndorsementsPage(),
+        loadStorageLocatorPage(),
       ]).catch(() => undefined);
 
-      void Promise.all([
-        api.myTools(),
-        api.sessions.list(),
-        api.reformat.listTemplates(),
-        api.consumables.listMaster(),
-        ...(user.roleName === 'Admin'
-          ? [api.admin.getUsers(), api.admin.getRoles(), api.admin.getTools(), api.pcountAdmin.listSessions()]
-          : []),
-      ]).catch(() => undefined);
+      void api.myTools().catch(() => undefined);
     };
     prefetch();
   }, [user]);
@@ -181,6 +179,7 @@ export default function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route path="/admin/storage-locator" element={<ProtectedRoute><AdminStorageLocatorPage /></ProtectedRoute>} />
               <Route
                 path="/pcount"
                 element={
@@ -268,6 +267,10 @@ export default function App() {
                     <EngineerEndorsementsPage />
                   </ProtectedRoute>
                 }
+              />
+              <Route
+                path="/storage-locator"
+                element={<ProtectedRoute><StorageLocatorPage /></ProtectedRoute>}
               />
             </Route>
           </Routes>

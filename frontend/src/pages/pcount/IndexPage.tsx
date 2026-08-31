@@ -33,7 +33,7 @@ export default function PcountIndexPage() {
 
   useEffect(() => {
     load();
-    const presenceTimer = setInterval(load, 5000);
+    const presenceTimer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 15000);
     return () => clearInterval(presenceTimer);
   }, []);
 
