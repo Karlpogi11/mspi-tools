@@ -12,6 +12,7 @@ export async function ensureStorageTables() {
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT storage_employees_created_by_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
   )`);
+  try { await pool.query('ALTER TABLE storage_employees ADD COLUMN removed_at TIMESTAMP NULL AFTER active'); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
   await pool.query(`CREATE TABLE IF NOT EXISTS storage_units (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ar_number VARCHAR(100) NOT NULL UNIQUE,

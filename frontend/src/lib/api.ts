@@ -445,6 +445,7 @@ export const api = {
     getStorageEmployees: () => request<StorageEmployee[]>('/storage-locator/employees'),
     addStorageEmployee: (employeeNumber: string, fullName: string) => request<StorageEmployee>('/storage-locator/employees', { method: 'POST', body: JSON.stringify({ employeeNumber, fullName }) }),
     updateStorageEmployee: (id: number, payload: { employeeNumber: string; fullName: string; active: boolean }) => request<{ message: string }>(`/storage-locator/employees/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    deleteStorageEmployee: (id: number) => request<{ message: string }>(`/storage-locator/employees/${id}`, { method: 'DELETE' }),
   },
 
     frontline: {

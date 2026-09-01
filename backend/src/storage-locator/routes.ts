@@ -22,7 +22,7 @@ function findRule(family: string, status: string) { return RULES.find((rule) => 
 function bad(res: any, message: string, code = 400) { res.status(code).json({ error: message }); }
 
 async function getEmployee(number: unknown) {
-  const [rows] = await getDbPool().query('SELECT id, employee_number AS employeeNumber, full_name AS fullName FROM storage_employees WHERE employee_number = ? AND active = 1 LIMIT 1', [employeeNumber(number)]);
+  const [rows] = await getDbPool().query('SELECT id, employee_number AS employeeNumber, full_name AS fullName FROM storage_employees WHERE employee_number = ? AND active = 1 AND removed_at IS NULL LIMIT 1', [employeeNumber(number)]);
   return (rows as Array<{ id: number; employeeNumber: string; fullName: string }>)[0];
 }
 
@@ -37,7 +37,7 @@ router.get('/employees/verify', async (req, res) => {
 
 router.get('/employees', requireAdmin, async (_req, res) => {
   await ensureStorageTables();
-  const [rows] = await getDbPool().query('SELECT id, employee_number AS employeeNumber, full_name AS fullName, active, created_at AS createdAt, updated_at AS updatedAt FROM storage_employees ORDER BY active DESC, full_name ASC');
+  const [rows] = await getDbPool().query('SELECT id, employee_number AS employeeNumber, full_name AS fullName, active, created_at AS createdAt, updated_at AS updatedAt FROM storage_employees WHERE removed_at IS NULL ORDER BY active DESC, full_name ASC');
   res.json(rows);
 });
 
@@ -57,6 +57,14 @@ router.patch('/employees/:id', requireAdmin, async (req, res) => {
   await ensureStorageTables();
   try { await getDbPool().execute('UPDATE storage_employees SET employee_number = ?, full_name = ?, active = ? WHERE id = ?', [number, name, active, id]); res.json({ message: 'Employee updated.' }); }
   catch (error) { if (String((error as Error).message).includes('Duplicate')) { bad(res, 'That employee number already exists.', 409); return; } throw error; }
+});
+
+router.delete('/employees/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) { bad(res, 'Employee is required.'); return; }
+  const [result] = await getDbPool().execute('UPDATE storage_employees SET active = 0, removed_at = CURRENT_TIMESTAMP WHERE id = ? AND removed_at IS NULL', [id]);
+  if ((result as { affectedRows: number }).affectedRows === 0) { bad(res, 'Employee not found.', 404); return; }
+  res.json({ message: 'Employee removed from verification. History was preserved.' });
 });
 
 router.get('/overview', async (_req, res) => {
