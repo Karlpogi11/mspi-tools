@@ -464,6 +464,7 @@ export const api = {
     serialHistory: (serial: string) => requestFresh<FrontlineSerialHistory[]>(`/frontline/serial-history?serial=${encodeURIComponent(serial)}`),
     deviceModels: () => request<string[]>('/frontline/device-models'),
     printer: () => requestFresh<{ printerIp: string | null; printerPort: number; printEnabled: boolean }>('/frontline/printer'),
+    testPrinter: () => requestFresh<{ message: string }>('/frontline/printer/test', { method: 'POST' }),
     printRawPrinter: (arNumber: string) => request<{ message: string }>('/frontline/printer/print', { method: 'POST', body: JSON.stringify({ arNumber }) }),
     report: (params: { start?: string; end?: string; ar?: string; cso?: string[]; type?: string[]; division?: string[] } = {}) => {
       const queryParams = new URLSearchParams();

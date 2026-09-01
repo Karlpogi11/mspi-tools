@@ -260,7 +260,7 @@ router.put('/printer', requireAdmin, async (req, res) => {
   res.json({ message: 'Printer configuration saved.', printerIp, printerPort, printEnabled });
 });
 
-router.post('/printer/test', requireAdmin, async (_req, res) => {
+router.post('/printer/test', async (_req, res) => {
   await ensureFrontlineTables();
   const [rows] = await getDbPool().query('SELECT printer_ip, printer_port FROM frontline_printer_settings WHERE id = 1 LIMIT 1');
   const row = (rows as Array<{ printer_ip?: string; printer_port?: number }>)[0];
