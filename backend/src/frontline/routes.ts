@@ -246,13 +246,13 @@ router.get('/printer', async (_req, res) => {
   await ensureFrontlineTables();
   const [rows] = await getDbPool().query('SELECT printer_ip, printer_port, print_enabled FROM frontline_printer_settings WHERE id = 1 LIMIT 1');
   const row = (rows as Array<{ printer_ip?: string; printer_port?: number; print_enabled?: number }>)[0];
-  res.json({ printerIp: row?.printer_ip || null, printerPort: Number(row?.printer_port) || 8008, printEnabled: row?.print_enabled !== 0 });
+  res.json({ printerIp: row?.printer_ip || null, printerPort: Number(row?.printer_port) || 8008, printEnabled: Number(row?.print_enabled) !== 0 });
 });
 
 router.put('/printer', requireAdmin, async (req, res) => {
   const printerIp = text(req.body?.printerIp);
   const printerPort = Number(req.body?.printerPort || 8008);
-  const printEnabled = req.body?.printEnabled !== false;
+  const printEnabled = req.body?.printEnabled === undefined ? true : req.body?.printEnabled === true || req.body?.printEnabled === 'true' || req.body?.printEnabled === 1 || req.body?.printEnabled === '1';
   if (!printerIp || isIP(printerIp) === 0) { res.status(400).json({ error: 'A valid printer IP address is required.' }); return; }
   if (!Number.isInteger(printerPort) || printerPort < 1 || printerPort > 65535) { res.status(400).json({ error: 'Printer port must be a whole number from 1 to 65535.' }); return; }
   await ensureFrontlineTables();
