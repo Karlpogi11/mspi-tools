@@ -514,17 +514,12 @@ router.post('/sync', async (req, res) => {
       const find = (...names: string[]) => headers.findIndex((header) => names.some((name) => header === name || header.startsWith(`${name} `)));
       const dateIdx = find('date', 'date logged', 'date of transaction', 'occurred date'); const fallbackDateIdxes = dateIdx >= 0 ? [dateIdx] : [0, 1, 5]; const period = sheetPeriod(sheet); const startIdx = find('start time'); const endIdx = find('end time'); const typeIdx = find('type of transaction'); const divisionIdx = find('product division'); const arIdx = find('a/r number', 'a r number', 'ar number', 'ar no', 'ar'); const serialIdx = find('serial number', 'serial no', 'serial'); const deviceIdx = find('device model', 'device/model', 'model', 'device', 'product name'); const csoIdx = find('cso', 'name of cso'); const issueIdx = find('issue / remarks', 'issue remarks', 'issue');
       const hasReportHeaders = startIdx >= 0 && typeIdx >= 0;
-      const hasDateMarkers = values.slice(headerIndex + 1).some((row) => {
-        const type = text(row[typeIdx]); const cso = text(row[csoIdx]);
-        return !type && !cso && fallbackDateIdxes.some((index) => !!parseDate(text(row[index])));
-      });
       for (let i = headerIndex + 1; i < values.length; i++) {
         const row = values[i] || []; const type = text(row[typeIdx]); const cso = text(row[csoIdx]);
         const dateCandidates = fallbackDateIdxes.map((index) => parseDate(text(row[index]))).filter((value): value is string => !!value);
         const matchingSheetDate = dateCandidates.find((value) => matchesSheetPeriod(value, period));
         const explicitDate = dateCandidates[0] || null;
-        if (!type && !cso && (matchingSheetDate || explicitDate)) currentDate = matchingSheetDate || explicitDate;
-        else if (!hasDateMarkers && (matchingSheetDate || explicitDate)) currentDate = matchingSheetDate || explicitDate;
+        if ((dateIdx < 0 || (!type && !cso)) && (matchingSheetDate || explicitDate)) currentDate = matchingSheetDate || explicitDate;
         const ar = arIdx >= 0 ? text(row[arIdx]) : ''; const serial = serialIdx >= 0 ? text(row[serialIdx]) : '';
         if (!type && !cso && (!ar && !serial || hasReportHeaders)) continue;
         const raw = JSON.stringify(row); const sourceRow = i + 1; const aht = startIdx >= 0 && endIdx >= 0 ? parseMinutes(text(row[startIdx]), text(row[endIdx])) : null;

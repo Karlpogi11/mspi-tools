@@ -45,6 +45,8 @@ export default function AdminFrontlinePage() {
 
   const chooseSpreadsheet = async (id: string) => {
     const normalizedId = id.match(/\/spreadsheets\/d\/([^/]+)/)?.[1] || id.trim();
+    const keepSavedSelection = source?.spreadsheet_id === normalizedId;
+    const savedSelection = keepSavedSelection ? selectedSheets : [];
     setSpreadsheetId(normalizedId); setSpreadsheetName(normalizedId); setSelectedSheets([]); setWriteSheetName(''); setSheets([]);
     if (!normalizedId) return;
     setLoadingSheets(true); setMessage('');
@@ -55,7 +57,7 @@ export default function AdminFrontlinePage() {
       setSheets(loadedSheets);
       setSelectedSheets((current) => {
         const available = new Set(loadedSheets.map((sheet) => sheet.title));
-        const retained = current.filter((title) => available.has(title));
+        const retained = savedSelection.filter((title) => available.has(title));
         if (retained.length > 0) return retained;
         const recent = getRecentSheet(loadedSheets);
         return recent ? [recent.title] : [];
@@ -65,8 +67,8 @@ export default function AdminFrontlinePage() {
 
   const save = async () => {
     if (!spreadsheetId || selectedSheets.length === 0 || !writeSheetName) return;
-    setBusy(true); setSaving(true); setMessage('Saving source…');
-    try { await api.admin.saveFrontlineSource(spreadsheetId, spreadsheetName || spreadsheetId, selectedSheets, writeSheetName); setMessage('Source saved.'); await load(); }
+    setBusy(true); setSaving(true); setMessage('Saving source and importing records…');
+    try { await api.admin.saveFrontlineSource(spreadsheetId, spreadsheetName || spreadsheetId, selectedSheets, writeSheetName); await api.admin.syncFrontline(); setMessage('Source saved and records refreshed.'); await load(); }
     catch (error) { setMessage((error as Error).message); } finally { setBusy(false); setSaving(false); }
   };
 
