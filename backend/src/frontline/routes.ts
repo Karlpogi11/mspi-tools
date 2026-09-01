@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import { isIP } from 'node:net';
 import { getDb, getDbPool } from '../db/index.js';
 import { authenticateToken, requireAdmin } from '../auth.js';
 import { writeAuditLog } from '../db/audit.js';
 import { ensureFrontlineTables, FRONTLINE_OPTION_KEYS, type FrontlineOptionKey } from './store.js';
+import { printRawArLabel, testPrinterConnection } from './printer.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -239,6 +241,46 @@ router.get('/source', async (req, res) => {
 });
 
 router.use(requireFrontlineAccess);
+
+router.get('/printer', async (_req, res) => {
+  await ensureFrontlineTables();
+  const [rows] = await getDbPool().query('SELECT printer_ip, printer_port, print_enabled FROM frontline_printer_settings WHERE id = 1 LIMIT 1');
+  const row = (rows as Array<{ printer_ip?: string; printer_port?: number; print_enabled?: number }>)[0];
+  res.json({ printerIp: row?.printer_ip || null, printerPort: Number(row?.printer_port) || 8008, printEnabled: row?.print_enabled !== 0 });
+});
+
+router.put('/printer', requireAdmin, async (req, res) => {
+  const printerIp = text(req.body?.printerIp);
+  const printerPort = Number(req.body?.printerPort || 8008);
+  const printEnabled = req.body?.printEnabled !== false;
+  if (!printerIp || isIP(printerIp) === 0) { res.status(400).json({ error: 'A valid printer IP address is required.' }); return; }
+  if (!Number.isInteger(printerPort) || printerPort < 1 || printerPort > 65535) { res.status(400).json({ error: 'Printer port must be a whole number from 1 to 65535.' }); return; }
+  await ensureFrontlineTables();
+  await getDbPool().execute('INSERT INTO frontline_printer_settings (id, printer_ip, printer_port, print_enabled, updated_by) VALUES (1, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE printer_ip = VALUES(printer_ip), printer_port = VALUES(printer_port), print_enabled = VALUES(print_enabled), updated_by = VALUES(updated_by)', [printerIp, printerPort, printEnabled ? 1 : 0, req.user!.userId]);
+  res.json({ message: 'Printer configuration saved.', printerIp, printerPort, printEnabled });
+});
+
+router.post('/printer/test', requireAdmin, async (_req, res) => {
+  await ensureFrontlineTables();
+  const [rows] = await getDbPool().query('SELECT printer_ip, printer_port FROM frontline_printer_settings WHERE id = 1 LIMIT 1');
+  const row = (rows as Array<{ printer_ip?: string; printer_port?: number }>)[0];
+  if (!row?.printer_ip) { res.status(400).json({ error: 'Save a printer IP address before testing the connection.' }); return; }
+  try { await testPrinterConnection(row.printer_ip, Number(row.printer_port) || 8008); res.json({ message: 'Printer connection successful.' }); }
+  catch { res.status(502).json({ error: 'Printer Offline.' }); }
+});
+
+router.post('/printer/print', async (req, res) => {
+  const arNumber = text(req.body?.arNumber);
+  if (!arNumber) { res.status(400).json({ error: 'An AR number is required.' }); return; }
+  await ensureFrontlineTables();
+  const [rows] = await getDbPool().query('SELECT printer_ip, printer_port FROM frontline_printer_settings WHERE id = 1 LIMIT 1');
+  const row = (rows as Array<{ printer_ip?: string; printer_port?: number }>)[0];
+  if (!row?.printer_ip) { res.status(400).json({ error: 'Save a printer IP address before printing.' }); return; }
+  const port = Number(row.printer_port) || 8008;
+  if (port !== 9100) { res.status(400).json({ error: 'Backend raw printing is only available for port 9100.' }); return; }
+  try { await printRawArLabel(row.printer_ip, port, arNumber); res.json({ message: `AR ${arNumber} sent to printer.` }); }
+  catch { res.status(502).json({ error: 'Printer Offline.' }); }
+});
 
 function isFrontlineOptionKey(value: string): value is FrontlineOptionKey {
   return (FRONTLINE_OPTION_KEYS as readonly string[]).includes(value);
