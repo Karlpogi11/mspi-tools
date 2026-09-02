@@ -624,7 +624,10 @@ router.get('/report', async (req, res) => {
   const queryArgs = writeSheet ? [...args, writeSheet] : args;
   const pool = getDbPool(); const [rows] = await pool.query(`SELECT fr.id, fr.source_sheet, fr.source_row, fr.occurred_date, fr.aht_minutes, fr.transaction_type, fr.product_division, fr.ar_number, fr.serial_number, fr.device_model, fr.cso, fr.issue, ee.id AS endorsement_id, ee.status AS endorsement_status, ee.engineer_name AS endorsed_engineer_name, ee.created_at AS endorsed_at FROM frontline_records fr LEFT JOIN engineer_endorsements ee ON ee.frontline_record_id = fr.id OR (ee.frontline_record_id IS NULL AND ee.ar_number = fr.ar_number) ${clause} ${orderBy} LIMIT 10000`, queryArgs);
   const records = rows as Array<Record<string, unknown>>; const aht = records.map((row) => Number(row.aht_minutes)).filter(Number.isFinite);
-  const countBy = (key: string) => Object.entries(records.reduce<Record<string, number>>((acc, row) => { const value = String(row[key] || 'Unspecified'); acc[value] = (acc[value] || 0) + 1; return acc; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const countBy = (key: string, limit?: number) => {
+    const counts = Object.entries(records.reduce<Record<string, number>>((acc, row) => { const value = String(row[key] || 'Unspecified'); acc[value] = (acc[value] || 0) + 1; return acc; }, {})).sort((a, b) => b[1] - a[1]);
+    return typeof limit === 'number' ? counts.slice(0, limit) : counts;
+  };
   res.json({ total: records.length, averageAht: aht.length ? Math.round(aht.reduce((sum, value) => sum + value, 0) / aht.length * 100) / 100 : 0, csos: countBy('cso'), types: countBy('transaction_type'), divisions: countBy('product_division'), records });
 });
 
