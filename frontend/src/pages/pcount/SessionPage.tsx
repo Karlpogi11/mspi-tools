@@ -593,6 +593,19 @@ export default function PcountSessionPage() {
 
       {stage === 'count' && (
         <div>
+          <ImportSystem
+            sessionId={sessionId}
+            onComplete={handleSystemImportComplete}
+            hasProducts={products.length > 0}
+            currentDisplayColumns={session.display_columns || []}
+            productCount={products.length}
+            disabled={hasActiveScans}
+            onlineCount={onlineCount}
+            activeScannerCount={scannerCount}
+            availableDisplayColumns={availableDisplayColumns}
+            previewProducts={products}
+            onDisplayColumnsChange={(cols) => setSession(s => s ? { ...s, display_columns: cols } : s)}
+          />
           <ImportCount sessionId={sessionId} onComplete={handleCountImportComplete} systemProducts={products} />
           <div className="mt-3 text-center">
             <button
