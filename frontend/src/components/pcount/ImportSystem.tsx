@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WorkBook } from 'xlsx';
-import { type Product, readJson } from '../../lib/api';
+import { api, type Product } from '../../lib/api';
 
 interface Props {
   sessionId: number;
@@ -14,6 +14,7 @@ interface Props {
   availableDisplayColumns?: string[];
   previewProducts?: Product[];
   onDisplayColumnsChange?: (columns: string[]) => void;
+  onClear?: () => Promise<void>;
 }
 
 interface ColumnMapping {
@@ -23,7 +24,7 @@ interface ColumnMapping {
   displayColumns: string[];
 }
 
-export default function ImportSystem({ sessionId, onComplete, hasProducts, currentDisplayColumns, productCount, disabled, onlineCount = 0, activeScannerCount = 0, availableDisplayColumns = [], previewProducts = [], onDisplayColumnsChange }: Props) {
+export default function ImportSystem({ sessionId, onComplete, hasProducts, currentDisplayColumns, productCount, disabled, onlineCount = 0, activeScannerCount = 0, availableDisplayColumns = [], previewProducts = [], onDisplayColumnsChange, onClear }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [headerRow, setHeaderRow] = useState(1);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -34,6 +35,8 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
   const [error, setError] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [excludedPartNumbers, setExcludedPartNumbers] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const workbookRef = useRef<WorkBook | null>(null);
@@ -99,8 +102,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
     } catch { setError('Failed to parse Excel file'); }
   }
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
+  function processFile(f: File) {
     if (!f) return;
     setFile(f);
     setError('');
@@ -119,6 +121,27 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
       } catch { setError('Failed to parse Excel file'); }
     };
     reader.readAsArrayBuffer(f);
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (f) processFile(f);
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragging(false);
+    if (!disabled && e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
+  }
+
+  function handleDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (!disabled && e.dataTransfer.types.includes('Files')) setDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
   }
 
   const handleHeaderRowChange = useCallback((val: number) => {
@@ -161,15 +184,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
       if (products.length === 0) {
         throw new Error('All imported rows were excluded. Keep at least one product.');
       }
-      const qs = replace ? '?replace=true' : '';
-      const res = await fetch(`/api/pcount/sessions/${sessionId}/import-system${qs}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ display_columns: mapping.displayColumns, products }),
-      });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error);
+      await api.products.importSystem(sessionId, products, mapping.displayColumns, replace);
       setShowUpload(false);
       setConfirmReplace(false);
       onComplete();
@@ -206,6 +221,24 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
     setPreview([]);
     setRawRows([]);
     setError('');
+  }
+
+  async function handleClearImports() {
+    if (!onClear || disabled || clearing) return;
+    const confirmed = window.confirm(
+      `Clear all ${productCount} imported products and actual counts? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setClearing(true);
+    setError('');
+    try {
+      await onClear();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to clear imports');
+    } finally {
+      setClearing(false);
+    }
   }
 
   if (hasProducts && !showUpload) {
@@ -294,7 +327,15 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
           >
             {disabled ? 'Locked' : 'Replace File'}
           </button>
+          <button
+            onClick={() => void handleClearImports()}
+            disabled={disabled || clearing || !onClear}
+            className="px-4 py-2 text-[#6e6e73] text-[13px] rounded-lg hover:bg-[#f5f5f7] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            {clearing ? 'Clearing…' : 'Clear imports'}
+          </button>
         </div>
+        {error && <p className="mt-3 text-[13px] text-[#dc2626]">{error}</p>}
       </div>
     );
   }
@@ -314,7 +355,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
 
   function renderUpload() {
     return (
-      <div>
+      <div onDragEnter={handleDragEnter} onDragOver={(e) => e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}>
         {disabled && (
           <div className="mb-4 px-4 py-3 rounded-lg bg-[#fef2f2] border border-[#fecaca] text-[13px] text-[#dc2626] flex items-center gap-2">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
@@ -323,12 +364,18 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
         )}
         {!file ? (
           <div onClick={() => { if (!disabled) inputRef.current?.click(); }}
+            onDragEnter={handleDragEnter}
+            onDragOver={(e) => e.preventDefault()}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
             className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
               disabled
                 ? 'border-[#d2d2d7] opacity-50 cursor-not-allowed'
-                : 'border-[#d2d2d7] hover:border-[#2563eb] cursor-pointer'
+                : dragging
+                  ? 'border-[#2563eb] bg-[#f5faff] cursor-copy'
+                  : 'border-[#d2d2d7] hover:border-[#2563eb] cursor-pointer'
             }`}>
-            <p className="text-[14px] text-[#6e6e73]">Click to select Excel file (.xlsx or .xls)</p>
+            <p className="text-[14px] text-[#6e6e73]">{dragging ? 'Drop Excel file to upload' : 'Click or drag an Excel file here (.xlsx or .xls)'}</p>
             <input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
           </div>
         ) : (

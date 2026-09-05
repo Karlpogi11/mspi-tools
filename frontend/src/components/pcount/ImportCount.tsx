@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import type { WorkBook } from 'xlsx';
-import { type Product, readJson } from '../../lib/api';
+import { api, type Product } from '../../lib/api';
 
 interface Props {
   sessionId: number;
@@ -45,6 +45,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
   const [importing, setImporting] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [error, setError] = useState('');
+  const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const workbookRef = useRef<WorkBook | null>(null);
   const xlsxRef = useRef<typeof import('xlsx') | null>(null);
@@ -113,9 +114,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
     }
   }
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
+  function processFile(selectedFile: File) {
     setFile(selectedFile);
     setHeaderRow(1);
     setError('');
@@ -134,6 +133,27 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
       }
     };
     reader.readAsArrayBuffer(selectedFile);
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) processFile(selectedFile);
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragging(false);
+    if (e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
+  }
+
+  function handleDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes('Files')) setDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
   }
 
   const handleHeaderRowChange = useCallback((value: number) => {
@@ -201,19 +221,10 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
     setImporting(true);
     setError('');
     try {
-      const res = await fetch(`/api/pcount/sessions/${sessionId}/import-count`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          products: sourceProducts.map(product => ({
-            product_code: product.product_code,
-            counted_qty: product.counted_qty,
-          })),
-        }),
-      });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error);
+      await api.products.importCount(sessionId, sourceProducts.map(product => ({
+        product_code: product.product_code,
+        counted_qty: product.counted_qty,
+      })));
       onComplete();
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : 'Import failed');
@@ -226,7 +237,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
   const blankRows = alignedProducts.filter(product => product.counted_qty === null).length;
 
   return (
-    <div className="pcount-card p-6">
+    <div className="pcount-card p-6" onDragEnter={handleDragEnter} onDragOver={(e) => e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}>
       <h2 className="text-[16px] font-semibold text-[#1d1d1f] mb-4">Import Actual Count</h2>
       <p className="text-[13px] text-[#6e6e73] mb-4">
         Upload the Apple and 3PP count workbook. Rows are pivoted, sorted Z\u2013A, and aligned to the system import by product code.
@@ -234,7 +245,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
 
       {!file ? (
         <div className="space-y-3">
-          <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-3 rounded-xl border-2 border-dashed p-5 transition-colors ${dragging ? 'border-[#2563eb] bg-[#f5faff]' : 'border-[#d2d2d7]'}`}>
             <button
               onClick={() => inputRef.current?.click()}
               className="pcount-secondary-button"
@@ -249,6 +260,9 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
             >
               {downloadingTemplate ? 'Preparing template\u2026' : 'Download count template'}
             </button>
+            <span className="text-[12px] text-[#6e6e73]">
+              {dragging ? 'Drop count workbook to upload' : 'Or drag the count workbook here'}
+            </span>
           </div>
         </div>
       ) : (

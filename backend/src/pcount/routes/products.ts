@@ -171,4 +171,27 @@ router.post('/sessions/:id/import-count', requireMember, async (req, res) => {
   }
 });
 
+router.delete('/sessions/:id/imports', requireMember, async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id);
+
+    await store.assertWritable(sessionId);
+
+    if (getScannerCountWs(sessionId) > 0) {
+      return res.status(409).json({ error: 'Cannot clear imports — another scanner is currently connected.' });
+    }
+
+    await store.deleteSessionProducts(sessionId);
+    broadcast(sessionId, { type: 'products_cleared' });
+    res.json({ message: 'System and actual count imports cleared.' });
+  } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Failed to clear imports' });
+  }
+});
+
 export default router;

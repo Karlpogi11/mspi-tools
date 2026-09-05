@@ -573,8 +573,8 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ product_code }),
       }),
-    importSystem: (sessionId: number, products: unknown[], display_columns: string[]) =>
-      request<{ message: string; count: number }>(`/pcount/sessions/${sessionId}/import-system`, {
+    importSystem: (sessionId: number, products: unknown[], display_columns: string[], replace = false) =>
+      request<{ message: string; count: number }>(`/pcount/sessions/${sessionId}/import-system${replace ? '?replace=true' : ''}`, {
         method: 'POST',
         body: JSON.stringify({ products, display_columns }),
       }),
@@ -582,6 +582,10 @@ export const api = {
       request<{ message: string }>(`/pcount/sessions/${sessionId}/import-count`, {
         method: 'POST',
         body: JSON.stringify({ products }),
+      }),
+    clearImports: (sessionId: number) =>
+      request<{ message: string }>(`/pcount/sessions/${sessionId}/imports`, {
+        method: 'DELETE',
       }),
   },
 

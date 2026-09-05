@@ -47,6 +47,7 @@ export default function PcountSessionPage() {
   const hasBeenInVerify = useRef(false);
   const productsRef = useRef<Product[]>([]);
   const pendingScansRef = useRef(new Map<string, number>());
+  const loadRequestRef = useRef(0);
 
   useEffect(() => {
     productsRef.current = products;
@@ -73,24 +74,24 @@ export default function PcountSessionPage() {
     };
   }, [stage, lastScan?.product_code, lastScan?.description, lastScan?.status]);
 
-  const loadSession = useCallback(async () => {
+  const loadSession = useCallback(async (syncStage = false) => {
+    const requestId = ++loadRequestRef.current;
     try {
       const s = await api.sessions.get(sessionId);
-      setSession(s);
-      setTableColumns(s.display_columns?.length ? s.display_columns : ALL_COLUMNS.map(column => column.key));
-
       const prods = await api.products.list(sessionId, {
         sort: sortDesc ? 'desc' : 'asc',
       });
+      if (requestId !== loadRequestRef.current) return;
+      setSession(s);
+      setTableColumns(s.display_columns?.length ? s.display_columns : ALL_COLUMNS.map(column => column.key));
       productsRef.current = prods;
       setProducts(prods);
 
-      if (prods.length === 0) {
-        setStage('setup');
-      } else {
-        setStage('verify');
+      if (syncStage) {
+        setStage(prods.length === 0 ? 'setup' : 'verify');
       }
     } catch {
+      if (requestId !== loadRequestRef.current) return;
       navigate('/pcount');
     } finally {
       setLoading(false);
@@ -98,7 +99,7 @@ export default function PcountSessionPage() {
   }, [sessionId, sortDesc, navigate]);
 
   useEffect(() => {
-    loadSession();
+    loadSession(true);
   }, [loadSession]);
 
   useEffect(() => {
@@ -132,6 +133,7 @@ export default function PcountSessionPage() {
           return;
         case 'products_imported':
         case 'counts_imported':
+        case 'products_cleared':
           loadSession();
           return;
       }
@@ -327,6 +329,12 @@ export default function PcountSessionPage() {
     await loadSession();
     setStage('verify');
   }, [loadSession]);
+
+  const handleClearImports = useCallback(async () => {
+    await api.products.clearImports(sessionId);
+    await loadSession();
+    setStage('setup');
+  }, [loadSession, sessionId]);
 
   const handleSkipToScan = useCallback(() => {
     setStage('verify');
@@ -587,6 +595,7 @@ export default function PcountSessionPage() {
           activeScannerCount={scannerCount}
           availableDisplayColumns={availableDisplayColumns}
           previewProducts={products}
+          onClear={handleClearImports}
           onDisplayColumnsChange={(cols) => setSession(s => s ? { ...s, display_columns: cols } : s)}
         />
       )}
@@ -604,6 +613,7 @@ export default function PcountSessionPage() {
             activeScannerCount={scannerCount}
             availableDisplayColumns={availableDisplayColumns}
             previewProducts={products}
+            onClear={handleClearImports}
             onDisplayColumnsChange={(cols) => setSession(s => s ? { ...s, display_columns: cols } : s)}
           />
           <ImportCount sessionId={sessionId} onComplete={handleCountImportComplete} systemProducts={products} />
