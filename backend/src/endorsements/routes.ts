@@ -17,7 +17,7 @@ function canEndorse(req: Request) { return req.user?.roleName === 'Admin' || req
 function canView(req: Request) { return canEndorse(req) || canManageRoster(req) || isEngineer(req); }
 function canManageRoster(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG' || req.user?.roleName === 'CSO'; }
 function canManageAvailability(req: Request) { return canManageRoster(req) || isEngineer(req); }
-function canEditCalendar(req: Request) { return req.user?.roleName === 'Admin' || isEngineer(req); }
+function canEditCalendar(req: Request) { return canEndorse(req) || isEngineer(req); }
 function canDeleteEndorsement(req: Request) { return canEndorse(req) || isEngineer(req); }
 function forbidden(res: Response) { res.status(403).json({ error: 'Engineer Endorsements access required' }); }
 function endorsementDivision(deviceModel: string, sourceDivision: string) {
@@ -257,9 +257,35 @@ router.post('/', async (req, res) => {
 
 router.put('/calendar-entry', async (req, res) => {
   if (!canEditCalendar(req)) { forbidden(res); return; }
-  const date = text(req.body?.date); const division = text(req.body?.division); const engineer = canonicalEngineerName(text(req.body?.engineer)); const count = Number(req.body?.count); const details = text(req.body?.details);
+  const date = text(req.body?.date); const division = text(req.body?.division); const engineer = canonicalEngineerName(text(req.body?.engineer)); const count = Number(req.body?.count); const details = text(req.body?.details); const arNumbers: string[] = Array.isArray(req.body?.arNumbers) ? Array.from(new Set(req.body.arNumbers.map((ar: unknown) => text(ar)) as string[])).filter(Boolean) : [];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !division || !engineer || !Number.isInteger(count) || count < 1 || count > 999) { res.status(400).json({ error: 'Date, category, Engineer, and a whole-number count are required.' }); return; }
   await ensureFrontlineTables();
+  if (arNumbers.length) {
+    if (arNumbers.length > 50) { res.status(400).json({ error: 'Enter no more than 50 AR numbers at a time.' }); return; }
+    const pool = getDbPool(); const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const placeholders = arNumbers.map(() => '?').join(',');
+      const [recordRows] = await connection.query(`SELECT id, ar_number, device_model, issue, product_division FROM frontline_records WHERE ar_number IN (${placeholders}) FOR UPDATE`, arNumbers);
+      const records = recordRows as Array<Record<string, unknown>>;
+      const recordsByAr = new Map(records.map((record) => [text(record.ar_number).toUpperCase(), record]));
+      const missing = arNumbers.filter((ar) => !recordsByAr.has(ar.toUpperCase()));
+      if (missing.length) { await connection.rollback(); res.status(404).json({ error: `Frontline record not found for AR: ${missing.join(', ')}.` }); return; }
+      const [existingRows] = await connection.query(`SELECT ar_number, engineer_name FROM engineer_endorsements WHERE ar_number IN (${placeholders}) FOR UPDATE`, arNumbers);
+      if ((existingRows as Array<Record<string, unknown>>).length) { const existing = existingRows as Array<Record<string, unknown>>; await connection.rollback(); res.status(409).json({ error: `Already endorsed: ${existing.map((row) => `AR ${text(row.ar_number)} (${text(row.engineer_name)})`).join(', ')}.` }); return; }
+      const [engineerRows] = await connection.query('SELECT user_id FROM engineer_roster WHERE engineer_name = ? AND active = 1 LIMIT 1', [engineer]);
+      const engineerUserId = (engineerRows as Array<{ user_id: number | null }>)[0]?.user_id ?? null;
+      for (const ar of arNumbers) {
+        const record = recordsByAr.get(ar.toUpperCase())!;
+        const deviceModel = text(record.device_model); const productDivision = endorsementDivision(deviceModel, text(record.product_division));
+        await connection.execute('INSERT INTO engineer_endorsements (ar_number, frontline_record_id, cso_user_id, engineer_user_id, engineer_name, device_model, issue, product_division) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [text(record.ar_number), Number(record.id), req.user!.userId, engineerUserId, engineer, deviceModel, text(record.issue), productDivision]);
+      }
+      if (engineerUserId !== null) await connection.execute('UPDATE engineer_daily_availability SET assignment_count = assignment_count + ? WHERE user_id = ? AND availability_date = ? AND status = \'active\'', [arNumbers.length, engineerUserId, todayManila()]);
+      await connection.commit();
+      void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.manual_ar_endorsements_created', resourceType: 'engineer_endorsements', metadata: { arNumbers, engineer, date, division } });
+      res.json({ message: `${arNumbers.length} AR${arNumbers.length === 1 ? '' : 's'} endorsed to ${engineer}.` }); return;
+    } catch (error) { await connection.rollback(); console.error('manual AR endorsement error:', error); res.status(500).json({ error: 'Unable to create the AR endorsements.' }); return; } finally { connection.release(); }
+  }
   await getDbPool().execute(`INSERT INTO engineer_calendar_entries (entry_date, product_division, engineer_name, entry_count, details, created_by) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE entry_count=VALUES(entry_count), details=VALUES(details), created_by=VALUES(created_by)`, [date, division, engineer, count, details.slice(0, 1000), req.user!.userId]);
   res.json({ message: 'Calendar entry saved.' });
 });

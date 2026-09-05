@@ -69,8 +69,18 @@ body select {
 .endorsement-page table th,
 .endorsement-page table td {
   border-color: #e1e1e6;
+  border-style: solid;
   border-left-width: 1px;
   border-right-width: 1px;
+}
+
+.endorsement-page table tbody td {
+  border-bottom-width: 1px;
+}
+
+.endorsement-page table tbody tr,
+.endorsement-page table tbody td {
+  height: 2.5rem;
 }
 
 .endorsement-page table tr {

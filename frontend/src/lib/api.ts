@@ -173,6 +173,7 @@ export interface StorageRule { family: 'IOS' | 'Mac'; status: string; numbers: n
 export interface StorageEmployee { id: number; employeeNumber: string; fullName: string; active: number; createdAt?: string; updatedAt?: string }
 export interface StorageUnit { id: number; ar_number: string; family: string; status: string; cabinet_number: number; state: 'in' | 'out'; checked_in_at: string | null; checked_out_at: string | null; current_employee_name?: string | null }
 export interface StorageMovement { id: number; action: 'IN' | 'OUT'; family: string; status: string; cabinet_number: number | null; occurred_at: string; employee_number: string; full_name: string }
+export interface StorageRecentMovement extends StorageMovement { ar_number: string }
 
 export interface Session {
   id: number;
@@ -503,7 +504,7 @@ export const api = {
     calendar: (month: string) => request<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
     calendarFresh: (month: string) => requestFresh<EngineerCalendar>(`/endorsements/calendar?month=${encodeURIComponent(month)}`),
     saveCalendarOrder: (month: string, division: string, engineerOrder: string[]) => request<{ message: string }>('/endorsements/calendar-order', { method: 'PUT', body: JSON.stringify({ month, division, engineerOrder }) }),
-    saveCalendarEntry: (payload: { date: string; division: string; engineer: string; count: number; details?: string }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'PUT', body: JSON.stringify(payload) }),
+    saveCalendarEntry: (payload: { date: string; division: string; engineer: string; count: number; details?: string; arNumbers?: string[] }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'PUT', body: JSON.stringify(payload) }),
     deleteCalendarEntry: (payload: { date: string; division: string; engineer: string }) => request<{ message: string }>('/endorsements/calendar-entry', { method: 'DELETE', body: JSON.stringify(payload) }),
     passEndorsement: (id: number) => request<{ message: string; engineer: string }>(`/endorsements/${id}/pass`, { method: 'POST' }),
     cancelEndorsement: (id: number) => request<{ message: string }>(`/endorsements/${id}/cancel`, { method: 'POST' }),
@@ -512,6 +513,7 @@ export const api = {
   storageLocator: {
     rules: () => request<{ rules: StorageRule[] }>('/storage-locator/rules'),
     overview: () => request<{ occupied: StorageUnit[]; rules: StorageRule[] }>('/storage-locator/overview'),
+    recentHistory: () => request<{ history: StorageRecentMovement[] }>('/storage-locator/recent-history'),
     verifyEmployee: (employeeNumber: string) => request<{ employee: StorageEmployee }>(`/storage-locator/employees/verify?employeeNumber=${encodeURIComponent(employeeNumber)}`),
     lookup: (arNumber: string) => request<{ unit: StorageUnit | null; history: StorageMovement[] }>(`/storage-locator/units/${encodeURIComponent(arNumber)}`),
     checkIn: (payload: { employeeNumber: string; arNumber: string; family: string; status: string; cabinetNumber: number }) => request<{ message: string }>('/storage-locator/units/in', { method: 'POST', body: JSON.stringify(payload) }),

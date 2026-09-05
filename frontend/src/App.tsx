@@ -1,7 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Suspense, lazy, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './lib/auth';
-import { api } from './lib/api';
+import { api, type Tool } from './lib/api';
 import Layout from './components/Layout';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -49,8 +49,19 @@ const AdminStorageLocatorPage = lazy(loadAdminStorageLocatorPage);
 const EngineerEndorsementsPage = lazy(loadEngineerEndorsementsPage);
 const StorageLocatorPage = lazy(loadStorageLocatorPage);
 
+const TOOL_PATHS = ['/pcount', '/rfpu', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator'];
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
+  const toolPath = TOOL_PATHS.find((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const [tools, setTools] = useState<Tool[] | null>(null);
+
+  useEffect(() => {
+    if (!user || !toolPath || user.isSuperAdmin) return;
+    setTools(null);
+    void api.myTools().then(setTools).catch(() => setTools([]));
+  }, [toolPath, user]);
 
   if (loading) {
     return (
@@ -63,6 +74,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!user) return <Navigate to="/login" replace />;
 
   if (!user.roleId) return <PendingApprovalPage />;
+
+  if (toolPath && !user.isSuperAdmin && !tools) {
+    return <div className="min-h-screen bg-[#f5f5f7] flex items-center justify-center"><p className="text-[14px] text-[#6e6e73]">Checking access...</p></div>;
+  }
+  if (toolPath && !user.isSuperAdmin && !tools?.some((tool) => tool.url === toolPath && tool.canAccess)) {
+    return <Navigate to="/" replace />;
+  }
 
   return <>{children}</>;
 }

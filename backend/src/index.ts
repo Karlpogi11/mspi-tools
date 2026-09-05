@@ -28,6 +28,7 @@ import frontlineRoutes from './frontline/routes.js';
 import { ensureFrontlineTables } from './frontline/store.js';
 import endorsementRoutes from './endorsements/routes.js';
 import storageLocatorRoutes from './storage-locator/routes.js';
+import { authenticateToken, requireToolAccess } from './auth.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -84,8 +85,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api', toolsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/frontline', frontlineRoutes);
-app.use('/api/endorsements', endorsementRoutes);
-app.use('/api/storage-locator', storageLocatorRoutes);
+app.use('/api/endorsements', authenticateToken, requireToolAccess('/endorsements'), endorsementRoutes);
+app.use('/api/storage-locator', authenticateToken, requireToolAccess('/storage-locator'), storageLocatorRoutes);
 
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
@@ -97,6 +98,7 @@ const tools = [
 ];
 
 for (const tool of tools) {
+  app.use(`/api/${tool.name}`, authenticateToken, requireToolAccess(`/${tool.name}`));
   app.use(`/api/${tool.name}`, tool.router);
 }
 

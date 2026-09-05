@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from './db/index.js';
-import { roles, users } from './db/schema.js';
+import { roles, users, roleToolAccess, tools } from './db/schema.js';
 
 export interface JwtPayload {
   userId: number;
@@ -103,4 +103,28 @@ export function requireSuperAdmin(
     return;
   }
   next();
+}
+
+export function requireToolAccess(toolUrl: string) {
+  return async function toolAccessMiddleware(req: Request, res: Response, next: NextFunction) {
+    if (req.user?.isSuperAdmin) {
+      next();
+      return;
+    }
+    if (!req.user?.roleId) {
+      res.status(403).json({ error: 'Tool access required' });
+      return;
+    }
+    const [access] = await getDb()
+      .select({ toolId: roleToolAccess.tool_id })
+      .from(roleToolAccess)
+      .innerJoin(tools, eq(roleToolAccess.tool_id, tools.id))
+      .where(and(eq(roleToolAccess.role_id, req.user.roleId), eq(tools.url, toolUrl)))
+      .limit(1);
+    if (!access) {
+      res.status(403).json({ error: 'You do not have access to this tool' });
+      return;
+    }
+    next();
+  };
 }

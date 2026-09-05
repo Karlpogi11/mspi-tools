@@ -73,6 +73,12 @@ router.get('/overview', async (_req, res) => {
   res.json({ occupied: rows, rules: RULES });
 });
 
+router.get('/recent-history', async (_req, res) => {
+  await ensureStorageTables();
+  const [rows] = await getDbPool().query(`SELECT m.id, m.action, m.family, m.status, m.cabinet_number, m.occurred_at, u.ar_number, e.employee_number, e.full_name FROM storage_movements m INNER JOIN storage_units u ON u.id = m.unit_id INNER JOIN storage_employees e ON e.id = m.employee_id ORDER BY m.occurred_at DESC, m.id DESC LIMIT 5`);
+  res.json({ history: rows });
+});
+
 router.get('/units/:arNumber', async (req, res) => {
   await ensureStorageTables();
   const ar = value(req.params.arNumber);
