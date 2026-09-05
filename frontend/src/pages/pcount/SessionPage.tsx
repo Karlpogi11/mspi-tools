@@ -318,8 +318,14 @@ export default function PcountSessionPage() {
     }
   }, [loadSession, sessionId]);
 
-  const handleImportComplete = useCallback(() => {
-    loadSession();
+  const handleSystemImportComplete = useCallback(async () => {
+    await loadSession();
+    setStage('count');
+  }, [loadSession]);
+
+  const handleCountImportComplete = useCallback(async () => {
+    await loadSession();
+    setStage('verify');
   }, [loadSession]);
 
   const handleSkipToScan = useCallback(() => {
@@ -572,7 +578,7 @@ export default function PcountSessionPage() {
       {stage === 'setup' && (
         <ImportSystem
           sessionId={sessionId}
-          onComplete={handleImportComplete}
+          onComplete={handleSystemImportComplete}
           hasProducts={products.length > 0}
           currentDisplayColumns={session.display_columns || []}
           productCount={products.length}
@@ -587,7 +593,7 @@ export default function PcountSessionPage() {
 
       {stage === 'count' && (
         <div>
-          <ImportCount sessionId={sessionId} onComplete={handleImportComplete} systemProducts={products} />
+          <ImportCount sessionId={sessionId} onComplete={handleCountImportComplete} systemProducts={products} />
           <div className="mt-3 text-center">
             <button
               onClick={handleSkipToScan}
