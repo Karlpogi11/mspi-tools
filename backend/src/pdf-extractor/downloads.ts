@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { ZipArchive } from 'archiver';
 import jwt from 'jsonwebtoken';
 import { DATA_DIR, DOWNLOADS } from './paths.js';
 import { PDF_PROCESS_CONCURRENCY, type ProcessResult } from './runner.js';
@@ -220,6 +219,7 @@ export async function createDownloadArtifact(results: ProcessResult[], userId: n
 
   const zipName = `renamed-invoices-${new Date().toISOString().slice(0, 10)}.zip`;
   const zipPath = path.join(DOWNLOADS, `${token}.zip`);
+  const { ZipArchive } = await import('archiver');
   await new Promise<void>((resolve, reject) => {
     const output = fs.createWriteStream(zipPath);
     const archive = new ZipArchive({ zlib: { level: 9 } });
