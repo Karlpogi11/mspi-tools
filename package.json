@@ -13,7 +13,7 @@
     "db:generate": "cd backend && npm run db:generate"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
+    "concurrently": "^10.0.5",
     "typescript": "^5.5.0"
   },
   "packageManager": "npm@10.9.3"
