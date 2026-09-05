@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, type EndorsementEngineer, type EngineerCalendar, type EngineerDashboard } from '../lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, type EndorsementEngineer, type EndorsementQueues, type EngineerCalendar, type EngineerDashboard } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import EndorsementQueuePanel from '../components/EndorsementQueuePanel';
 
 export default function EngineerEndorsementsPage() {
   const { user } = useAuth();
@@ -13,18 +14,17 @@ export default function EngineerEndorsementsPage() {
   const [editingCellError, setEditingCellError] = useState('');
   const [deletingManualEntry, setDeletingManualEntry] = useState(false);
   const [roster, setRoster] = useState<EndorsementEngineer[] | null>(null);
-  const [nextEngineer, setNextEngineer] = useState<EndorsementEngineer | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [rosterBusy, setRosterBusy] = useState(false);
-  const [newEngineerName, setNewEngineerName] = useState('');
+  const [queueState, setQueueState] = useState<EndorsementQueues | null>(null);
+  const [assignmentRequest, setAssignmentRequest] = useState<{ arNumber: string } | null>(null);
+  const loadVersion = useRef(0);
+  const queueLoadVersion = useRef(0);
+  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageIsError, setMessageIsError] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [editingEndorsementId, setEditingEndorsementId] = useState<number | null>(null);
   const [deviceModelDraft, setDeviceModelDraft] = useState('');
   const [savingDeviceModel, setSavingDeviceModel] = useState(false);
-  const [passingEndorsementId, setPassingEndorsementId] = useState<number | null>(null);
   const [editingEngineerId, setEditingEngineerId] = useState<number | null>(null);
   const [engineerDraft, setEngineerDraft] = useState('');
   const [savingEngineer, setSavingEngineer] = useState(false);
@@ -36,118 +36,35 @@ export default function EngineerEndorsementsPage() {
   const canManageAvailability = canManageRoster || user?.roleName === 'ENGR';
   const showMessage = (text: string, isError = false) => { setMessage(text); setMessageIsError(isError); };
 
-  const load = async (silent = false) => {
+  const loadHistory = async (silent = false) => {
+    const version = ++loadVersion.current;
     if (!silent) setLoading(true);
     try {
-      const fetchDashboard = silent ? api.endorsements.dashboardFresh : api.endorsements.dashboard;
-      const fetchCalendar = silent ? api.endorsements.calendarFresh : api.endorsements.calendar;
-      const [nextDashboard, nextCalendar] = await Promise.all([fetchDashboard(), fetchCalendar(calendarMonth)]);
-      setDashboard(nextDashboard);
-      setCalendar(nextCalendar);
+      const [nextDashboard, nextCalendar] = await Promise.all([api.endorsements.dashboardFresh(), api.endorsements.calendarFresh(calendarMonth)]);
+      if (version !== loadVersion.current) return;
+      setDashboard(nextDashboard); setCalendar(nextCalendar);
     } catch (error) {
+      if (version !== loadVersion.current) return;
       showMessage((error as Error).message, true);
-    } finally {
-      setLoading(false);
-    }
+    } finally { if (version === loadVersion.current) setLoading(false); }
   };
-
-  const loadRoster = async () => {
+  const loadQueues = async () => {
+    const version = ++queueLoadVersion.current;
     try {
-      const result = await api.endorsements.available();
-      setRoster(result.roster);
-      setNextEngineer(result.nextEngineer);
-    } catch (error) {
-      showMessage((error as Error).message, true);
-    }
+      const availability = await api.endorsements.available();
+      if (version === queueLoadVersion.current) { setRoster(availability.roster); setQueueState(availability); }
+    } catch (error) { if (version === queueLoadVersion.current) showMessage((error as Error).message, true); }
   };
-
-  useEffect(() => { void load(); const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(true); }, 30000); return () => window.clearInterval(timer); }, [calendarMonth]);
-  useEffect(() => { void loadRoster(); }, [canManageRoster]);
-  useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 4000); return () => window.clearTimeout(timer); }, [message]);
-
-  const passNext = async () => {
-    const previousNext = nextEngineer;
-    const activeEngineers = roster?.filter((engineer) => engineer.status === 'active') || [];
-    const currentIndex = previousNext ? activeEngineers.findIndex((engineer) => engineer.id === previousNext.id) : -1;
-    const optimisticNext = currentIndex >= 0 && activeEngineers.length > 1
-      ? activeEngineers[(currentIndex + 1) % activeEngineers.length]
-      : previousNext;
-    if (optimisticNext) setNextEngineer(optimisticNext);
-    setBusy(true);
-    setMessage('');
-    try {
-      await api.endorsements.passNext();
-      void Promise.all([load(true), loadRoster()]);
-    } catch (error) {
-      setNextEngineer(previousNext);
-      showMessage((error as Error).message, true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addEngineer = async () => {
-    const name = newEngineerName.trim();
-    if (!name) return;
-    setRosterBusy(true);
-    setMessage('');
-    try {
-      await api.endorsements.addEngineer(name);
-      setNewEngineerName('');
-      await loadRoster();
-      setMessage(`${name} added to today's Engineer roster.`);
-    } catch (error) {
-      showMessage((error as Error).message, true);
-    } finally {
-      setRosterBusy(false);
-    }
-  };
-
-  const removeEngineer = async (id: number) => {
-    const previousRoster = roster;
-    const nextRoster = roster?.map((engineer) => engineer.id === id ? { ...engineer, status: 'left' as const } : engineer) || null;
-    setRoster(nextRoster);
-    setNextEngineer(nextRoster?.find((engineer) => engineer.status === 'active') || null);
-    setRosterBusy(true);
-    setMessage('');
-    try {
-      await api.endorsements.removeEngineer(id);
-      void loadRoster();
-      setMessage('Engineer removed from today\'s roster.');
-    } catch (error) {
-      setRoster(previousRoster);
-      setNextEngineer(previousRoster?.find((engineer) => engineer.status === 'active') || null);
-      showMessage((error as Error).message, true);
-    } finally {
-      setRosterBusy(false);
-    }
-  };
-
-  const markPresent = async (name: string) => {
-    const previousRoster = roster;
-    const nextRoster = roster?.map((engineer) => engineer.full_name.toLowerCase() === name.toLowerCase() ? { ...engineer, status: 'active' as const } : engineer) || null;
-    setRoster(nextRoster);
-    setNextEngineer(nextRoster?.find((engineer) => engineer.status === 'active') || null);
-    setRosterBusy(true);
-    setMessage('');
-    try {
-      await api.endorsements.addEngineer(name);
-      void loadRoster();
-      setMessage(`${name} is present and eligible for endorsements.`);
-    } catch (error) {
-      setRoster(previousRoster);
-      setNextEngineer(previousRoster?.find((engineer) => engineer.status === 'active') || null);
-      showMessage((error as Error).message, true);
-    } finally {
-      setRosterBusy(false);
-    }
-  };
-
-  const toggleAvailability = async (engineer: EndorsementEngineer) => {
-    if (!canManageAvailability) return;
-    if (engineer.status === 'active') await removeEngineer(engineer.id);
-    else await markPresent(engineer.full_name);
-  };
+  useEffect(() => {
+    void loadQueues();
+    if (showDetails) void loadHistory();
+    const refreshQueues = () => { if (document.visibilityState === 'visible') void loadQueues(); };
+    const queueTimer = window.setInterval(refreshQueues, 10000);
+    const pageTimer = window.setInterval(() => { if (showDetails && document.visibilityState === 'visible') void loadHistory(true); }, 60000);
+    window.addEventListener('focus', refreshQueues); document.addEventListener('visibilitychange', refreshQueues);
+    return () => { window.clearInterval(queueTimer); window.clearInterval(pageTimer); window.removeEventListener('focus', refreshQueues); document.removeEventListener('visibilitychange', refreshQueues); ++loadVersion.current; ++queueLoadVersion.current; };
+  }, [calendarMonth, showDetails]);
+  useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 6000); return () => window.clearTimeout(timer); }, [message]);
 
   const formatDate = (value: string | null | undefined) => {
     if (!value) return '—';
@@ -167,22 +84,35 @@ export default function EngineerEndorsementsPage() {
  const selectedEndorsementCount = selectedEndorsements.reduce((sum, entry) => sum + (entry.manual_count || 1), 0);
  const latestCalendarTimestamp = useMemo(() => { if (!calendar) return null; let latest = ''; for (const day of calendar.days) for (const division of Object.values(day.counts)) for (const entries of Object.values(division)) for (const entry of entries) if (entry.created_at > latest) latest = entry.created_at; return latest || null; }, [calendar]);
   const openCalendarEditor = (date: string, division: string, engineer: string) => { if (!canEditEndorsement) return; const entry = calendar?.days.find((day) => day.date === date)?.counts[division]?.[engineer]?.find((item) => item.is_manual); setEditingCellError(''); setEditingCell({ date, division, engineer, count: entry?.manual_count ? String(entry.manual_count) : '', details: entry?.details || '', arNumber: '' }); };
-  const saveCalendarEntry = async () => { if (!editingCell) return; const arNumber = editingCell.arNumber.trim(); const count = Number(editingCell.count); if (!arNumber && (!Number.isInteger(count) || count < 1)) return; setSavingCell(true); setEditingCellError(''); setMessage(''); try { await api.endorsements.saveCalendarEntry({ ...editingCell, count: arNumber ? 1 : count, arNumbers: arNumber ? [arNumber] : undefined }); setEditingCell(null); setEditingCellError(''); setSelectedDay(null); await load(true); showMessage(arNumber ? 'AR endorsed.' : 'Calendar entry saved.'); } catch (error) { const errorMessage = (error as Error).message; if (arNumber) setEditingCellError(errorMessage); else showMessage(errorMessage, true); } finally { setSavingCell(false); } };
- const deleteManualCalendarEntry = async (date: string, division: string, engineer: string) => { if (!window.confirm('Delete this manual calendar entry?')) return; setDeletingManualEntry(true); setMessage(''); try { const result = await api.endorsements.deleteCalendarEntry({ date, division, engineer }); setSelectedDay(null); setEditingCell(null); await load(true); showMessage(result.message); } catch (error) { showMessage((error as Error).message, true); } finally { setDeletingManualEntry(false); } };
+  const saveCalendarEntry = async () => {
+    if (!editingCell) return;
+    const arNumber = editingCell.arNumber.trim();
+    if (arNumber) {
+      if (editingCell.date !== queueState?.date) { setEditingCellError('New AR assignments are recorded today. Use manual counts for historical dates.'); return; }
+      setAssignmentRequest({ arNumber });
+      setEditingCell(null); setSelectedDay(null); return;
+    }
+    const count = Number(editingCell.count);
+    if (!Number.isInteger(count) || count < 1) return;
+    setSavingCell(true); setEditingCellError('');
+    try { await api.endorsements.saveCalendarEntry({ ...editingCell, count }); setEditingCell(null); setSelectedDay(null); await loadHistory(true); showMessage('Manual count saved.'); }
+    catch (error) { setEditingCellError((error as Error).message); }
+    finally { setSavingCell(false); }
+  };
   const canEditEndorsement = user?.roleName === 'Admin' || user?.roleName === 'CSO' || user?.roleName === 'ENGR';
   const beginDeviceModelEdit = (id: number, value: string | null) => { setEditingEndorsementId(id); setDeviceModelDraft(value || ''); };
-  const saveDeviceModel = async (id: number) => { const value = deviceModelDraft.trim(); if (!value) return; setSavingDeviceModel(true); setMessage(''); try { await api.endorsements.updateDeviceModel(id, value); setEditingEndorsementId(null); setDeviceModelDraft(''); await load(); showMessage('Device model updated.'); } catch (error) { showMessage((error as Error).message, true); } finally { setSavingDeviceModel(false); } };
+  const saveDeviceModel = async (id: number) => { const value = deviceModelDraft.trim(); if (!value) return; setSavingDeviceModel(true); setMessage(''); try { await api.endorsements.updateDeviceModel(id, value); setEditingEndorsementId(null); setDeviceModelDraft(''); await loadHistory(); showMessage('Device model updated.'); } catch (error) { showMessage((error as Error).message, true); } finally { setSavingDeviceModel(false); } };
   const beginEngineerEdit = (id: number, name: string) => { setEditingEngineerId(id); setEngineerDraft(name); };
-  const saveEngineer = async (id: number) => { const name = engineerDraft.trim(); if (!name) return; setSavingEngineer(true); setMessage(''); try { await api.endorsements.updateEngineer(id, name); setEditingEngineerId(null); setEngineerDraft(''); await Promise.all([load(true), loadRoster()]); showMessage('Engineer assignment updated.'); } catch (error) { showMessage((error as Error).message, true); } finally { setSavingEngineer(false); } };
-  const reorderEngineers = async (division: string, targetEngineer: string) => { if (!draggedEngineer || !calendar) return; const [draggedDivision, draggedName] = draggedEngineer.split('::'); if (draggedDivision !== division || draggedName === targetEngineer) return; const currentOrder = calendar.engineerOrder?.[division] || calendar.columns.filter((column) => column.division === division).map((column) => column.engineer); const nextOrder = [...currentOrder]; const from = nextOrder.indexOf(draggedName); const to = nextOrder.indexOf(targetEngineer); if (from < 0 || to < 0) return; nextOrder.splice(from, 1); nextOrder.splice(to, 0, draggedName); const nextEngineerOrder = { ...calendar.engineerOrder, [division]: nextOrder }; const orderIndex = new Map(nextOrder.map((name, index) => [name, index])); setCalendar({ ...calendar, engineerOrder: nextEngineerOrder, columns: calendar.columns.map((column) => column.division === division ? column : column).sort((a, b) => a.division === division && b.division === division ? (orderIndex.get(a.engineer) ?? 0) - (orderIndex.get(b.engineer) ?? 0) : 0) }); setDraggedEngineer(null); setSavingOrder(true); try { await api.endorsements.saveCalendarOrder(calendar.month, division, nextOrder); await load(true); } catch (error) { showMessage((error as Error).message, true); await load(true); } finally { setSavingOrder(false); } };
-  const deleteEndorsement = async (id: number) => { if (!window.confirm('Delete this endorsement only? The original Frontline record will not be changed.')) return; setDeletingEndorsementId(id); setMessage(''); try { const result = await api.endorsements.delete(id); setSelectedDay(null); await Promise.all([load(true), loadRoster()]); showMessage(result.message); } catch (error) { showMessage((error as Error).message, true); } finally { setDeletingEndorsementId(null); } };
+  const saveEngineer = async (id: number) => { const name = engineerDraft.trim(); if (!name) return; setSavingEngineer(true); setMessage(''); try { await api.endorsements.updateEngineer(id, name); setEditingEngineerId(null); setEngineerDraft(''); await loadHistory(true); showMessage('Engineer assignment updated.'); } catch (error) { showMessage((error as Error).message, true); } finally { setSavingEngineer(false); } };
+  const reorderEngineers = async (division: string, targetEngineer: string) => { if (!draggedEngineer || !calendar) return; const [draggedDivision, draggedName] = draggedEngineer.split('::'); if (draggedDivision !== division || draggedName === targetEngineer) return; const currentOrder = calendar.engineerOrder?.[division] || calendar.columns.filter((column) => column.division === division).map((column) => column.engineer); const nextOrder = [...currentOrder]; const from = nextOrder.indexOf(draggedName); const to = nextOrder.indexOf(targetEngineer); if (from < 0 || to < 0) return; nextOrder.splice(from, 1); nextOrder.splice(to, 0, draggedName); const nextEngineerOrder = { ...calendar.engineerOrder, [division]: nextOrder }; const orderIndex = new Map(nextOrder.map((name, index) => [name, index])); setCalendar({ ...calendar, engineerOrder: nextEngineerOrder, columns: calendar.columns.map((column) => column.division === division ? column : column).sort((a, b) => a.division === division && b.division === division ? (orderIndex.get(a.engineer) ?? 0) - (orderIndex.get(b.engineer) ?? 0) : 0) }); setDraggedEngineer(null); setSavingOrder(true); try { await api.endorsements.saveCalendarOrder(calendar.month, division, nextOrder); await loadHistory(true); } catch (error) { showMessage((error as Error).message, true); await loadHistory(true); } finally { setSavingOrder(false); } };
+  const deleteEndorsement = async (id: number) => { if (!window.confirm('Delete this endorsement only? The original Frontline record will not be changed.')) return; setDeletingEndorsementId(id); setMessage(''); try { const result = await api.endorsements.delete(id); setSelectedDay(null); await loadHistory(true); showMessage(result.message); } catch (error) { showMessage((error as Error).message, true); } finally { setDeletingEndorsementId(null); } };
 
   return (
     <div className="endorsement-page min-h-[calc(100vh-128px)] bg-[#f4f3f6]">
       <div className="mx-auto w-full max-w-none">
         <div className="mb-7 flex flex-wrap items-end justify-between gap-3">
-          <div><h1 className="text-[28px] font-semibold tracking-tight text-[#1d1d1f]">Engineer Endorsements</h1><p className="mt-1.5 text-[14px] text-[#3c3c43]">Daily availability and customer device endorsements.</p></div>
-          <button type="button" onClick={() => setShowDetails((visible) => !visible)} aria-expanded={showDetails} className="rounded-full border border-[#d2d2d7] px-4 py-2 text-[12px] font-medium text-[#3c3c43] hover:bg-[#f5f5f7]">{showDetails ? 'Hide details' : 'Show details'}</button>
+          <h1 className="text-[28px] font-semibold tracking-tight text-[#1d1d1f]">Engineer Endorsements</h1>
+          <button type="button" onClick={() => setShowDetails((visible) => !visible)} aria-expanded={showDetails} className="rounded-full border border-[#d2d2d7] px-4 py-2 text-[12px] font-medium text-[#3c3c43] hover:bg-[#f5f5f7]">{showDetails ? 'Hide history' : 'View history'}</button>
         </div>
 
         {message && (
@@ -193,38 +123,16 @@ export default function EngineerEndorsementsPage() {
           </div>
         )}
 
-        <section className="mb-5 rounded-2xl border border-[#e5e5e7] bg-white p-5">
-          <div className="flex items-center justify-between gap-3"><p className="text-[11px] uppercase tracking-wider text-[#6e6e73]">Next endorsement</p><span className="rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[10px] font-medium text-[#6e6e73]">{dashboard?.date || 'Today'}</span></div>
-          {nextEngineer ? <div className="mt-3 flex items-center gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1d1d1f] text-[13px] font-semibold text-white">1</div><div className="min-w-0"><p className="truncate text-[22px] font-semibold tracking-tight text-[#1d1d1f]">{nextEngineer.full_name}</p><p className="mt-0.5 text-[12px] text-[#6e6e73]">First in round robin · {nextEngineer.assignment_count} assigned today</p></div></div> : <p className="mt-2 text-[13px] text-[#6e6e73]">No Engineer is currently available. Engineers can join today&apos;s queue above.</p>}
-        </section>
-
-        {showDetails && (
-          <section className="mb-5 rounded-2xl border border-[#e5e5e7] bg-white p-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-[13px] font-semibold text-[#1d1d1f]">Today&apos;s Engineer availability</h2>
-                <p className="mt-1 text-[12px] text-[#6e6e73]">Click an Engineer card to change availability. The first available card is next.</p>
-              </div>
-              {canManageRoster && <form className="flex w-full max-w-md gap-2 sm:w-auto" onSubmit={(event) => { event.preventDefault(); void addEngineer(); }}>
-                <input value={newEngineerName} onChange={(event) => setNewEngineerName(event.target.value)} placeholder="Engineer name" aria-label="Engineer name" className="h-9 min-w-0 flex-1 rounded-lg border border-[#d2d2d7] px-3 text-[12px]" />
-                <button type="submit" disabled={rosterBusy || !newEngineerName.trim()} className="rounded-full bg-[#1d1d1f] px-4 py-2 text-[11px] font-semibold text-white disabled:opacity-40">
-                  {rosterBusy ? 'Adding…' : 'Add Engineer'}
-                </button>
-              </form>}
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {roster === null ? <p className="text-[12px] text-[#6e6e73]">Loading roster…</p> : roster.length ? <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{roster.map((engineer, index) => <button key={engineer.id} type="button" onClick={() => void toggleAvailability(engineer)} disabled={!canManageAvailability} aria-pressed={engineer.status === 'active'} aria-label={`${engineer.full_name}: ${engineer.status === 'active' ? 'available' : 'unavailable'}. Click to change status.`} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${engineer.status === 'active' ? 'border-[#cfe8d6] bg-[#fbfefc] hover:bg-[#f4fbf6]' : 'border-[#e5e5e7] bg-[#fafafa] opacity-70 hover:bg-[#f5f5f7]'} ${canManageAvailability ? 'cursor-pointer' : 'cursor-default'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${engineer.status === 'active' ? 'bg-[#e8f5eb] text-[#166534]' : 'bg-[#e8e8ed] text-[#86868b]'}`}>{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[#1d1d1f]">{engineer.full_name}</span><span className="mt-0.5 block text-[11px] text-[#6e6e73]">{engineer.assignment_count} assigned today</span></span><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${engineer.status === 'active' ? 'bg-[#ecfdf3] text-[#166534]' : 'bg-[#f0f0f2] text-[#6e6e73]'}`}>{engineer.status === 'active' ? 'Available' : 'Away'}</span></button>)}</div> : <p className="text-[12px] text-[#6e6e73]">No Engineers added for today yet.</p>}
-            </div>
-          </section>
-        )}
+        <EndorsementQueuePanel state={queueState} canAssign={canEditEndorsement} canManage={canManageAvailability} canAdd={canManageRoster} currentUserId={user?.id} canManageAll={canManageRoster} isEngineer={user?.roleName === 'ENGR'}
+          request={assignmentRequest} onRequestHandled={() => setAssignmentRequest(null)} onRefresh={loadQueues} onAssignmentComplete={async () => { await loadQueues(); if (showDetails) await loadHistory(true); }} onMessage={showMessage} />
 
         {loading ? (
           <div className="rounded-2xl border border-[#e5e5e7] bg-white p-8 text-center text-[13px] text-[#6e6e73]">Loading endorsements…</div>
         ) : dashboard && (
-          <>
+          <>{showDetails && <>
             <section className="mb-5 min-w-0 max-w-full rounded-2xl border border-[#e5e5e7] bg-white">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e5e5e7] px-5 py-4"><div><h2 className="text-[13px] font-semibold text-[#1d1d1f]">Endorsement calendar</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Daily workload by Engineer · click a count to view details · double-click a cell to edit.</p><p className="mt-1 text-[11px] text-[#86868b]">Available today · {roster === null ? 'Checking…' : roster.filter((engineer) => engineer.status === 'active').map((engineer) => engineer.full_name).join(', ') || 'None'}</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => shiftMonth(-1)} className="h-8 w-8 rounded-full border border-[#d2d2d7] text-[16px] text-[#3c3c43] hover:bg-[#f5f5f7]" aria-label="Previous month">‹</button><span className="min-w-32 text-center text-[12px] font-semibold text-[#1d1d1f]">{calendarTitle}</span><button type="button" onClick={() => shiftMonth(1)} className="h-8 w-8 rounded-full border border-[#d2d2d7] text-[16px] text-[#3c3c43] hover:bg-[#f5f5f7]" aria-label="Next month">›</button></div></div>
-              {calendar && <div className="w-full max-w-full overflow-visible"><table className="w-full min-w-0 table-fixed border-separate border-spacing-0 text-left text-[12px]"><colgroup><col className="w-28 min-w-28 max-w-28" /><col className="w-14 min-w-14 max-w-14" />{calendar.columns.map((column, index) => <col key={`${column.division}-${column.engineer}-${index}`} className="w-auto" />)}</colgroup><thead className="bg-[#fafafa] text-[10px] uppercase tracking-wider text-[#6e6e73]"><tr className="sticky top-12 z-[6] bg-[#fafafa]"><th rowSpan={2} className="sticky left-0 top-12 z-[7] w-28 min-w-28 max-w-28 border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-b border-[#e5e5e7] bg-[#fafafa] px-4 py-3">Date</th><th rowSpan={2} className="sticky left-28 top-12 z-[7] w-14 min-w-14 max-w-14 border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-b border-[#e5e5e7] bg-[#fafafa] px-2 py-3">Day</th>{calendar.divisions.map((division) => { const columns = calendar.columns.filter((column) => column.division === division); return <th key={division} colSpan={Math.max(columns.length, 1)} className="sticky top-12 z-[5] border-r border-b border-l-4 border-[#e5e5e7] bg-[#fafafa] px-4 py-3 text-center normal-case text-[12px] font-semibold text-[#1d1d1f]">{division}<span className="ml-2 text-[10px] font-normal text-[#6e6e73]">{calendar.totals[division] || 0} total</span></th>})}</tr><tr className="sticky top-[90px] z-[6] bg-[#fafafa]">{calendar.divisions.flatMap((division) => { const columns = calendar.columns.filter((column) => column.division === division); return columns.length ? columns.map((column, index) => <th key={`${column.division}-${column.engineer}`} draggable={canEditEndorsement} onDragStart={() => setDraggedEngineer(`${division}::${column.engineer}`)} onDragOver={(event) => event.preventDefault()} onDrop={() => void reorderEngineers(division, column.engineer)} title={canEditEndorsement ? 'Drag to reorder Engineer columns' : column.engineer} className={`sticky top-[90px] z-[5] w-auto min-w-0 border-r border-b bg-[#fafafa] px-4 py-3 text-center ${index === 0 ? 'border-l-4' : ''} border-[#e5e5e7]`}><span className="block whitespace-normal break-words text-[11px] font-semibold text-[#3c3c43]" title={column.engineer}>{column.engineer}</span><span className="mt-1 block text-[10px] font-normal text-[#6e6e73]">{column.total}</span></th>) : (<th key={division} className="sticky top-[90px] z-[5] border-r border-b border-l-4 border-[#e5e5e7] bg-[#fafafa] px-4 py-3 text-center text-[10px] font-normal text-[#86868b]">No Engineers</th>); })}</tr></thead><tbody>{calendar.days.map((day) => <tr key={day.date} className={`h-6 border-t border-[#f0f0f2] ${day.date === dashboard.date ? 'bg-[#fbfefc]' : ''}`}><td className="sticky left-0 z-[2] w-28 min-w-28 max-w-28 whitespace-nowrap border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-[#e5e5e7] bg-inherit px-4 py-1.5 align-middle font-medium text-[#3c3c43]">{formatDate(`${day.date}T00:00:00Z`)}</td><td className="sticky left-28 z-[2] w-14 min-w-14 max-w-14 border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-[#e5e5e7] bg-inherit px-2 py-1.5 align-middle text-[#6e6e73]">{day.day}</td>{calendar.divisions.flatMap((division) => { const columns = calendar.columns.filter((column) => column.division === division); if (!columns.length) return [<td key={`${day.date}-${division}-empty`} className="border-r border-l-4 border-[#e5e5e7] px-2 py-1.5 align-middle text-center text-[#d2d2d7]">—</td>]; return columns.map((column, index) => { const entries = day.counts[division]?.[column.engineer] || []; const cellCount = entries.reduce((sum, entry) => sum + (entry.manual_count || 1), 0); const isLatestCell = Boolean(latestCalendarTimestamp && entries.some((entry) => entry.created_at === latestCalendarTimestamp)); return <td key={`${day.date}-${division}-${column.engineer}`} className={`w-auto min-w-0 border-r p-0 align-middle ${index === 0 ? 'border-l-4' : ''} border-[#e5e5e7]`}>{entries.length ? <button type="button" onClick={() => setSelectedDay({ date: day.date, division, engineer: column.engineer })} onPointerUp={() => setSelectedDay({ date: day.date, division, engineer: column.engineer })} className="relative flex min-h-6 w-full items-center justify-center rounded-none bg-[#f5f5f7] px-2 py-1.5 text-left hover:bg-[#e5e5e7]" aria-label={`${entries.length} endorsements for ${column.engineer} in ${division} on ${day.date}`}><span className="block pt-2 text-center text-[15px] font-semibold leading-6 text-[#1d1d1f]">{cellCount}</span>{isLatestCell && <span title="New" aria-label="New" className="absolute right-1 top-0.5 rounded-full border border-[#d2d2d7] px-1 py-px text-[7px] font-semibold leading-3 tracking-wide text-[#6e6e73]">NEW</span>}</button> : <button type="button" onDoubleClick={() => openCalendarEditor(day.date, division, column.engineer)} className="flex min-h-6 w-full cursor-default items-center justify-center rounded-none px-2 py-1.5 text-[#d2d2d7] hover:bg-[#fafafa]" aria-label={`Empty cell for ${column.engineer} in ${division} on ${day.date}; double-click to add an entry`}>—</button>}</td>; }); })}</tr>)}</tbody></table></div>}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e5e5e7] px-5 py-4"><div><h2 className="text-[13px] font-semibold text-[#1d1d1f]">Endorsement calendar</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Daily workload by Engineer · click a count for details · double-click an empty cell for manual counts.</p><p className="mt-1 text-[11px] text-[#86868b]">Available today · {roster === null ? 'Checking…' : roster.filter((engineer) => engineer.status === 'active').map((engineer) => engineer.full_name).join(', ') || 'None'}</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => shiftMonth(-1)} className="h-8 w-8 rounded-full border border-[#d2d2d7] text-[16px] text-[#3c3c43] hover:bg-[#f5f5f7]" aria-label="Previous month">‹</button><span className="min-w-32 text-center text-[12px] font-semibold text-[#1d1d1f]">{calendarTitle}</span><button type="button" onClick={() => shiftMonth(1)} className="h-8 w-8 rounded-full border border-[#d2d2d7] text-[16px] text-[#3c3c43] hover:bg-[#f5f5f7]" aria-label="Next month">›</button></div></div>
+              {calendar && <div className="w-full max-w-full overflow-visible"><table className="w-full min-w-0 table-fixed border-separate border-spacing-0 text-left text-[12px]"><colgroup><col className="w-28 min-w-28 max-w-28" /><col className="w-14 min-w-14 max-w-14" />{calendar.columns.map((column, index) => <col key={`${column.division}-${column.engineer}-${index}`} className="w-auto" />)}</colgroup><thead className="bg-[#fafafa] text-[10px] uppercase tracking-wider text-[#6e6e73]"><tr className="sticky top-12 z-[6] bg-[#fafafa]"><th rowSpan={2} className="sticky left-0 top-12 z-[7] w-28 min-w-28 max-w-28 border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-b border-[#e5e5e7] bg-[#fafafa] px-4 py-3">Date</th><th rowSpan={2} className="sticky left-28 top-12 z-[7] w-14 min-w-14 max-w-14 border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-b border-[#e5e5e7] bg-[#fafafa] px-2 py-3">Day</th>{calendar.divisions.map((division) => { const columns = calendar.columns.filter((column) => column.division === division); return <th key={division} colSpan={Math.max(columns.length, 1)} className="sticky top-12 z-[5] border-r border-b border-l-4 border-[#e5e5e7] bg-[#fafafa] px-4 py-3 text-center normal-case text-[12px] font-semibold text-[#1d1d1f]">{division}<span className="ml-2 text-[10px] font-normal text-[#6e6e73]">{calendar.totals[division] || 0} total</span></th>})}</tr><tr className="sticky top-[90px] z-[6] bg-[#fafafa]">{calendar.divisions.flatMap((division) => { const columns = calendar.columns.filter((column) => column.division === division); return columns.length ? columns.map((column, index) => <th key={`${column.division}-${column.engineer}`} draggable={canEditEndorsement} onDragStart={() => setDraggedEngineer(`${division}::${column.engineer}`)} onDragOver={(event) => event.preventDefault()} onDrop={() => void reorderEngineers(division, column.engineer)} title={canEditEndorsement ? 'Drag to arrange columns; round-robin turns stay the same' : column.engineer} className={`sticky top-[90px] z-[5] w-auto min-w-0 border-r border-b bg-[#fafafa] px-4 py-3 text-center ${index === 0 ? 'border-l-4' : ''} border-[#e5e5e7]`}><span className="block whitespace-normal break-words text-[11px] font-semibold text-[#3c3c43]" title={column.engineer}>{column.engineer}</span><span className="mt-1 block text-[10px] font-normal text-[#6e6e73]">{column.total}</span>{queueState?.queues.find((queue) => queue.division === division)?.nextEngineer?.full_name === column.engineer && <span className="mt-1 inline-block rounded-full bg-[#1d1d1f] px-2 py-0.5 text-[8px] font-semibold tracking-wide text-white">NEXT</span>}</th>) : (<th key={division} className="sticky top-[90px] z-[5] border-r border-b border-l-4 border-[#e5e5e7] bg-[#fafafa] px-4 py-3 text-center text-[10px] font-normal text-[#86868b]">No Engineers</th>); })}</tr></thead><tbody>{calendar.days.map((day) => <tr key={day.date} className={`h-6 border-t border-[#f0f0f2] ${day.date === dashboard.date ? 'bg-[#eef1f5] ring-1 ring-inset ring-[#c4c9d1]' : ''}`}><td className="sticky left-0 z-[2] w-28 min-w-28 max-w-28 whitespace-nowrap border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-[#e5e5e7] bg-inherit px-4 py-1.5 align-middle font-medium text-[#3c3c43]">{formatDate(`${day.date}T00:00:00Z`)}{day.date === dashboard.date && <span className="mt-0.5 block text-[9px] font-semibold text-[#5b6575]">TODAY</span>}</td><td className="sticky left-28 z-[2] w-14 min-w-14 max-w-14 border-r shadow-[2px_0_4px_-3px_rgba(0,0,0,0.18)] border-[#e5e5e7] bg-inherit px-2 py-1.5 align-middle text-[#6e6e73]">{day.day}</td>{calendar.divisions.flatMap((division) => { const columns = calendar.columns.filter((column) => column.division === division); if (!columns.length) return [<td key={`${day.date}-${division}-empty`} className="border-r border-l-4 border-[#e5e5e7] px-2 py-1.5 align-middle text-center text-[#d2d2d7]">—</td>]; return columns.map((column, index) => { const entries = day.counts[division]?.[column.engineer] || []; const cellCount = entries.reduce((sum, entry) => sum + (entry.manual_count || 1), 0); const isLatestCell = Boolean(latestCalendarTimestamp && entries.some((entry) => entry.created_at === latestCalendarTimestamp)); return <td key={`${day.date}-${division}-${column.engineer}`} className={`w-auto min-w-0 border-r p-0 align-middle ${index === 0 ? 'border-l-4' : ''} border-[#e5e5e7]`}>{entries.length ? <button type="button" onClick={() => setSelectedDay({ date: day.date, division, engineer: column.engineer })} onPointerUp={() => setSelectedDay({ date: day.date, division, engineer: column.engineer })} className="relative flex min-h-6 w-full items-center justify-center rounded-none bg-[#f5f5f7] px-2 py-1.5 text-left hover:bg-[#e5e5e7]" aria-label={`${cellCount} endorsements for ${column.engineer} in ${division} on ${day.date}`}><span className="block pt-2 text-center text-[15px] font-semibold leading-6 text-[#1d1d1f]">{cellCount}</span>{isLatestCell && <span title="New" aria-label="New" className="absolute right-1 top-0.5 rounded-full border border-[#d2d2d7] px-1 py-px text-[7px] font-semibold leading-3 tracking-wide text-[#6e6e73]">NEW</span>}</button> : <button type="button" onDoubleClick={() => openCalendarEditor(day.date, division, column.engineer)} className="flex min-h-6 w-full cursor-default items-center justify-center rounded-none px-2 py-1.5 text-[#d2d2d7] hover:bg-[#fafafa]" aria-label={`Empty cell for ${column.engineer} in ${division} on ${day.date}; double-click to add an entry`}>—</button>}</td>; }); })}</tr>)}</tbody></table></div>}
               {selectedDay && (
                 <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/20 p-4" role="dialog" aria-modal="true" aria-label="Endorsement details">
                   <div className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
@@ -274,11 +182,11 @@ export default function EngineerEndorsementsPage() {
                       <button type="button" onClick={() => setEditingCell(null)} className="rounded-full px-2 py-1 text-[11px] text-[#6e6e73] hover:bg-[#f5f5f7]">Close</button>
                     </div>
                     <label className="mt-5 block text-[11px] font-medium text-[#3c3c43]">
-                      Frontline AR number <span className="font-normal text-[#86868b]">(one only)</span>
+                      Frontline AR number
                       <input type="text" value={editingCell.arNumber} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveCalendarEntry(); } }} onChange={(event) => { setEditingCellError(''); setEditingCell((current) => current ? { ...current, arNumber: event.target.value } : current); }} placeholder="Enter one AR number" aria-invalid={Boolean(editingCellError)} className={`mt-2 h-10 w-full rounded-xl border px-3 text-[12px] outline-none focus:ring-2 focus:ring-[#d2d2d7]/40 ${editingCellError ? 'border-[#b42318] focus:border-[#b42318]' : 'border-[#d2d2d7] focus:border-[#8e8e93]'}`} autoFocus />
                       {editingCellError && <p className="mt-2 text-[11px] leading-4 text-[#b42318]" role="alert">{editingCellError}</p>}
                     </label>
-                    {editingCell.arNumber.trim() ? <p className="mt-3 rounded-xl bg-[#f5f5f7] px-3 py-2.5 text-[11px] leading-4 text-[#6e6e73]">Frontline details will be loaded automatically and assigned to this Engineer.</p> : <>
+                    {editingCell.arNumber.trim() ? <p className="mt-3 rounded-xl bg-[#f5f5f7] px-3 py-2.5 text-[11px] leading-4 text-[#6e6e73]">Review the Frontline details and the next Engineer in this division before assigning.</p> : <>
                       <div className="my-5 flex items-center gap-3 text-[9px] font-semibold uppercase tracking-wider text-[#86868b]"><span className="h-px flex-1 bg-[#e5e5e7]" /><span>or manual entry</span><span className="h-px flex-1 bg-[#e5e5e7]" /></div>
                       <label className="block text-[11px] font-medium text-[#3c3c43]">Manual count <span className="font-normal text-[#86868b]">(required without an AR)</span>
                         <input type="number" min="1" max="999" value={editingCell.count} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveCalendarEntry(); } }} onChange={(event) => setEditingCell((current) => current ? { ...current, count: event.target.value } : current)} className="mt-2 h-10 w-full rounded-xl border border-[#d2d2d7] px-3 text-[12px] outline-none focus:border-[#8e8e93] focus:ring-2 focus:ring-[#d2d2d7]/40" />
@@ -289,13 +197,13 @@ export default function EngineerEndorsementsPage() {
                     </>}
                     <div className="mt-6 flex justify-end gap-2">
                       <button type="button" onClick={() => setEditingCell(null)} className="rounded-full px-4 py-2 text-[11px] text-[#3c3c43] hover:bg-[#f5f5f7]">Cancel</button>
-                      <button type="button" onClick={() => void saveCalendarEntry()} disabled={savingCell || (!editingCell.arNumber.trim() && (!Number.isInteger(Number(editingCell.count)) || Number(editingCell.count) < 1))} className="rounded-full bg-[#1d1d1f] px-4 py-2 text-[11px] font-semibold text-white disabled:opacity-40">{savingCell ? 'Saving…' : 'Save'}</button>
+                      <button type="button" onClick={() => void saveCalendarEntry()} disabled={savingCell || (!editingCell.arNumber.trim() && (!Number.isInteger(Number(editingCell.count)) || Number(editingCell.count) < 1))} className="rounded-full bg-[#1d1d1f] px-4 py-2 text-[11px] font-semibold text-white disabled:opacity-40">{savingCell ? 'Saving…' : editingCell.arNumber.trim() ? 'Review assignment' : 'Save count'}</button>
                     </div>
                   </div>
                 </div>
               )}
             </section>
-            {showDetails && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Metric label="Total endorsements" value={Number(dashboard.totals.total || 0).toLocaleString()} />
               <Metric label="Pending work" value={Number(dashboard.totals.pending || 0).toLocaleString()} />
               <Metric label="Today's assignment count" value={Number(dashboard.availability?.assignment_count || 0).toLocaleString()} />
@@ -315,8 +223,8 @@ export default function EngineerEndorsementsPage() {
             <div className="mt-5">
               <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-[13px] font-semibold text-[#1d1d1f]">Recent endorsements</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Delete an endorsement without deleting the original Frontline record.</p></div><span className="text-[11px] text-[#6e6e73]">{dashboard.endorsements.length}</span></div>
-                <div className="mt-4 space-y-2">
-                  {dashboard.endorsements.length ? dashboard.endorsements.map((row) => <div key={row.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#f5f5f7] px-3 py-2.5"><div className="min-w-0"><p className="truncate text-[12px] font-medium text-[#1d1d1f]">AR {row.ar_number} <span className="font-normal text-[#6e6e73]">· {row.engineer_name}</span></p><p className="mt-0.5 truncate text-[11px] text-[#6e6e73]">{row.device_model || 'Device not specified'} · {row.issue || 'No issue provided'}</p></div>{canEditEndorsement && <button type="button" onClick={() => void deleteEndorsement(row.id)} disabled={deletingEndorsementId === row.id} className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium text-[#b42318] hover:bg-[#feeceb] disabled:cursor-not-allowed disabled:opacity-40">{deletingEndorsementId === row.id ? 'Deleting…' : 'Delete'}</button>}</div>) : <p className="text-[12px] text-[#6e6e73]">No endorsements yet.</p>}
+                <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-1">
+                  {dashboard.endorsements.length ? dashboard.endorsements.map((row) => <div key={row.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#f5f5f7] px-3 py-2.5"><div className="min-w-0"><p className="truncate text-[12px] font-medium text-[#1d1d1f]">AR {row.ar_number} <span className="font-normal text-[#6e6e73]">· {row.engineer_name}</span></p><p className="mt-0.5 truncate text-[11px] text-[#6e6e73]">{row.device_model || 'Device not specified'} · CSO: {row.cso_name || 'Unknown'} · {row.issue || 'No issue provided'}</p></div>{canEditEndorsement && <button type="button" onClick={() => void deleteEndorsement(row.id)} disabled={deletingEndorsementId === row.id} className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium text-[#b42318] hover:bg-[#feeceb] disabled:cursor-not-allowed disabled:opacity-40">{deletingEndorsementId === row.id ? 'Deleting…' : 'Delete'}</button>}</div>) : <p className="text-[12px] text-[#6e6e73]">No endorsements yet.</p>}
                 </div>
               </section>
             </div>

@@ -349,8 +349,14 @@ export interface FrontlineOption { id: number; label: string; sort_order: number
 export type FrontlineOptionLists = Record<FrontlineOptionKey, FrontlineOption[]>;
 export interface FrontlineAccessRequest { id: number; user_id: number; email?: string; full_name?: string; reason: string; status: 'pending' | 'approved' | 'rejected'; created_at: string; reviewed_at: string | null; access_scope?: 'all' | 'cso' | null; cso_name?: string | null }
 export interface EndorsementEngineer { id: number; user_id: number | null; full_name: string; email?: string; assignment_count: number; status?: 'active' | 'left'; joined_at?: string; last_assigned_at?: string | null }
+export const ENDORSEMENT_DIVISIONS = ['iOS/ACCS', 'MacBook', 'iMac'] as const;
+export type EndorsementDivision = typeof ENDORSEMENT_DIVISIONS[number];
+export interface EndorsementQueue { division: EndorsementDivision; engineers: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null; token: string }
+export interface EndorsementQueues { date: string; queues: EndorsementQueue[]; roster: EndorsementEngineer[]; engineers: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null; skips: Array<{ id: number; division: EndorsementDivision; engineer_name: string; reason: string; created_at: string }> }
+export interface EndorsementAssignmentInput { arNumber: string; frontlineRecordId?: number; sourceSheet?: string; sourceRow?: number; serialNumber?: string; deviceModel?: string; division?: EndorsementDivision; queueToken?: string }
+export interface EndorsementPreview { date: string; record: { arNumber: string; frontlineRecordId: number; deviceModel: string; issue: string; productDivision: EndorsementDivision }; queue: EndorsementQueue }
 export interface EndorsementNotification { id: number; ar_number: string; device_model: string; issue: string; engineer_name: string; cso_user_id: number | null; created_at: string }
-export interface EngineerDashboard { date: string; availability: { user_id: number; status: 'active' | 'left'; joined_at: string; left_at: string | null; assignment_count: number } | null; totals: { total: number; pending: number }; divisions: Array<{ product_division: string; total: number }>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; created_at: string; engineer_name: string }> }
+export interface EngineerDashboard { date: string; availability: { user_id: number; status: 'active' | 'left'; joined_at: string; left_at: string | null; assignment_count: number } | null; totals: { total: number; pending: number }; divisions: Array<{ product_division: string; total: number }>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; created_at: string; engineer_name: string; cso_name: string | null }> }
 export interface EngineerCalendar { month: string; divisions: string[]; engineerOrder: Record<string, string[]>; columns: Array<{ division: string; engineer: string; total: number }>; totals: Record<string, number>; days: Array<{ date: string; day: string; counts: Record<string, Record<string, Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; engineer_name: string; created_at: string; manual_count?: number; details?: string; is_manual?: boolean }>>>; endorsements: Array<{ id: number; ar_number: string; device_model: string; issue: string; product_division: string; status: string; engineer_name: string; created_at: string }> }> }
 export interface ApplecareSite { id: number; ship_to: string; site_name: string; active: number }
 export interface ApplecarePackingList {
@@ -485,13 +491,15 @@ export const api = {
   endorsements: {
     join: () => request<{ message: string }>('/endorsements/availability/join', { method: 'POST' }),
     leave: () => request<{ message: string }>('/endorsements/availability/leave', { method: 'POST' }),
-    skip: () => request<{ message: string }>('/endorsements/availability/skip', { method: 'POST' }),
-    passNext: () => request<{ message: string }>('/endorsements/availability/pass-next', { method: 'POST' }),
+    skip: (division: EndorsementDivision, reason: string, queueToken: string) => request<{ message: string }>('/endorsements/availability/skip', { method: 'POST', body: JSON.stringify({ division, reason, queueToken }) }),
+    passNext: (division: EndorsementDivision, reason: string, queueToken: string) => request<{ message: string }>('/endorsements/availability/pass-next', { method: 'POST', body: JSON.stringify({ division, reason, queueToken }) }),
+    reorder: (division: EndorsementDivision, engineerIds: number[], queueToken: string) => request<{ message: string }>('/endorsements/availability/order', { method: 'PUT', body: JSON.stringify({ division, engineerIds, queueToken }) }),
     addEngineer: (name: string) => request<{ message: string }>('/endorsements/availability/add', { method: 'POST', body: JSON.stringify({ name }) }),
     removeEngineer: (id: number) => request<{ message: string }>('/endorsements/availability/remove', { method: 'POST', body: JSON.stringify({ id }) }),
-    available: () => request<{ date: string; engineers: EndorsementEngineer[]; roster: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null }>('/endorsements/available'),
+    available: (division?: EndorsementDivision) => requestFresh<EndorsementQueues>(`/endorsements/available${division ? `?division=${encodeURIComponent(division)}` : ''}`),
+    preview: (payload: EndorsementAssignmentInput) => request<EndorsementPreview>('/endorsements/preview', { method: 'POST', body: JSON.stringify(payload) }),
     notifications: (afterId = 0) => requestFresh<EndorsementNotification[]>(`/endorsements/notifications?afterId=${afterId}`),
-    create: (payload: { arNumber: string; frontlineRecordId: number; sourceSheet?: string; sourceRow?: number; serialNumber?: string; deviceModel?: string }) => request<{ message: string; endorsementId: number; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
+    create: (payload: EndorsementAssignmentInput) => request<{ message: string; endorsementId: number; engineer: { userId: number | null; name: string }; record: { arNumber: string; deviceModel: string; issue: string; productDivision: string } }>('/endorsements', { method: 'POST', body: JSON.stringify(payload) }),
     updateDeviceModel: (id: number, deviceModel: string) => request<{ message: string; deviceModel: string }>(`/endorsements/${id}`, { method: 'PATCH', body: JSON.stringify({ deviceModel }) }),
     updateEngineer: (id: number, engineerName: string) => request<{ message: string; engineer: string }>(`/endorsements/${id}/engineer`, { method: 'PATCH', body: JSON.stringify({ engineerName }) }),
     delete: (id: number) => request<{ message: string }>(`/endorsements/${id}`, { method: 'DELETE' }),
