@@ -351,7 +351,7 @@ export interface FrontlineAccessRequest { id: number; user_id: number; email?: s
 export interface EndorsementEngineer { id: number; user_id: number | null; full_name: string; email?: string; assignment_count: number; status?: 'active' | 'left'; joined_at?: string; last_assigned_at?: string | null }
 export const ENDORSEMENT_DIVISIONS = ['iOS/ACCS', 'MacBook', 'iMac'] as const;
 export type EndorsementDivision = typeof ENDORSEMENT_DIVISIONS[number];
-export interface EndorsementQueue { division: EndorsementDivision; engineers: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null; token: string }
+export interface EndorsementQueue { division: EndorsementDivision; countPeriod: 'day' | 'month'; engineers: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null; token: string }
 export interface EndorsementQueues { date: string; queues: EndorsementQueue[]; roster: EndorsementEngineer[]; engineers: EndorsementEngineer[]; nextEngineer: EndorsementEngineer | null; skips: Array<{ id: number; division: EndorsementDivision; engineer_name: string; reason: string; created_at: string }> }
 export interface EndorsementAssignmentInput { arNumber: string; frontlineRecordId?: number; sourceSheet?: string; sourceRow?: number; serialNumber?: string; deviceModel?: string; division?: EndorsementDivision; queueToken?: string }
 export interface EndorsementPreview { date: string; record: { arNumber: string; frontlineRecordId: number; deviceModel: string; issue: string; productDivision: EndorsementDivision }; queue: EndorsementQueue }
@@ -496,6 +496,8 @@ export const api = {
     reorder: (division: EndorsementDivision, engineerIds: number[], queueToken: string) => request<{ message: string }>('/endorsements/availability/order', { method: 'PUT', body: JSON.stringify({ division, engineerIds, queueToken }) }),
     addEngineer: (name: string) => request<{ message: string }>('/endorsements/availability/add', { method: 'POST', body: JSON.stringify({ name }) }),
     removeEngineer: (id: number) => request<{ message: string }>('/endorsements/availability/remove', { method: 'POST', body: JSON.stringify({ id }) }),
+    schedule: (engineerName?: string) => requestFresh<{ restDays: string[] }>(`/endorsements/availability/schedule${engineerName ? `?engineerName=${encodeURIComponent(engineerName)}` : ''}`),
+    saveSchedule: (restDays: string[], engineerName?: string) => request<{ message: string; restDays: string[] }>('/endorsements/availability/schedule', { method: 'PUT', body: JSON.stringify({ restDays, engineerName }) }),
     available: (division?: EndorsementDivision) => requestFresh<EndorsementQueues>(`/endorsements/available${division ? `?division=${encodeURIComponent(division)}` : ''}`),
     preview: (payload: EndorsementAssignmentInput) => request<EndorsementPreview>('/endorsements/preview', { method: 'POST', body: JSON.stringify(payload) }),
     notifications: (afterId = 0) => requestFresh<EndorsementNotification[]>(`/endorsements/notifications?afterId=${afterId}`),

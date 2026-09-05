@@ -35,6 +35,7 @@ export interface QueueEngineer {
 }
 export interface DivisionQueue {
   division: Division;
+  countPeriod: 'day' | 'month';
   engineers: QueueEngineer[];
   nextEngineer: QueueEngineer | null;
   token: string;
@@ -64,6 +65,17 @@ export async function ensureQueueTables() {
       CONSTRAINT engineer_queue_availability_fk FOREIGN KEY (availability_id) REFERENCES engineer_daily_availability(id),
       CONSTRAINT engineer_queue_endorsement_fk FOREIGN KEY (endorsement_id) REFERENCES engineer_endorsements(id) ON DELETE CASCADE
     )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS engineer_availability_schedules (
+      user_id int NOT NULL PRIMARY KEY,
+      rest_days varchar(80) NOT NULL DEFAULT '',
+      updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT engineer_schedule_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS engineer_roster_schedules (
+      engineer_name varchar(150) NOT NULL PRIMARY KEY,
+      rest_days varchar(80) NOT NULL DEFAULT '',
+      updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
   })().catch((error) => { tablesReady = null; throw error; });
   await tablesReady;
 }
@@ -71,9 +83,11 @@ export async function ensureQueueTables() {
 export async function lockDay(connection: PoolConnection, date: string) {
   await connection.execute('INSERT IGNORE INTO engineer_queue_days (queue_date) VALUES (?)', [date]);
   const [days] = await connection.query('SELECT initialized FROM engineer_queue_days WHERE queue_date = ? FOR UPDATE', [date]);
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Asia/Manila' }).format(new Date(`${date}T00:00:00+08:00`));
   await connection.query(`INSERT INTO engineer_daily_availability (user_id, engineer_name, availability_date, status)
-    SELECT user_id, engineer_name, ?, 'active' FROM engineer_roster WHERE active = 1 ORDER BY engineer_name
-    ON DUPLICATE KEY UPDATE user_id = COALESCE(engineer_daily_availability.user_id, VALUES(user_id))`, [date]);
+    SELECT r.user_id, r.engineer_name, ?, IF(FIND_IN_SET(?, COALESCE(s.rest_days, '')) > 0, 'active', 'left')
+    FROM engineer_roster r LEFT JOIN engineer_roster_schedules s ON s.engineer_name = r.engineer_name WHERE r.active = 1 ORDER BY r.engineer_name
+    ON DUPLICATE KEY UPDATE user_id = COALESCE(engineer_daily_availability.user_id, VALUES(user_id))`, [date, weekday]);
   if (Number((days as Array<{ initialized: number }>)[0].initialized)) return;
   // Seed each division from its actual assignments, never from the old combined counter.
   const [rows] = await connection.query(`SELECT e.id, e.device_model, e.product_division, e.created_at, a.id AS availability_id
@@ -114,6 +128,26 @@ export async function withQueue<T>(work: (connection: PoolConnection, date: stri
 }
 
 export async function divisionQueue(connection: PoolConnection, date: string, division: Division): Promise<DivisionQueue> {
+  const countPeriod = division === 'iOS/ACCS' ? 'day' : 'month';
+  if (countPeriod === 'month') {
+    const monthStart = `${date.slice(0, 7)}-01`;
+    const monthEndDate = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 1));
+    const monthEnd = `${monthEndDate.getUTCFullYear()}-${String(monthEndDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    const [rows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.joined_at,
+      COALESCE(turns.last_turn, 0) AS last_turn, COALESCE(monthly.total, 0) AS assignment_count, monthly.last_assigned_at
+      FROM engineer_daily_availability a
+      LEFT JOIN (SELECT engineer_name, COUNT(*) AS total, MAX(created_at) AS last_assigned_at FROM engineer_endorsements
+        WHERE created_at >= ? AND created_at < ? AND product_division = ? GROUP BY engineer_name) monthly ON monthly.engineer_name = a.engineer_name
+      LEFT JOIN (SELECT prior.engineer_name, MAX(e.id) AS last_turn FROM engineer_queue_events e
+        JOIN engineer_daily_availability prior ON prior.id = e.availability_id
+        WHERE e.queue_date >= ? AND e.queue_date < ? AND e.product_division = ? GROUP BY prior.engineer_name) turns ON turns.engineer_name = a.engineer_name
+      WHERE a.availability_date = ? AND EXISTS (SELECT 1 FROM engineer_roster r WHERE r.active = 1 AND r.engineer_name = a.engineer_name)
+      ORDER BY COALESCE(monthly.total, 0), COALESCE(turns.last_turn, 0), a.joined_at, a.id`, [dayBounds(monthStart)[0], dayBounds(monthEnd)[0], division, monthStart, dayBounds(monthEnd)[0], division, date]);
+    const roster = (rows as QueueEngineer[]).map((row) => ({ ...row, id: Number(row.id), user_id: row.user_id == null ? null : Number(row.user_id), assignment_count: Number(row.assignment_count), last_turn: Number(row.last_turn) }));
+    const engineers = roster.filter((row) => row.status === 'active');
+    const token = createHash('sha256').update(JSON.stringify([date, division, countPeriod, roster.map((row) => [row.id, row.full_name, row.status, row.last_turn, row.assignment_count])])).digest('hex');
+    return { division, countPeriod, engineers, nextEngineer: engineers[0] || null, token };
+  }
   const [rows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.joined_at,
     COALESCE(e.last_turn, 0) AS last_turn, COALESCE(e.total, 0) AS assignment_count, e.last_assignment AS last_assigned_at
     FROM engineer_daily_availability a LEFT JOIN (
@@ -126,7 +160,7 @@ export async function divisionQueue(connection: PoolConnection, date: string, di
   const roster = (rows as QueueEngineer[]).map((row) => ({ ...row, id: Number(row.id), user_id: row.user_id == null ? null : Number(row.user_id), assignment_count: Number(row.assignment_count), last_turn: Number(row.last_turn) }));
   const engineers = roster.filter((row) => row.status === 'active');
   const token = createHash('sha256').update(JSON.stringify([date, division, roster.map((row) => [row.id, row.full_name, row.status, row.last_turn, row.assignment_count])])).digest('hex');
-  return { division, engineers, nextEngineer: engineers[0] || null, token };
+  return { division, countPeriod, engineers, nextEngineer: engineers[0] || null, token };
 }
 
 export function requireCurrentQueue(queue: DivisionQueue, token: unknown) {

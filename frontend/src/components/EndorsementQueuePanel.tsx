@@ -27,6 +27,11 @@ export default function EndorsementQueuePanel({ state, canAssign, canManage, can
   const [reason, setReason] = useState('');
   const [skipError, setSkipError] = useState('');
   const [newName, setNewName] = useState('');
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [restDays, setRestDays] = useState<string[]>([]);
+  const [scheduleEngineerName, setScheduleEngineerName] = useState<string | undefined>();
+  const [scheduleEngineers, setScheduleEngineers] = useState<Array<{ id: number; full_name: string }>>([]);
+  const [scheduleError, setScheduleError] = useState('');
   const [arranging, setArranging] = useState<{ division: EndorsementDivision; token: string; engineers: EndorsementEngineer[] } | null>(null);
   const arInput = useRef<HTMLInputElement>(null);
   const draggedEngineerId = useRef<number | null>(null);
@@ -86,6 +91,22 @@ export default function EndorsementQueuePanel({ state, canAssign, canManage, can
     } catch (error) { onMessage((error as Error).message, true); }
     finally { busyRef.current = false; setBusy(false); }
   };
+  const openSchedule = async () => {
+    try {
+      const engineers = canManageAll ? (await api.endorsements.roster()).roster : [];
+      const engineerName = canManageAll ? engineers[0]?.full_name : undefined;
+      const result = await api.endorsements.schedule(engineerName);
+      setScheduleError(''); setScheduleEngineers(engineers); setScheduleEngineerName(engineerName); setRestDays(result.restDays); setScheduleOpen(true);
+    }
+    catch (error) { onMessage((error as Error).message, true); }
+  };
+  const saveSchedule = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true);
+    try { const result = await api.endorsements.saveSchedule(restDays, scheduleEngineerName); setScheduleOpen(false); await onRefresh(); onMessage(result.message); }
+    catch (error) { setScheduleError((error as Error).message); }
+    finally { busyRef.current = false; setBusy(false); }
+  };
   const confirmSkip = async () => {
     if (!skip || !reason.trim() || busyRef.current) return;
     busyRef.current = true; setBusy(true); setSkipError('');
@@ -130,6 +151,7 @@ export default function EndorsementQueuePanel({ state, canAssign, canManage, can
         <label className="sr-only" htmlFor="endorsement-ar">Frontline AR number</label>
         <input id="endorsement-ar" ref={arInput} value={ar} maxLength={100} onChange={(event) => { setAr(event.target.value); setAssignmentError(''); }} placeholder="Frontline AR number" autoComplete="off" disabled={busy} className={`${inputClass} min-w-0 flex-1`} />
         <button disabled={busy || !state || !ar.trim()} className="h-10 shrink-0 rounded-full bg-[#1d1d1f] px-5 text-[12px] font-semibold text-white disabled:opacity-40">{busy ? 'Checking…' : 'Review'}</button>
+        {(isEngineer || canManageAll) && <button type="button" onClick={() => void openSchedule()} aria-label="Availability schedule" title="Availability schedule" className="h-10 w-10 shrink-0 rounded-full border border-[#d2d2d7] text-[#515154] hover:bg-[#f5f5f7]">⚙</button>}
       </div>
       {assignmentError && !preview && <p role="alert" className="mt-2 text-[12px] text-[#b42318]">{assignmentError}</p>}
     </form>}
@@ -147,7 +169,7 @@ export default function EndorsementQueuePanel({ state, canAssign, canManage, can
           <ol className="mt-3 space-y-2.5">
             {queue?.engineers.slice(0, 3).map((engineer, index) => <li key={engineer.id} className="flex items-center gap-3">
               <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${index === 0 ? 'bg-[#1d1d1f] text-white' : 'bg-white text-[#6e6e73]'}`}>{index + 1}</span>
-              <div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[#1d1d1f]">{engineer.full_name}</p><p className="mt-0.5 text-[10px] text-[#6e6e73]">{index === 0 ? 'Next' : index === 1 ? 'Second' : 'Third'} · {engineer.assignment_count} today</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[#1d1d1f]">{engineer.full_name}</p><p className="mt-0.5 text-[10px] text-[#6e6e73]">{index === 0 ? 'Next' : index === 1 ? 'Second' : 'Third'} · {engineer.assignment_count} {queue?.countPeriod === 'month' ? 'this month' : 'today'}</p></div>
             </li>)}
           </ol>
           {queue && !queue.nextEngineer && <p className="mt-3 text-[12px] text-[#6e6e73]">No Engineer available.</p>}
@@ -168,6 +190,8 @@ export default function EndorsementQueuePanel({ state, canAssign, canManage, can
       </div>
     </details>
     {Boolean(state?.skips.length) && <details className="mt-3 text-[11px] text-[#6e6e73]"><summary className="cursor-pointer">Skipped turns</summary><ul className="mt-2 space-y-2">{state!.skips.map((entry) => <li key={entry.id}><span className="font-medium text-[#3c3c43]">{entry.division} · {entry.engineer_name}</span> — {entry.reason}</li>)}</ul></details>}
+
+    {scheduleOpen && <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 p-4" role="dialog" aria-modal="true" aria-label="Availability schedule"><div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"><h2 className="text-[16px] font-semibold text-[#1d1d1f]">Availability schedule</h2>{canManageAll && <label className="mt-4 block text-[11px] font-medium text-[#3c3c43]">Engineer<select value={scheduleEngineerName || ''} onChange={async (event) => { try { const engineerName = event.target.value; const result = await api.endorsements.schedule(engineerName); setScheduleError(''); setScheduleEngineerName(engineerName); setRestDays(result.restDays); } catch (error) { setScheduleError((error as Error).message); } }} className="mt-1.5 h-10 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[12px]">{scheduleEngineers.map((engineer) => <option key={engineer.id} value={engineer.full_name}>{engineer.full_name}</option>)}</select></label>}<div className="mt-4 grid grid-cols-2 gap-2">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <label key={day} className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#e5e5e7] px-3 py-2 text-[12px]"><input type="checkbox" checked={restDays.includes(day)} onChange={() => { setScheduleError(''); setRestDays((days) => days.includes(day) ? days.filter((item) => item !== day) : [...days, day]); }} />{day}</label>)}</div>{scheduleError && <p role="alert" className="mt-3 text-[12px] text-[#b42318]">{scheduleError}</p>}<div className="mt-5 flex justify-end gap-2"><button type="button" className={buttonClass} disabled={busy} onClick={() => setScheduleOpen(false)}>Cancel</button><button type="button" disabled={busy} onClick={() => void saveSchedule()} className="rounded-full bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-40">Save schedule</button></div></div></div>}
 
     {arranging && <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 p-4" role="dialog" aria-modal="true" aria-label={`Arrange ${arranging.division} queue`}>
       <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">

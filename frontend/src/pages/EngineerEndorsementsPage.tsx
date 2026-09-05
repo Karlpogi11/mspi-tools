@@ -32,7 +32,7 @@ export default function EngineerEndorsementsPage() {
   const [savingOrder, setSavingOrder] = useState(false);
   const [deletingEndorsementId, setDeletingEndorsementId] = useState<number | null>(null);
 
-  const canManageRoster = user?.roleName === 'Admin' || user?.roleName === 'PMG' || user?.roleName === 'CSO';
+  const canManageRoster = Boolean(user?.isSuperAdmin) || user?.roleName === 'Admin' || user?.roleName === 'PMG' || user?.roleName === 'CSO';
   const canManageAvailability = canManageRoster || user?.roleName === 'ENGR';
   const showMessage = (text: string, isError = false) => { setMessage(text); setMessageIsError(isError); };
 
@@ -99,7 +99,7 @@ export default function EngineerEndorsementsPage() {
     catch (error) { setEditingCellError((error as Error).message); }
     finally { setSavingCell(false); }
   };
-  const canEditEndorsement = user?.roleName === 'Admin' || user?.roleName === 'CSO' || user?.roleName === 'ENGR';
+  const canEditEndorsement = Boolean(user?.isSuperAdmin) || user?.roleName === 'Admin' || user?.roleName === 'CSO' || user?.roleName === 'ENGR';
   const beginDeviceModelEdit = (id: number, value: string | null) => { setEditingEndorsementId(id); setDeviceModelDraft(value || ''); };
   const saveDeviceModel = async (id: number) => { const value = deviceModelDraft.trim(); if (!value) return; setSavingDeviceModel(true); setMessage(''); try { await api.endorsements.updateDeviceModel(id, value); setEditingEndorsementId(null); setDeviceModelDraft(''); await loadHistory(); showMessage('Device model updated.'); } catch (error) { showMessage((error as Error).message, true); } finally { setSavingDeviceModel(false); } };
   const beginEngineerEdit = (id: number, name: string) => { setEditingEngineerId(id); setEngineerDraft(name); };

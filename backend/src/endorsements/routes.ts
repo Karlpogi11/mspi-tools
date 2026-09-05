@@ -14,9 +14,9 @@ function text(value: unknown) { return String(value ?? '').trim(); }
 function canonicalEngineerName(value: string) { const name = text(value); return name.toLowerCase() === 'k' ? 'Karl' : name; }
 function isoTimestamp(value: unknown) { if (!value) return null; const date = value instanceof Date ? value : new Date(String(value)); return Number.isNaN(date.getTime()) ? String(value) : date.toISOString(); }
 function isEngineer(req: Request) { return req.user?.roleName === 'ENGR'; }
-function canEndorse(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'CSO'; }
+function canEndorse(req: Request) { return Boolean(req.user?.isSuperAdmin) || req.user?.roleName === 'Admin' || req.user?.roleName === 'CSO'; }
 function canView(req: Request) { return canEndorse(req) || canManageRoster(req) || isEngineer(req); }
-function canManageRoster(req: Request) { return req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG' || req.user?.roleName === 'CSO'; }
+function canManageRoster(req: Request) { return Boolean(req.user?.isSuperAdmin) || req.user?.roleName === 'Admin' || req.user?.roleName === 'PMG' || req.user?.roleName === 'CSO'; }
 function canManageAvailability(req: Request) { return canManageRoster(req) || isEngineer(req); }
 function canEditCalendar(req: Request) { return canEndorse(req) || isEngineer(req); }
 function canDeleteEndorsement(req: Request) { return canEndorse(req) || isEngineer(req); }
@@ -67,6 +67,34 @@ router.post('/availability/pass-next', queueRoute(async (req, res) => {
   res.json(result);
 }));
 
+const scheduleDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+router.get('/availability/schedule', async (req, res) => {
+  if (!isEngineer(req) && !canManageRoster(req)) { forbidden(res); return; }
+  await ensureQueueTables();
+  const requestedName = text(req.query.engineerName);
+  const [users] = await getDbPool().query('SELECT full_name FROM users WHERE id = ?', [req.user!.userId]);
+  const engineerName = canManageRoster(req) && requestedName ? requestedName : text((users as Array<{ full_name: string }>)[0]?.full_name);
+  const [rows] = await getDbPool().query('SELECT rest_days FROM engineer_roster_schedules WHERE engineer_name = ?', [engineerName]);
+  const value = String((rows as Array<{ rest_days?: string }>)[0]?.rest_days || '');
+  res.json({ restDays: value.split(',').filter((day) => scheduleDays.includes(day)) });
+});
+router.put('/availability/schedule', queueRoute(async (req, res) => {
+  if (!isEngineer(req) && !canManageRoster(req)) { forbidden(res); return; }
+  const restDays = Array.isArray(req.body?.restDays) ? req.body.restDays.filter((day: unknown): day is string => typeof day === 'string' && scheduleDays.includes(day)) : [];
+  if (new Set(restDays).size !== restDays.length) throw new QueueError(400, 'Choose each rest day once.');
+  const requestedName = text(req.body?.engineerName);
+  const [users] = await getDbPool().query('SELECT full_name FROM users WHERE id = ?', [req.user!.userId]);
+  const engineerName = canManageRoster(req) && requestedName ? requestedName : text((users as Array<{ full_name: string }>)[0]?.full_name);
+  if (!engineerName) throw new QueueError(400, 'Choose an Engineer.');
+  await withQueue(async (connection, date) => {
+    await connection.execute('INSERT INTO engineer_roster_schedules (engineer_name, rest_days) VALUES (?, ?) ON DUPLICATE KEY UPDATE rest_days = VALUES(rest_days)', [engineerName, restDays.join(',')]);
+    const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Asia/Manila' }).format(new Date(`${date}T00:00:00+08:00`));
+    await connection.execute("UPDATE engineer_daily_availability SET status = ?, left_at = IF(? = 'left', CURRENT_TIMESTAMP, NULL) WHERE engineer_name = ? AND availability_date = ?", [restDays.includes(weekday) ? 'active' : 'left', restDays.includes(weekday) ? 'active' : 'left', engineerName, date]);
+  });
+  void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.availability_schedule_updated', resourceType: 'engineer_availability_schedule', metadata: { engineerName, restDays } });
+  res.json({ message: 'Weekly availability schedule saved.', restDays });
+}));
+
 router.put('/availability/order', queueRoute(async (req, res) => {
   if (!canManageRoster(req)) { forbidden(res); return; }
   const result = await reorderQueue(req.body?.division, req.body?.engineerIds, req.body?.queueToken, req.user!.userId);
@@ -109,7 +137,9 @@ router.post('/availability/remove', queueRoute(async (req, res) => {
 router.get('/roster', async (req, res) => {
   if (!canManageRoster(req)) { forbidden(res); return; }
   await ensureFrontlineTables();
-  const [rows] = await getDbPool().query('SELECT id, user_id, engineer_name AS full_name, active, created_at, updated_at FROM engineer_roster WHERE active = 1 ORDER BY engineer_name ASC, id ASC');
+  const [rows] = await getDbPool().query(`SELECT r.id, COALESCE(r.user_id, u.id) AS user_id, r.engineer_name AS full_name, r.active, r.created_at, r.updated_at
+    FROM engineer_roster r LEFT JOIN users u ON LOWER(TRIM(u.full_name)) = LOWER(TRIM(r.engineer_name))
+    WHERE r.active = 1 ORDER BY r.engineer_name ASC, r.id ASC`);
   res.json({ roster: rows });
 });
 
