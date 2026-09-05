@@ -56,7 +56,10 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }));
-app.use(express.json({ limit: '100kb' }));
+app.use((req, res, next) => {
+  const limit = req.path.startsWith('/api/pcount') ? '10mb' : '100kb';
+  express.json({ limit })(req, res, next);
+});
 app.use(cookieParser());
 
 // Shared hosting protection: normal users can still poll comfortably, while
