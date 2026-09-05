@@ -7,9 +7,17 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          xlsx: ['xlsx'],
+        manualChunks(id) {
+          if (id.includes('node_modules/xlsx-js-style')) return 'xlsx-style';
+          if (id.includes('node_modules/xlsx')) return 'xlsx';
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router-dom')) return 'vendor';
+          if (id.endsWith('/src/components/pcount/ImportSystem.tsx')) return 'pcount-import-system';
+          if (id.endsWith('/src/components/pcount/ImportCount.tsx')) return 'pcount-import-count';
+          if (id.endsWith('/src/components/pcount/ProductTable.tsx')) return 'pcount-product-table';
+          if (id.endsWith('/src/components/pcount/ScanPanel.tsx')) return 'pcount-scan-panel';
+          if (id.endsWith('/src/components/pcount/ScanBar.tsx')) return 'pcount-scan-bar';
+          if (id.endsWith('/src/components/pcount/PcountReportPreview.tsx')) return 'pcount-report';
+          if (id.includes('/src/components/pcount/')) return 'pcount-components';
         },
       },
     },

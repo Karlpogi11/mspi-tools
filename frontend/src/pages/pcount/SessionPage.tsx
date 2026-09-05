@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api, type Session, type Product, type ScanResult, readJson } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -8,7 +8,8 @@ import ProductTable, { ALL_COLUMNS, ColumnPicker } from '../../components/pcount
 import ScanPanel from '../../components/pcount/ScanPanel';
 import ScanBar from '../../components/pcount/ScanBar';
 import ToolHelp from '../../components/ToolHelp';
-import PcountReportPreview from '../../components/pcount/PcountReportPreview';
+
+const PcountReportPreview = lazy(() => import('../../components/pcount/PcountReportPreview'));
 
 type Stage = 'setup' | 'count' | 'verify' | 'report';
 
@@ -816,11 +817,13 @@ export default function PcountSessionPage() {
         </div>
       )}
       {stage === 'report' && session && (
-        <PcountReportPreview
-          session={session}
-          products={products}
-          onClose={() => setStage('verify')}
-        />
+        <Suspense fallback={<div className="pcount-card p-6 text-[13px] text-[#6e6e73]">Loading report…</div>}>
+          <PcountReportPreview
+            session={session}
+            products={products}
+            onClose={() => setStage('verify')}
+          />
+        </Suspense>
       )}
     </div>
   );
