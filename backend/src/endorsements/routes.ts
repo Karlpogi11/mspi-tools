@@ -89,7 +89,9 @@ router.put('/availability/schedule', queueRoute(async (req, res) => {
   await withQueue(async (connection, date) => {
     await connection.execute('INSERT INTO engineer_roster_schedules (engineer_name, rest_days) VALUES (?, ?) ON DUPLICATE KEY UPDATE rest_days = VALUES(rest_days)', [engineerName, restDays.join(',')]);
     const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Asia/Manila' }).format(new Date(`${date}T00:00:00+08:00`));
-    await connection.execute("UPDATE engineer_daily_availability SET status = ?, left_at = IF(? = 'left', CURRENT_TIMESTAMP, NULL) WHERE engineer_name = ? AND availability_date = ?", [restDays.includes(weekday) ? 'active' : 'left', restDays.includes(weekday) ? 'active' : 'left', engineerName, date]);
+    const isRestDay = restDays.includes(weekday);
+    await connection.execute('UPDATE engineer_daily_availability SET status = ?, left_at = CURRENT_TIMESTAMP WHERE engineer_name = ? AND availability_date = ?', [isRestDay ? 'left' : 'active', engineerName, date]);
+    if (!isRestDay) await connection.execute('UPDATE engineer_daily_availability SET left_at = NULL WHERE engineer_name = ? AND availability_date = ?', [engineerName, date]);
   });
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.availability_schedule_updated', resourceType: 'engineer_availability_schedule', metadata: { engineerName, restDays } });
   res.json({ message: 'Weekly availability schedule saved.', restDays });

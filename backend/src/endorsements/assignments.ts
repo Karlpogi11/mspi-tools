@@ -69,6 +69,7 @@ export async function reorderQueue(division: unknown, engineerIds: unknown, toke
     throw new QueueError(400, 'Provide a valid Engineer order.');
   }
   const requestedIds = engineerIds.map(Number);
+  if (!requestedIds.length) throw new QueueError(400, 'Provide a valid Engineer order.');
   if (new Set(requestedIds).size !== requestedIds.length) throw new QueueError(400, 'Engineer order contains duplicates.');
   return withQueue(async (connection, date) => {
     const queue = await divisionQueue(connection, date, selectedDivision);

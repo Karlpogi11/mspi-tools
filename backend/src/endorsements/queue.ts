@@ -85,7 +85,7 @@ export async function lockDay(connection: PoolConnection, date: string) {
   const [days] = await connection.query('SELECT initialized FROM engineer_queue_days WHERE queue_date = ? FOR UPDATE', [date]);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Asia/Manila' }).format(new Date(`${date}T00:00:00+08:00`));
   await connection.query(`INSERT INTO engineer_daily_availability (user_id, engineer_name, availability_date, status)
-    SELECT r.user_id, r.engineer_name, ?, IF(FIND_IN_SET(?, COALESCE(s.rest_days, '')) > 0, 'active', 'left')
+    SELECT r.user_id, r.engineer_name, ?, IF(FIND_IN_SET(?, COALESCE(s.rest_days, '')) > 0, 'left', 'active')
     FROM engineer_roster r LEFT JOIN engineer_roster_schedules s ON s.engineer_name = r.engineer_name WHERE r.active = 1 ORDER BY r.engineer_name
     ON DUPLICATE KEY UPDATE user_id = COALESCE(engineer_daily_availability.user_id, VALUES(user_id))`, [date, weekday]);
   if (Number((days as Array<{ initialized: number }>)[0].initialized)) return;
@@ -103,28 +103,39 @@ export async function lockDay(connection: PoolConnection, date: string) {
   await connection.execute('UPDATE engineer_queue_days SET initialized = 1 WHERE queue_date = ?', [date]);
 }
 
+function isLockContention(error: unknown) {
+  const code = (error as { code?: string; errno?: number })?.code;
+  const errno = (error as { errno?: number })?.errno;
+  return code === 'ER_LOCK_DEADLOCK' || code === 'ER_LOCK_WAIT_TIMEOUT' || errno === 1213 || errno === 1205;
+}
+
 export async function withQueue<T>(work: (connection: PoolConnection, date: string) => Promise<T>, syncCounts = true): Promise<T> {
   await ensureQueueTables();
-  const connection = await getDbPool().getConnection();
   const date = todayManila();
-  try {
-    await connection.beginTransaction();
-    await lockDay(connection, date);
-    const result = await work(connection, date);
-    if (syncCounts) {
-      await connection.query(`UPDATE engineer_daily_availability a LEFT JOIN (
-        SELECT availability_id, COUNT(endorsement_id) AS total, MAX(created_at) AS last_assignment
-        FROM engineer_queue_events WHERE queue_date = ? GROUP BY availability_id
-      ) e ON e.availability_id = a.id
-        SET a.assignment_count = COALESCE(e.total, 0), a.last_assigned_at = e.last_assignment
-        WHERE a.availability_date = ?`, [date, date]);
-    }
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally { connection.release(); }
+  // Concurrent queue operations (polling + arrange/assign/skip) contend on the
+  // daily guard row. A deadlock victim must retry instead of surfacing a 500.
+  for (let attempt = 0; ; attempt++) {
+    const connection = await getDbPool().getConnection();
+    try {
+      await connection.beginTransaction();
+      await lockDay(connection, date);
+      const result = await work(connection, date);
+      if (syncCounts) {
+        await connection.query(`UPDATE engineer_daily_availability a LEFT JOIN (
+          SELECT availability_id, COUNT(endorsement_id) AS total, MAX(created_at) AS last_assignment
+          FROM engineer_queue_events WHERE queue_date = ? GROUP BY availability_id
+        ) e ON e.availability_id = a.id
+          SET a.assignment_count = COALESCE(e.total, 0), a.last_assigned_at = e.last_assignment
+          WHERE a.availability_date = ?`, [date, date]);
+      }
+      await connection.commit();
+      return result;
+    } catch (error) {
+      await connection.rollback().catch(() => undefined);
+      if (error instanceof QueueError || !isLockContention(error) || attempt >= 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1) + Math.floor(Math.random() * 50)));
+    } finally { connection.release(); }
+  }
 }
 
 export async function divisionQueue(connection: PoolConnection, date: string, division: Division): Promise<DivisionQueue> {
