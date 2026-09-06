@@ -563,13 +563,14 @@ export const api = {
   },
 
   products: {
-    list: (sessionId: number, params?: { status?: string; search?: string; sort?: string }) => {
+    list: (sessionId: number, params?: { status?: string; search?: string; sort?: string; fresh?: boolean }) => {
       const q = new URLSearchParams();
       if (params?.status) q.set('status', params.status);
       if (params?.search) q.set('search', params.search);
       if (params?.sort) q.set('sort', params.sort);
       const qs = q.toString();
-      return request<Product[]>(`/pcount/sessions/${sessionId}/products${qs ? `?${qs}` : ''}`);
+      const path = `/pcount/sessions/${sessionId}/products${qs ? `?${qs}` : ''}`;
+      return params?.fresh ? requestFresh<Product[]>(path) : request<Product[]>(path);
     },
     get: (sessionId: number, code: string) =>
       request<Product>(`/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`),

@@ -13,6 +13,24 @@ const PcountReportPreview = lazy(() => import('../../components/pcount/PcountRep
 
 type Stage = 'setup' | 'count' | 'verify' | 'report';
 
+function isExcludedProduct(product: Product): boolean {
+  return String(product.status || '').trim().toLowerCase() === 'excluded';
+}
+
+function normalizeProductStatus(product: Product): Product {
+  if (isExcludedProduct(product)) return { ...product, status: 'excluded' };
+  const status = String(product.status || '').trim().toLowerCase();
+  if (status === 'pending' || status === 'matched' || status === 'missing') {
+    return { ...product, status };
+  }
+  const countedQty = Number(product.counted_qty) || 0;
+  const systemQty = Number(product.system_qty) || 0;
+  return {
+    ...product,
+    status: countedQty === 0 ? 'pending' : countedQty >= systemQty ? 'matched' : 'missing',
+  };
+}
+
 export default function PcountSessionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -79,9 +97,10 @@ export default function PcountSessionPage() {
     const requestId = ++loadRequestRef.current;
     try {
       const s = await api.sessions.get(sessionId);
-      const prods = await api.products.list(sessionId, {
+      const prods = (await api.products.list(sessionId, {
         sort: sortDesc ? 'desc' : 'asc',
-      });
+        fresh: true,
+      })).map(normalizeProductStatus);
       if (requestId !== loadRequestRef.current) return;
       setSession(s);
       setTableColumns(s.display_columns?.length ? s.display_columns : ALL_COLUMNS.map(column => column.key));
@@ -212,8 +231,9 @@ export default function PcountSessionPage() {
   }, []);
 
   const handleProductUpdate = useCallback((updated: Product) => {
+    const normalized = normalizeProductStatus(updated);
     setProducts(prev => prev.map(p =>
-      p.product_code === updated.product_code ? updated : p
+      p.product_code === normalized.product_code ? normalized : p
     ));
     loadSession();
   }, [loadSession]);
@@ -352,6 +372,12 @@ export default function PcountSessionPage() {
     setExportError('');
 
     try {
+      const latestProducts = await api.products.list(sessionId, {
+        sort: sortDesc ? 'desc' : 'asc',
+        fresh: true,
+      });
+      productsRef.current = latestProducts;
+      setProducts(latestProducts);
       const XLSX = await import('xlsx-js-style');
       // Excel is the detailed product export. The report preview owns the summary output.
       // Keep the match flag in the final column for quick row-by-row verification.
@@ -364,21 +390,23 @@ export default function PcountSessionPage() {
       const headers = exportColumns.map(column => column.label);
       const valueFor = (product: Product, names: string[]) => {
         const wanted = names.map(name => name.toLowerCase());
-        return Object.entries(product.extra || {}).find(([key]) => wanted.includes(key.trim().toLowerCase()))?.[1] || '';
+        const value = Object.entries(product.extra || {}).find(([key]) => wanted.includes(String(key).trim().toLowerCase()))?.[1];
+        return String(value ?? '');
       };
 
-      const rows = [...products]
-        .filter(product => product.status !== 'excluded')
-        .sort((a, b) => a.product_code.localeCompare(b.product_code, undefined, { sensitivity: 'base', numeric: true }))
+      const rows = [...latestProducts]
+        .filter(product => !isExcludedProduct(product))
+        .sort((a, b) => String(a.product_code || '').localeCompare(String(b.product_code || ''), undefined, { sensitivity: 'base', numeric: true }))
         .map(product => {
           const brand = valueFor(product, ['brand']).trim().toLowerCase();
-          const sheet: 'Apple' | '3PP' = brand.includes('apple') || product.category.toLowerCase() === 'apple' ? 'Apple' : '3PP';
+          const category = String(product.category || '').trim().toLowerCase();
+          const sheet: 'Apple' | '3PP' = brand.includes('apple') || category === 'apple' ? 'Apple' : '3PP';
           const values = exportColumns.map(column => {
             switch (column.key) {
               case 'Product Code': return product.product_code;
               case 'System Qty': return product.system_qty;
               case 'Actual Qty': return product.counted_qty;
-              case 'Is Match': return product.counted_qty === product.system_qty;
+              case 'Is Match': return product.status === 'matched' || product.counted_qty === product.system_qty;
               default: return product.extra?.[column.key] ?? '';
             }
           });

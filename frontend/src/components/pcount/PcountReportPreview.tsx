@@ -58,6 +58,10 @@ function hasUnsupportedCanvasColor(value: string): boolean {
   return /(oklab|oklch|\blab\(|\blch\(|color\()/i.test(value);
 }
 
+function isExcludedProduct(product: Product): boolean {
+  return product.status.trim().toLowerCase() === 'excluded';
+}
+
 export default function PcountReportPreview({ session, products, onClose }: Props) {
   const defaultDate = useMemo(() => {
     try {
@@ -84,7 +88,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
   const [appleTotalOverride, setAppleTotalOverride] = useState<string | null>(null);
   const [tppTotalOverride, setTppTotalOverride] = useState<string | null>(null);
 
-  const countedProducts = products.filter(product => product.status !== 'excluded');
+  const countedProducts = products.filter(product => !isExcludedProduct(product));
 
   const defaultSummaries = useMemo(() => {
     const map = new Map<string, {
@@ -256,6 +260,25 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
           logging: false,
           onclone: clonedDocument => {
             const clonedPage = clonedDocument.querySelector('.pcount-report-pages');
+            clonedPage?.querySelectorAll<HTMLInputElement>('input').forEach(input => {
+              const text = clonedDocument.createElement('span');
+              const computed = clonedDocument.defaultView?.getComputedStyle(input);
+              text.className = input.className;
+              text.textContent = input.value || input.placeholder || '';
+              if (computed) {
+                for (const property of [
+                  'box-sizing', 'width', 'height', 'min-height', 'max-height',
+                  'margin', 'padding', 'border', 'border-radius', 'font', 'font-size',
+                  'font-weight', 'line-height', 'letter-spacing', 'text-align',
+                  'text-transform', 'vertical-align', 'color', 'background-color',
+                  'white-space', 'overflow',
+                ]) {
+                  text.style.setProperty(property, computed.getPropertyValue(property));
+                }
+                text.style.display = computed.display === 'inline' ? 'inline-block' : computed.display;
+              }
+              input.replaceWith(text);
+            });
             clonedPage?.querySelectorAll<HTMLElement>('*').forEach(element => {
               const computed = clonedDocument.defaultView?.getComputedStyle(element);
               if (!computed) return;
@@ -272,7 +295,8 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
         pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
       }
 
-      const filename = `pcount-report-${(session.name || `session-${session.id}`).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'report'}.pdf`;
+      const filenameDate = date.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || new Date().toISOString().slice(0, 10);
+      const filename = `pcount_${filenameDate}.pdf`;
       const pdfUrl = URL.createObjectURL(pdf.output('blob'));
       const previewWindow = window.open(pdfUrl, '_blank', 'noopener,noreferrer');
       if (!previewWindow) {
@@ -312,7 +336,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
 
   const actualTable = (
     <>
-      <table className="report-table mt-8"><thead><tr><th>Category</th><th>SOH</th><th>Actual Qty</th><th>Stock Issued</th><th>Variance</th><th>Remarks</th></tr></thead><tbody>{defaultSummaries.map(row => <tr key={row.category}><td className="p-1"><input value={summaryValue(row.category, 'category', row.category)} onChange={e => editSummary(row.category, 'category', e.target.value)} className="w-full bg-transparent border-0 outline-none text-left font-bold text-[#1d1d1f] focus:ring-0 p-0 text-[11px]" /></td>{(['soh', 'actual', 'issued', 'variance'] as const).map(field => <td key={field}><input type="text" value={summaryValue(row.category, field, row[field])} onChange={e => editSummary(row.category, field, e.target.value)} className="w-full bg-transparent border-0 outline-none text-center font-medium focus:ring-0 p-0" /></td>)}<td><input type="text" value={summaryValue(row.category, 'remarks', row.remarks) || 'N/A'} onFocus={e => { if (e.currentTarget.value === 'N/A') editSummary(row.category, 'remarks', ''); }} onChange={e => editSummary(row.category, 'remarks', e.target.value)} onBlur={e => { const value = e.currentTarget.value.trim() || 'N/A'; editSummary(row.category, 'remarks', value); void saveRemark(row.category, value); }} className="w-full bg-transparent border-0 outline-none text-left pl-1 focus:ring-0 p-0" aria-label={`Remarks for ${row.category}`} /></td></tr>)}</tbody></table>
+      <table className="report-table mt-8"><thead><tr><th>Category</th><th>SOH</th><th>Actual Qty</th><th>Stock Issued</th><th>Variance</th><th>Remarks</th></tr></thead><tbody>{defaultSummaries.map(row => <tr key={row.category}><td className="p-1"><input value={summaryValue(row.category, 'category', row.category)} onChange={e => editSummary(row.category, 'category', e.target.value)} className="w-full bg-transparent border-0 outline-none text-left font-bold text-[#1d1d1f] focus:ring-0 p-0 text-[11px]" /></td>{(['soh', 'actual', 'issued', 'variance'] as const).map(field => <td key={field}><input type="text" value={summaryValue(row.category, field, row[field])} onChange={e => editSummary(row.category, field, e.target.value)} className="w-full bg-transparent border-0 outline-none text-center font-medium focus:ring-0 p-0" /></td>)}<td><input type="text" value={summaryValue(row.category, 'remarks', row.remarks)} onFocus={e => { if (e.currentTarget.value === 'N/A') editSummary(row.category, 'remarks', ''); }} onChange={e => editSummary(row.category, 'remarks', e.target.value)} onBlur={e => { const value = e.currentTarget.value.trim() || 'N/A'; editSummary(row.category, 'remarks', value); void saveRemark(row.category, value); }} className="w-full bg-transparent border-0 outline-none text-left pl-1 focus:ring-0 p-0" aria-label={`Remarks for ${row.category}`} /></td></tr>)}</tbody></table>
       <div className="mt-3 flex justify-between items-start"><div className="flex flex-col gap-1 text-left"><input value={appleTotalText} onChange={e => setAppleTotalOverride(e.target.value)} className="bg-transparent border-0 outline-none text-[11px] font-semibold text-[#4b4540] p-0 w-48 focus:ring-0" placeholder="Apple - 237" /><input value={tppTotalText} onChange={e => setTppTotalOverride(e.target.value)} className="bg-transparent border-0 outline-none text-[11px] font-semibold text-[#4b4540] p-0 w-48 focus:ring-0" placeholder="3PP - 1092" /></div><div className="flex-1" /></div>
     </>
   );
@@ -479,7 +503,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
                   <td>
                     <input
                       type="text"
-                      value={summaryValue(row.category, 'remarks', row.remarks) || 'N/A'}
+                      value={summaryValue(row.category, 'remarks', row.remarks)}
                       onFocus={e => {
                         if (e.currentTarget.value === 'N/A') editSummary(row.category, 'remarks', '');
                       }}
