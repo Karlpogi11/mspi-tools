@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type FrontlineReport, type FrontlineStatus } from '../lib/api';
+import { api, ENDORSEMENT_DIVISIONS, type EndorsementDivision, type FrontlineReport, type FrontlineStatus } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import ToolHelp from '../components/ToolHelp';
 
@@ -85,8 +85,8 @@ export default function FrontlinePage() {
   const isEndorsementRow = (row: FrontlineReport['records'][number]) => { const type = row.transaction_type.toLowerCase().replace(/[-_]+/g, ' ').replace(/\s*\(\s*/g, ' (').replace(/\s*\)\s*/g, ')').replace(/\s+/g, ' ').trim(); return ['received (appointment)', 'received (walk in)', 'job order (walk in)'].includes(type); };
   const copyForViber = async (row: FrontlineReport['records'][number]) => { const value = `FOR ENDORSEMENT\n- ${row.ar_number || '-'}\n- -\n- ${row.issue || '-'}\n- ${row.product_division || '-'}`; try { await navigator.clipboard.writeText(value); setCopiedRecordId(row.id); window.setTimeout(() => setCopiedRecordId((current) => current === row.id ? null : current), 1800); } catch { setMessage('Unable to copy. Please check browser clipboard permission.'); } };
   const printArLabel = async (row: FrontlineReport['records'][number]) => { const ar = row.ar_number.trim(); if (!ar) return; setPrintingRecordId(row.id); setMessage('Checking printer configuration…'); let device: EpsonDevice | null = null; try { const configured = await api.frontline.printer(); const configuredIp = configured.printerIp; const configuredPort = configured.printerPort || 8008; setPrinterIp(configuredIp); setPrinterPort(configuredPort); if (!configuredIp) { setMessage('Ask an Admin to configure the AR label printer IP address.'); return; } if (configuredPort === 9100) { const result = await api.frontline.printRawPrinter(ar); setMessage(result.message); return; } if (!window.epson?.ePOSDevice) throw new Error('Epson SDK is not loaded.'); setMessage('Connecting to printer…'); device = new window.epson.ePOSDevice(); await new Promise<void>((resolve, reject) => device!.connect(configuredIp, String(configuredPort), (result) => result === 'OK' ? resolve() : reject(new Error(`Epson connection failed: ${result}`)))); const printer = await new Promise<EpsonPrinter>((resolve, reject) => device!.createDevice('local_printer', device!.DEVICE_TYPE_PRINTER, { crypto: false, buffer: false }, (createdPrinter, result) => { if (result !== 'OK' || !createdPrinter) reject(new Error(result || 'Unable to create printer device.')); else resolve(createdPrinter); })); await new Promise<void>((resolve, reject) => { printer.onreceive = (response) => response.success ? resolve() : reject(new Error(response.code || 'Printer rejected the job.')); printer.onerror = (error) => reject(new Error(error.code || 'Printer communication failed.')); printer.addTextAlign(printer.ALIGN_CENTER); printer.addTextSize(4, 4); printer.addTextDouble(false, false); printer.addText(`${ar}\n`); printer.addTextSize(1, 1); printer.addFeedLine(1); printer.addBarcode(ar, printer.BARCODE_CODE128, printer.HRI_NONE, printer.FONT_A, 1, 48); printer.addFeedLine(4); printer.addCut(printer.CUT_FEED); printer.send(); }); setMessage(`AR ${ar} sent to printer.`); } catch (error) { setMessage((error as Error).message || `Unable to print AR ${ar}.`); } finally { device?.disconnect(); setPrintingRecordId(null); } };
-  const refreshAvailable = async () => { const result = await api.endorsements.available(); setAvailableEngineers({ ...result, engineers: result.nextEngineer ? [result.nextEngineer] : [] }); setSelectedEngineerId(result.nextEngineer?.id); };
-  const openEndorsement = async (row: FrontlineReport['records'][number]) => { setSuccessMessage(''); setArNumberDraft(row.ar_number?.trim().toUpperCase() === 'N/A' ? '' : row.ar_number.trim()); setDeviceModelDraft(row.device_model?.trim() || ''); setEndorsementError(''); setModelSuggestionsOpen(false); setHighlightedModelIndex(0); setEndorseRecord({ ...row, product_division: row.device_model?.trim() || 'Device model not specified' }); setAvailableEngineers(null); setSelectedEngineerId(undefined); try { await refreshAvailable(); } catch (error) { setMessage((error as Error).message); } };
+  const refreshAvailable = async (deviceModel = deviceModelDraft, sourceDivision = endorseRecord?.product_division || '') => { const division = resolveEndorsementDivision(deviceModel, sourceDivision); const result = await api.endorsements.available(division); setAvailableEngineers({ ...result, engineers: result.nextEngineer ? [result.nextEngineer] : [] }); setSelectedEngineerId(result.nextEngineer?.id); };
+  const openEndorsement = async (row: FrontlineReport['records'][number]) => { setSuccessMessage(''); setArNumberDraft(row.ar_number?.trim().toUpperCase() === 'N/A' ? '' : row.ar_number.trim()); setDeviceModelDraft(row.device_model?.trim() || ''); setEndorsementError(''); setModelSuggestionsOpen(false); setHighlightedModelIndex(0); setEndorseRecord(row); setAvailableEngineers(null); setSelectedEngineerId(undefined); try { await refreshAvailable(row.device_model, row.product_division); } catch (error) { setMessage((error as Error).message); } };
   const chooseDeviceModel = (model: string) => { setDeviceModelDraft(model); setModelSuggestionsOpen(false); setHighlightedModelIndex(0); };
   const handleDeviceModelKeyDown = (event: KeyboardEvent<HTMLInputElement>) => { if (!modelSuggestionsOpen || !filteredDeviceModels.length) return; if (event.key === 'ArrowDown') { event.preventDefault(); setHighlightedModelIndex((index) => Math.min(index + 1, filteredDeviceModels.length - 1)); } else if (event.key === 'ArrowUp') { event.preventDefault(); setHighlightedModelIndex((index) => Math.max(index - 1, 0)); } else if (event.key === 'Enter') { event.preventDefault(); chooseDeviceModel(filteredDeviceModels[highlightedModelIndex]); } else if (event.key === 'Escape') { setModelSuggestionsOpen(false); } };
   const addEngineer = async () => { if (!newEngineerName.trim()) return; try { await api.endorsements.addEngineer(newEngineerName.trim()); setNewEngineerName(''); await refreshAvailable(); } catch (error) { setMessage((error as Error).message); } };
@@ -119,6 +119,21 @@ function Spinner() { return <span className="h-3 w-3 animate-spin rounded-full b
 
 function parseBackendTimestamp(value: string) {
   return new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(' ', 'T')}Z` : value);
+}
+
+function resolveEndorsementDivision(deviceModel: string, sourceDivision: string): EndorsementDivision | undefined {
+  const model = deviceModel.trim();
+  if (/^MacBook\b/i.test(model)) return 'MacBook';
+  if (/^iMac\b/i.test(model)) return 'iMac';
+  if (/^(iPhone|iPad|iPod|Apple Watch|AirPods|Beats)\b/i.test(model)) return 'iOS/ACCS';
+
+  const normalized = sourceDivision.trim().toLowerCase();
+  const division = ENDORSEMENT_DIVISIONS.find((item) => item.toLowerCase() === normalized);
+  if (division) return division;
+  if (normalized === 'portable') return 'MacBook';
+  if (normalized === 'desktop') return 'iMac';
+  if (normalized.includes('accs') || ['ios', 'iphone', 'ipad', 'ipod', 'watch', 'beats', 'shuffle'].includes(normalized)) return 'iOS/ACCS';
+  return undefined;
 }
 
 function frontlineReportCacheKey(userId: number) {
