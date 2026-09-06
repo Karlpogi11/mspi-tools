@@ -186,6 +186,28 @@ export async function recordTurn(connection: PoolConnection, date: string, divis
     VALUES (?, ?, ?, ?, ?, ?, ?)`, [date, division, availabilityId, endorsementId, endorsementId === null ? 'skipped' : 'assigned', actorUserId, reason]);
 }
 
+export async function readQueues() {
+  await ensureQueueTables();
+  const pool = getDbPool();
+  const date = todayManila();
+  const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM engineer_daily_availability WHERE availability_date = ?', [date]);
+  if (!Number((countRows as Array<{ total: number }>)[0]?.total)) return availableQueues();
+  const connection = await pool.getConnection();
+  try {
+    const queues: DivisionQueue[] = [];
+    for (const division of DIVISIONS) queues.push(await divisionQueue(connection, date, division));
+    const [roster] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.joined_at,
+      (SELECT COUNT(endorsement_id) FROM engineer_queue_events e WHERE e.availability_id = a.id AND e.queue_date = ?) AS assignment_count
+      FROM engineer_daily_availability a WHERE a.availability_date = ?
+      AND EXISTS (SELECT 1 FROM engineer_roster r WHERE r.active = 1 AND r.engineer_name = a.engineer_name)
+      ORDER BY a.engineer_name, a.id`, [date, date]);
+    const [skips] = await connection.query(`SELECT e.id, e.product_division AS division, a.engineer_name, e.reason, e.created_at
+      FROM engineer_queue_events e JOIN engineer_daily_availability a ON a.id = e.availability_id
+      WHERE e.queue_date = ? AND e.event_type = 'skipped' ORDER BY e.id DESC LIMIT 6`, [date]);
+    return { date, queues, roster, skips };
+  } finally { connection.release(); }
+}
+
 export async function availableQueues() {
   return withQueue(async (connection, date) => {
     const queues: DivisionQueue[] = [];

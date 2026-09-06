@@ -3,7 +3,7 @@ import { getDbPool } from '../db/index.js';
 import { authenticateToken } from '../auth.js';
 import { writeAuditLog } from '../db/audit.js';
 import { ensureFrontlineTables } from '../frontline/store.js';
-import { QueueError, availableQueues, dayBounds, ensureQueueTables, lockDay, resolveDivision, todayManila, withQueue } from './queue.js';
+import { QueueError, availableQueues, dayBounds, ensureQueueTables, lockDay, readQueues, resolveDivision, todayManila, withQueue } from './queue.js';
 import { assignNext, changeDeviceModel, changeEngineer, previewAssignment, removeEndorsement, reorderQueue, skipNext } from './assignments.js';
 
 const router = Router();
@@ -198,7 +198,7 @@ router.delete('/roster/:id', async (req, res) => {
 
 router.get('/available', queueRoute(async (req, res) => {
   if (!canView(req)) { forbidden(res); return; }
-  const result = await availableQueues();
+  const result = await readQueues();
   const selected = result.queues.find((queue) => queue.division === req.query.division);
   res.set('Cache-Control', 'no-store').json({ ...result, engineers: selected?.engineers || [], nextEngineer: selected?.nextEngineer || null });
 }));
