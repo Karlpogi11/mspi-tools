@@ -13,6 +13,7 @@ const BUILTIN_TOOLS = [
   { name: 'Frontline Monitor', url: '/frontline', icon: 'monitor', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin'] },
   { name: 'Engineer Endorsements', url: '/endorsements', icon: 'wrench', description: 'Podium only — join the daily Engineer queue and manage customer device endorsements from Frontline Monitor.', roles: ['Admin', 'ENGR'] },
   { name: 'Storage Locator', url: '/storage-locator', icon: 'package', description: 'Track customer units in IOS and Mac cabinet storage with verified employee IN/OUT history.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'Parts Inventory', url: '/parts', icon: 'package', description: 'Stock Apple service parts in and out per site with serial tracking and a shared Google Sheet log.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
 ] as const;
 
 const BUILTIN_ROLE_NAMES = ['Admin', 'PMG', 'CSO', 'ENGR'];

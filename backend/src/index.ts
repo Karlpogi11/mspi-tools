@@ -28,6 +28,7 @@ import frontlineRoutes from './frontline/routes.js';
 import { ensureFrontlineTables } from './frontline/store.js';
 import endorsementRoutes from './endorsements/routes.js';
 import storageLocatorRoutes from './storage-locator/routes.js';
+import partsRoutes from './parts/routes.js';
 import { authenticateToken, requireToolAccess } from './auth.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
@@ -78,6 +79,17 @@ const expensiveApiLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'This operation is temporarily rate limited. Please try again later.' },
 });
+const partsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyGenerator: (req) => {
+    const userId = (req as typeof req & { user?: { userId?: number } }).user?.userId;
+    return userId ? `user:${userId}` : `ip:${req.ip}`;
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Parts requests are temporarily rate limited. Please wait a moment and try again.' },
+});
 
 app.use('/api', apiLimiter);
 app.use('/api/frontline/sync', expensiveApiLimiter);
@@ -90,6 +102,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/frontline', frontlineRoutes);
 app.use('/api/endorsements', authenticateToken, requireToolAccess('/endorsements'), endorsementRoutes);
 app.use('/api/storage-locator', authenticateToken, requireToolAccess('/storage-locator'), storageLocatorRoutes);
+app.use('/api/parts', authenticateToken, requireToolAccess('/parts'), partsLimiter, partsRoutes);
 
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
@@ -176,6 +189,9 @@ async function start() {
     const { ensureStorageTables } = await import('./storage-locator/store.js');
     await ensureStorageTables();
     logger.info('Storage Locator tables ready');
+    const { ensurePartsTables } = await import('./parts/store.js');
+    await ensurePartsTables();
+    logger.info('Parts Inventory tables ready');
     await syncBuiltinToolCatalog();
     logger.info('Built-in tool catalog synchronized');
   } catch (error) {

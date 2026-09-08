@@ -16,6 +16,11 @@ Welcome to the Obsidian Vault for the MSPI Internal Tools project. This workspac
 - [[Tool - RFPU]]: **Request For Price Utility** standalone route integration.
 - [[Tool - PDF Extractor]]: **AWB/Invoice PDF Extractor** — text-layer + OCR pipeline that files PDFs by month and logs every invoice.
 - [[Tool - Consumables]]: **Label Maker** — log received consumables, derive production/expiry from the 9D code, and print labels.
+- [[Tool - AppleCare]]: **AppleCare Packing Lists** — Gmail-synced packing-list inbox with parsed line items and site mapping.
+- [[Tool - Frontline Monitor]]: **Frontline Monitor** — Google-Sheets-backed CSO activity reporting, data entry write-back, and label printing.
+- [[Tool - Endorsements]]: **Engineer Endorsements** — round-robin endorsement queue over Frontline records with calendar management.
+- [[Tool - Storage Locator]]: **Storage Locator** — cabinet IN/OUT tracking for customer units with verified employee history.
+- [[Tool - Parts Inventory]]: **Parts Inventory** — per-site Apple parts stock IN/OUT with serial tracking and a shared Google Sheet log.
 
 ### 🧩 Browser Extensions
 - [[Tool - Work Permit Extension]]: Standalone Chrome extension for approved personal-email users.

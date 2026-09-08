@@ -27,6 +27,8 @@ export interface JwtPayload {
   email: string;
   roleId: number | null;
   roleName: string | null;
+  isSuperAdmin: boolean;
+  tokenVersion: number;
 }
 ```
 
@@ -38,16 +40,16 @@ The backend routes are guarded using Express middleware defined in `auth.ts`:
 
 ### 1. `authenticateToken`
 - Extracts the token from `req.cookies.token` (or upgrade headers in WebSocket).
-- Verifies it against `process.env.JWT_SECRET`.
+- Verifies it against `process.env.JWT_SECRET`, then reloads the user row and rejects when `users.token_version !== payload.tokenVersion` (revocation on password change/reset).
 - Attaches the parsed payload to `req.user`.
-- Rejects requests with `401 Unauthorized` if invalid or expired.
+- Rejects requests with `401 Unauthorized` if invalid or expired, `503` when the DB backing verification is unavailable.
 
 ```typescript
 export function authenticateToken(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies?.token;
   if (!token) return res.status(401).json({ error: 'Authentication required' });
 
-  const payload = verifyAccessToken(token);
+  const payload = await verifyAccessToken(token);
   if (!payload) return res.status(401).json({ error: 'Invalid or expired token' });
 
   req.user = payload;
@@ -55,9 +57,10 @@ export function authenticateToken(req: Request, res: Response, next: NextFunctio
 }
 ```
 
-### 2. `requireAdmin`
-- Rejects requests with `403 Forbidden` if `req.user.roleName` is not `'Admin'`.
-- Applied to administrative control routes (user approvals, tool registration).
+### 2. `requireAdmin` / `requireSuperAdmin` / `requireToolAccess`
+- `requireAdmin` — rejects with `403 Forbidden` if `req.user.roleName` is not `'Admin'`.
+- `requireSuperAdmin` — rejects with `403` unless `req.user.isSuperAdmin` (seed-promoted account; bypasses per-tool checks in the frontend `ProtectedRoute` and backend `requireToolAccess`).
+- `requireToolAccess(toolUrl)` — checks `role_tool_access` × `tools.url`; super-admins bypass, users without a role are rejected. Applied per tool in `backend/src/index.ts` (e.g. `/api/applecare`, `/api/endorsements`, `/api/storage-locator`).
 
 ---
 
@@ -98,7 +101,7 @@ function getSessionAuth(request: IncomingMessage): { userId: number } | null {
 - Reuses the same validation rules as self-service change (`passwordValidationError` in `backend/src/routes/auth.ts`).
 - Admins **cannot** reset their own account — another admin must do it.
 - The user signs in with the new password; the admin hands it over in person or via a secure channel (no email/SMTP involved).
-- Existing JWTs stay valid until expiry (8h) since sessions are cookie-based with no server-side store.
+- Password change/reset bumps `users.token_version`, immediately invalidating previously issued JWTs (token-version revocation; JWT expiry is 8h).
 
 UI: **Admin → Users → Reset password** button opens a modal to enter the new password.
 

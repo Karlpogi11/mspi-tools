@@ -40,6 +40,12 @@ const adminTools = [
     description: 'Manage employee verification for customer unit storage operations.',
     icon: 'M4 7h16v13H4zM7 7V5a5 5 0 0110 0v2M8 12h8M8 16h5',
   },
+  {
+    to: '/admin/parts',
+    name: 'Parts Inventory',
+    description: 'Manage sites, parts master, all-site stock, and the Google Sheet log.',
+    icon: 'm16.5 9.4 5-2.9M3 7l9 5 9-5M12 12v9M20 8.5v7a2 2 0 01-1 1.7l-6 3.4a2 2 0 01-2 0l-6-3.4a2 2 0 01-1-1.7v-7a2 2 0 011-1.7l6-3.4a2 2 0 012 0l6 3.4a2 2 0 011 1.7Z',
+  },
 ];
 
 export default function AdminPage() {

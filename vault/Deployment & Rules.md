@@ -25,6 +25,14 @@ COOKIE_DOMAIN=.mspi.io
 PORT=3000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
+# Optional: Google Sheets OAuth callback for Frontline Monitor
+GOOGLE_SHEETS_REDIRECT_URI=http://localhost:3001/api/frontline/google/callback
+# AppleCare Gmail OAuth + Frontline Google OAuth
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=
+# AppleCare attachment storage (default: <cwd>/data/applecare)
+APPLECARE_DATA_DIR=
 ```
 
 ---

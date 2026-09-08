@@ -59,9 +59,8 @@ function base64UrlUtf8(value: string): string {
 export async function readJson<T>(res: Response): Promise<T> {
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
-    if (res.status === 429) {
-      throw responseError('Too many failed login attempts. Please wait before trying again.', res);
-    }
+    if (res.status === 403) throw responseError('Access to this resource was blocked by the hosting server. Please try again shortly.', res);
+    if (res.status === 429) throw responseError('Too many requests. Please wait before trying again.', res);
     throw responseError('The server is unavailable right now. Please try again in a moment.', res);
   }
   return res.json() as Promise<T>;
@@ -73,8 +72,8 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     try {
       res = await fetch(`${BASE}${path}`, {
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
         ...options,
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
       });
     } catch {
       if (attempt === 0) {
@@ -174,6 +173,13 @@ export interface StorageEmployee { id: number; employeeNumber: string; fullName:
 export interface StorageUnit { id: number; ar_number: string; family: string; status: string; cabinet_number: number; state: 'in' | 'out'; checked_in_at: string | null; checked_out_at: string | null; current_employee_name?: string | null }
 export interface StorageMovement { id: number; action: 'IN' | 'OUT'; family: string; status: string; cabinet_number: number | null; occurred_at: string; employee_number: string; full_name: string }
 export interface StorageRecentMovement extends StorageMovement { ar_number: string }
+
+export interface PartsSite { id: number; code: string; name: string; active: number }
+export interface PartsMasterItem { id: number; part_number: string; description: string; eee_code: string | null; substitute_part: string | null; serialized: string }
+export interface PartsUnit { id: number; part_number: string; description?: string | null; serial: string | null; quantity: number; status: string; reference: string | null; occurred_date: string | null; stocked_in_at?: string | null; stocked_out_at?: string | null; site_code: string; site_name?: string }
+export interface PartsStockSummary { total: number; units: number; out_total: number; parts: number }
+export interface PartsMovement { id: number; type: string; part_number: string; serial: string | null; occurred_date: string; reference: string | null; quantity: number; created_at: string; site_code: string }
+export interface PartsSheetStatus { connected: boolean; email: string | null; spreadsheetId: string; spreadsheetName: string; sheetName: string; pendingSync: number }
 
 export interface Session {
   id: number;
@@ -367,6 +373,14 @@ export interface ApplecarePackingList {
 export interface ApplecareItem { id: number; part_number: string; description: string; po_no: string | null; serial_number: string; quantity: number; raw_text: string | null }
 export interface ApplecarePackingListDetail extends ApplecarePackingList { items: ApplecareItem[]; raw_text?: string | null }
 
+let partsSiteToken = '';
+export function setPartsSiteToken(token: string) {
+  partsSiteToken = token;
+}
+function siteHeaders(): Record<string, string> {
+  return partsSiteToken ? { 'x-site-token': partsSiteToken } : {};
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ message: string; user: User }>('/auth/login', {
@@ -456,6 +470,15 @@ export const api = {
     addStorageEmployee: (employeeNumber: string, fullName: string) => request<StorageEmployee>('/storage-locator/employees', { method: 'POST', body: JSON.stringify({ employeeNumber, fullName }) }),
     updateStorageEmployee: (id: number, payload: { employeeNumber: string; fullName: string; active: boolean }) => request<{ message: string }>(`/storage-locator/employees/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     deleteStorageEmployee: (id: number) => request<{ message: string }>(`/storage-locator/employees/${id}`, { method: 'DELETE' }),
+    getPartsSites: () => request<{ sites: PartsSite[] }>('/parts/sites'),
+    addPartsSite: (code: string, name: string) => request<PartsSite>('/parts/sites', { method: 'POST', body: JSON.stringify({ code, name }) }),
+    updatePartsSite: (id: number, payload: { code: string; name: string; active: boolean }) => request<{ message: string }>(`/parts/sites/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    deletePartsSite: (id: number) => request<{ message: string }>(`/parts/sites/${id}`, { method: 'DELETE' }),
+    getPartsMaster: (q?: string) => request<{ items: PartsMasterItem[] }>(`/parts/master${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+    addPartsMaster: (payload: { part_number: string; description: string; eee_code?: string | null; substitute_part?: string | null; serialized?: string }) => request<PartsMasterItem>('/parts/master', { method: 'POST', body: JSON.stringify(payload) }),
+    updatePartsMaster: (id: number, payload: { part_number: string; description: string; eee_code?: string | null; substitute_part?: string | null; serialized?: string }) => request<{ message: string }>(`/parts/master/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+    deletePartsMaster: (id: number) => request<{ message: string }>(`/parts/master/${id}`, { method: 'DELETE' }),
+    importPartsMaster: (items: { part_number: string; description: string; eee_code?: string | null; substitute_part?: string | null; serialized?: string }[]) => request<{ added: number; updated: number; count: number }>('/parts/master/import', { method: 'POST', body: JSON.stringify({ items }) }),
   },
 
     frontline: {
@@ -528,6 +551,43 @@ export const api = {
     lookup: (arNumber: string) => request<{ unit: StorageUnit | null; history: StorageMovement[] }>(`/storage-locator/units/${encodeURIComponent(arNumber)}`),
     checkIn: (payload: { employeeNumber: string; arNumber: string; family: string; status: string; cabinetNumber: number }) => request<{ message: string }>('/storage-locator/units/in', { method: 'POST', body: JSON.stringify(payload) }),
     checkOut: (payload: { employeeNumber: string; arNumber: string }) => request<{ message: string }>('/storage-locator/units/out', { method: 'POST', body: JSON.stringify(payload) }),
+  },
+
+  parts: {
+    verifySite: (code: string) => request<{ site: PartsSite; siteToken: string }>(`/parts/sites/verify?code=${encodeURIComponent(code)}`),
+    master: (q?: string, limit?: number) => request<{ items: PartsMasterItem[] }>(`/parts/master${q || limit ? `?${new URLSearchParams({ ...(q ? { q } : {}), ...(limit ? { limit: String(limit) } : {}) }).toString()}` : ''}`),
+    stock: (siteCode: string, q?: string, limit?: number) => requestFresh<{ stock: PartsUnit[]; summary: PartsStockSummary }>(`/parts/stock?siteCode=${encodeURIComponent(siteCode)}${q ? `&q=${encodeURIComponent(q)}` : ''}${limit ? `&limit=${limit}` : ''}`, { headers: siteHeaders() }),
+    partUnits: (siteCode: string, partNumber: string) => requestFresh<{ units: PartsUnit[] }>(`/parts/part-units?siteCode=${encodeURIComponent(siteCode)}&partNumber=${encodeURIComponent(partNumber)}`, { headers: siteHeaders() }),
+    stockParts: (siteCode: string) => request<{ parts: { part_number: string; description: string | null; date: string | null; serials: number }[] }>(`/parts/stock/parts?siteCode=${encodeURIComponent(siteCode)}`, { headers: siteHeaders() }),
+    lookup: (serial: string, siteCode: string) => requestFresh<{ unit: PartsUnit | null; history: PartsMovement[] }>(`/parts/lookup?serial=${encodeURIComponent(serial)}&siteCode=${encodeURIComponent(siteCode)}`, { headers: siteHeaders() }),
+    resolve: (params: { serial?: string; partNumber?: string; eee?: string; siteCode?: string }) => {
+      const query = new URLSearchParams();
+      if (params.serial) query.set('serial', params.serial);
+      if (params.partNumber) query.set('partNumber', params.partNumber);
+      if (params.eee) query.set('eee', params.eee);
+      if (params.siteCode) query.set('siteCode', params.siteCode);
+      return requestFresh<{ part: PartsMasterItem | null; unit: PartsUnit | null }>(`/parts/resolve?${query.toString()}`, { headers: siteHeaders() });
+    },
+    recent: (siteCode: string) => request<{ history: PartsMovement[] }>(`/parts/recent?siteCode=${encodeURIComponent(siteCode)}`, { headers: siteHeaders() }),
+    stockIn: (payload: { siteCode: string; partNumber: string; serial?: string; eee?: string; quantity?: number; occurredDate?: string }) => request<{ message: string }>('/parts/stock/in', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
+    stockOut: (payload: { siteCode: string; serial?: string; partNumber?: string; quantity?: number; reference: string; occurredDate?: string }) => request<{ message: string }>('/parts/stock/out', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
+    importIn: (siteCode: string, rows: { date: string; partNumber: string; serial: string }[]) => request<{ imported: number; failed: number; errors: { row: number; error: string }[] }>('/parts/import/in', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ siteCode, rows }) }),
+    importOut: (siteCode: string, rows: { date: string; serial: string; reference: string; partNumber: string }[]) => request<{ imported: number; failed: number; errors: { row: number; error: string }[] }>('/parts/import/out', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ siteCode, rows }) }),
+    downloadTemplate: async (kind: 'in' | 'out') => {
+      const res = await fetch(`${BASE}/parts/template/${kind}`, { credentials: 'include', headers: siteHeaders() });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to download template');
+      }
+      await saveBlob(await res.blob(), kind === 'in' ? 'parts-stock-in-template.xlsx' : 'parts-stock-out-template.xlsx');
+    },
+    sheetStatus: () => request<PartsSheetStatus>('/parts/sheets/status'),
+    sheetConnectUrl: () => `${BASE}/parts/sheets/connect`,
+    sheetDisconnect: () => request<{ message: string }>('/parts/sheets/disconnect', { method: 'DELETE' }),
+    sheetConfig: () => request<{ config: { spreadsheet_id: string; spreadsheet_name: string; sheet_name: string } | null }>('/parts/sheets/config'),
+    saveSheetConfig: (spreadsheetId: string, spreadsheetName: string, sheetName: string) => request<{ message: string }>('/parts/sheets/config', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, sheetName }) }),
+    sheetList: (spreadsheetId: string) => request<{ title: string; sheets: string[] }>(`/parts/sheets/list?spreadsheetId=${encodeURIComponent(spreadsheetId)}`),
+    retrySheet: () => request<{ synced: number; remaining: number }>('/parts/sheets/retry', { method: 'POST' }),
   },
 
   sessions: {

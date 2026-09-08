@@ -31,6 +31,8 @@ const loadAdminEngineersPage = () => import('./pages/admin/AdminEngineersPage');
 const loadAdminStorageLocatorPage = () => import('./pages/admin/AdminStorageLocatorPage');
 const loadEngineerEndorsementsPage = () => import('./pages/EngineerEndorsementsPage');
 const loadStorageLocatorPage = () => import('./pages/StorageLocatorPage');
+const loadPartsPage = () => import('./pages/PartsPage');
+const loadAdminPartsPage = () => import('./pages/admin/AdminPartsPage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
 const PcountIndexPage = lazy(loadPcountIndexPage);
@@ -48,8 +50,10 @@ const AdminEngineersPage = lazy(loadAdminEngineersPage);
 const AdminStorageLocatorPage = lazy(loadAdminStorageLocatorPage);
 const EngineerEndorsementsPage = lazy(loadEngineerEndorsementsPage);
 const StorageLocatorPage = lazy(loadStorageLocatorPage);
+const PartsPage = lazy(loadPartsPage);
+const AdminPartsPage = lazy(loadAdminPartsPage);
 
-const TOOL_PATHS = ['/pcount', '/rfpu', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator'];
+const TOOL_PATHS = ['/pcount', '/rfpu', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator', '/parts'];
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -112,6 +116,8 @@ function PrefetchCommonRoutes() {
         loadAdminStorageLocatorPage(),
         loadEngineerEndorsementsPage(),
         loadStorageLocatorPage(),
+        loadPartsPage(),
+        loadAdminPartsPage(),
       ]).catch(() => undefined);
 
       void api.myTools().catch(() => undefined);
@@ -198,6 +204,7 @@ export default function App() {
                 }
               />
               <Route path="/admin/storage-locator" element={<ProtectedRoute><AdminStorageLocatorPage /></ProtectedRoute>} />
+              <Route path="/admin/parts" element={<ProtectedRoute><AdminPartsPage /></ProtectedRoute>} />
               <Route
                 path="/pcount"
                 element={
@@ -289,6 +296,14 @@ export default function App() {
               <Route
                 path="/storage-locator"
                 element={<ProtectedRoute><StorageLocatorPage /></ProtectedRoute>}
+              />
+              <Route
+                path="/parts"
+                element={
+                  <ProtectedRoute>
+                    <PartsPage />
+                  </ProtectedRoute>
+                }
               />
             </Route>
           </Routes>
