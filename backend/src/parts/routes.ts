@@ -305,14 +305,24 @@ function parseMasterItem(raw: any): { part_number: string; description: string; 
   return { part_number, description, eee_code, substitute_part, serialized };
 }
 
+function searchTerms(query: string): string[] {
+  return query.trim().split(/\s+/).filter(Boolean).slice(0, 8);
+}
+
 router.get('/master', async (req, res) => {
   await ensurePartsTables();
   const q = value(req.query.q);
   const limit = Math.min(Math.max(Number(req.query.limit) || (q ? 200 : 1000), 1), 12000);
   const safeLimit = Number.isInteger(limit) ? limit : 1000;
   const pool = getDbPool();
-  const [rows] = q
-    ? await pool.query(`SELECT id, part_number, description, eee_code, substitute_part, serialized FROM parts_master WHERE part_number LIKE ? OR description LIKE ? OR eee_code LIKE ? ORDER BY part_number ASC LIMIT ${safeLimit}`, [`%${q}%`, `%${q}%`, `%${q}%`])
+  const terms = searchTerms(q);
+  const [rows] = terms.length
+    ? await pool.query(
+      `SELECT id, part_number, description, eee_code, substitute_part, serialized FROM parts_master
+       WHERE ${terms.map(() => '(part_number LIKE ? OR description LIKE ? OR eee_code LIKE ?)').join(' AND ')}
+       ORDER BY part_number ASC LIMIT ${safeLimit}`,
+      terms.flatMap((term) => [`%${term}%`, `%${term}%`, `%${term}%`]),
+    )
     : await pool.query(`SELECT id, part_number, description, eee_code, substitute_part, serialized FROM parts_master ORDER BY part_number ASC LIMIT ${safeLimit}`);
   res.json({ items: rows });
 });
@@ -477,11 +487,14 @@ router.get('/stock', async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2000);
   const safeLimit = Number.isInteger(limit) ? limit : 500;
   const pool = getDbPool();
-  const filter = q ? 'AND (u.part_number LIKE ? OR u.serial LIKE ? OR m.description LIKE ?)' : '';
+  const terms = searchTerms(q);
+  const filter = terms.length
+    ? `AND ${terms.map(() => '(u.part_number LIKE ? OR u.serial LIKE ? OR m.description LIKE ?)').join(' AND ')}`
+    : '';
   const params: unknown[] = [];
   let siteFilter = '';
   if (siteCode && siteCode !== 'ALL') { siteFilter = 'AND s.code = ?'; params.push(siteCode); }
-  if (q) params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  for (const term of terms) params.push(`%${term}%`, `%${term}%`, `%${term}%`);
   const [rows] = await pool.query(
     `SELECT u.id, u.part_number, m.description, u.serial, u.quantity, u.status, u.reference, u.occurred_date, s.code AS site_code, s.name AS site_name
      FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id LEFT JOIN parts_master m ON m.part_number = u.part_number

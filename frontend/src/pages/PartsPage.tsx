@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { api, setPartsSiteToken, type PartsMasterItem, type PartsStockSummary, type PartsSite, type PartsUnit } from '../lib/api';
+import { api, setPartsSiteToken, type PartsMasterItem, type PartsMovement, type PartsSite, type PartsUnit } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { parseStockInWorkbook, parseStockOutWorkbook, todayIso } from '../lib/parts';
 
 const dateOnly = (v: string | null | undefined) => (v ? v.slice(0, 10) : '—');
+const priorityPartFamilies = ['display', 'battery'] as const;
+const searchCountsKey = 'mspi.parts.search-counts';
+
+function prioritizeSuggestions(items: PartsMasterItem[]): PartsMasterItem[] {
+  return [...items].sort((a, b) => {
+    const rank = (item: PartsMasterItem) => {
+      const description = item.description.trim().toLowerCase();
+      const firstDescriptionTerm = description.split(/[,:/\-]/, 1)[0].trim();
+      const index = priorityPartFamilies.findIndex((family) => firstDescriptionTerm === family);
+      return index === -1 ? priorityPartFamilies.length : index;
+    };
+    return rank(a) - rank(b) || a.part_number.localeCompare(b.part_number);
+  });
+}
 
 function PartResultCard({ part, nonSerialized }: { part: PartsMasterItem; nonSerialized: boolean }) {
   return (
@@ -41,8 +55,9 @@ export default function PartsPage() {
   const [reference, setReference] = useState('');
   const [date, setDate] = useState(todayIso());
   const [stock, setStock] = useState<PartsUnit[]>([]);
-  const [summary, setSummary] = useState<PartsStockSummary>({ total: 0, units: 0, out_total: 0, parts: 0 });
-  const [search, setSearch] = useState('');
+  const [movementHistory, setMovementHistory] = useState<PartsMovement[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const [partUnits, setPartUnits] = useState<PartsUnit[]>([]);
   const [partUnitsBusy, setPartUnitsBusy] = useState(false);
@@ -53,6 +68,11 @@ export default function PartsPage() {
   const [fieldErrors, setFieldErrors] = useState<{ scan?: string; serial?: string; unitSerial?: string; reference?: string }>({});
 
   const clearAllNotices = () => { setError(''); setMessage(''); setFieldErrors({}); };
+  useEffect(() => {
+    if (!message && !error) return;
+    const timer = window.setTimeout(clearAllNotices, 5000);
+    return () => window.clearTimeout(timer);
+  }, [message, error]);
   const fieldBorder = (hasError: boolean) => (hasError ? 'border-[#e11d48]' : 'border-[#d2d2d7]');
   const setFieldError = (field: 'scan' | 'serial' | 'unitSerial' | 'reference', message: string) => {
     setError('');
@@ -69,7 +89,9 @@ export default function PartsPage() {
   const [findBusy, setFindBusy] = useState(false);
   const [showAllParts, setShowAllParts] = useState(false);
   const [suggestions, setSuggestions] = useState<PartsMasterItem[]>([]);
+  const [suggestionSource, setSuggestionSource] = useState<'stock' | 'master'>('master');
   const [showSuggest, setShowSuggest] = useState(false);
+  const [frequentSearches, setFrequentSearches] = useState<string[]>([]);
   const scanRef = useRef<HTMLInputElement>(null);
   const fileInRef = useRef<HTMLInputElement>(null);
   const fileOutRef = useRef<HTMLInputElement>(null);
@@ -78,6 +100,25 @@ export default function PartsPage() {
 
   // Module-level token must be current before any data fetch fires.
   setPartsSiteToken(siteToken);
+
+  useEffect(() => {
+    try {
+      const counts = JSON.parse(localStorage.getItem(searchCountsKey) || '{}') as Record<string, number>;
+      setFrequentSearches(Object.entries(counts).sort(([, a], [, b]) => b - a).slice(0, 6).map(([value]) => value));
+    } catch { /* Ignore unavailable or malformed browser storage. */ }
+  }, []);
+
+  const rememberSearch = (rawValue: string) => {
+    const value = rawValue.trim().toUpperCase();
+    if (!value) return;
+    setFrequentSearches((current) => {
+      let counts: Record<string, number> = {};
+      try { counts = JSON.parse(localStorage.getItem(searchCountsKey) || '{}') as Record<string, number>; } catch { /* Start fresh. */ }
+      counts[value] = (counts[value] || 0) + 1;
+      try { localStorage.setItem(searchCountsKey, JSON.stringify(counts)); } catch { /* Ignore storage failures. */ }
+      return Object.entries(counts).sort(([, a], [, b]) => b - a).slice(0, 6).map(([item]) => item);
+    });
+  };
 
   // Find serial results grouped to one row per unique part (totals only —
   // serials live in the right workbench when a row is tapped).
@@ -103,22 +144,24 @@ export default function PartsPage() {
     finally { setBusy(false); }
   };
 
-  const loadStock = async (code: string, q?: string) => {
+  const loadStock = async (code: string) => {
     try {
-      const result = await api.parts.stock(code, q);
-      setStock(result.stock); setSummary(result.summary);
+      const result = await api.parts.stock(code);
+      setStock(result.stock);
+    } catch (err) { setError((err as Error).message); }
+  };
+
+  const loadMovementHistory = async (code: string) => {
+    try {
+      setMovementHistory((await api.parts.recent(code)).history);
     } catch (err) { setError((err as Error).message); }
   };
 
   useEffect(() => {
     if (!site) return;
     void loadStock(site.code);
+    void loadMovementHistory(site.code);
   }, [site]);
-  useEffect(() => {
-    if (!site) return;
-    const t = setTimeout(() => void loadStock(site.code, search.trim() || undefined), 300);
-    return () => clearTimeout(t);
-  }, [search, site]);
   useEffect(() => {
     if (site) scanRef.current?.focus();
   }, [site, tab]);
@@ -160,6 +203,7 @@ export default function PartsPage() {
   // movement tabs. This keeps read-only results from racing movement state.
   const runGlobalSearch = async () => {
     if (!scan.trim() || globalSearchBusy.current || findBusy || resolving) return;
+    rememberSearch(scan);
     globalSearchBusy.current = true;
     try {
       if (tab === 'find') await searchFind();
@@ -188,8 +232,18 @@ export default function PartsPage() {
 
   const pickSuggestion = (item: PartsMasterItem) => {
     setScan(item.part_number);
+    rememberSearch(item.part_number);
     setShowSuggest(false);
-    void searchFind(item.part_number, findView);
+    if (tab === 'find') void searchFind(item.part_number, findView);
+    else void doResolve(item.part_number, 'scan');
+  };
+
+  const pickSavedSearch = (value: string) => {
+    setScan(value);
+    rememberSearch(value);
+    setShowSuggest(false);
+    if (tab === 'find') void searchFind(value, findView);
+    else void doResolve(value, 'scan');
   };
 
   const openPartSerials = (item: { part_number: string }) => {
@@ -209,21 +263,52 @@ export default function PartsPage() {
     finally { setFindBusy(false); }
   };
 
-  // Smart suggestions while typing in Find — matches part number, description, EEE.
+  // Smart suggestions while typing — matches part number, description, and EEE.
   useEffect(() => {
-    if (!site || tab !== 'find') return;
+    if (!site || tab !== 'find' || unitSerialMode) {
+      setSuggestions([]);
+      return;
+    }
     const q = scan.trim();
-    if (q.length < 2) { setSuggestions([]); return; }
+    if (q.length < 2) { setSuggestions([]); setSuggestionSource('master'); return; }
     const t = setTimeout(() => {
-      void api.parts.master(q, 8).then((r) => setSuggestions(r.items)).catch(() => undefined);
+      const stockItems = [...new Map(
+        stock
+          .filter((item) => q.toLowerCase().split(/\s+/).every((term) => `${item.part_number} ${item.description || ''} ${item.serial || ''}`.toLowerCase().includes(term)))
+          .map((item) => [item.part_number, {
+            id: item.id,
+            part_number: item.part_number,
+            description: item.description || '',
+            eee_code: null,
+            substitute_part: null,
+            serialized: item.serial ? 'Y' : 'N',
+          } as PartsMasterItem]),
+      ).values()];
+      if (stockItems.length) {
+        setSuggestionSource('stock');
+        setSuggestions(prioritizeSuggestions(stockItems).slice(0, 8));
+        return;
+      }
+      void api.parts.master(q, 50)
+        .then((r) => { setSuggestionSource('master'); setSuggestions(prioritizeSuggestions(r.items).slice(0, 8)); })
+        .catch(() => { setSuggestionSource('master'); setSuggestions([]); });
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scan, tab, site]);
+  }, [scan, site, tab, unitSerialMode]);
+
+  // Movement tabs map scans automatically; Find remains the explicit-search tab.
+  useEffect(() => {
+    if (!site || tab === 'find' || unitSerialMode || !scan.trim()) return;
+    const timer = setTimeout(() => void doResolve(scan, 'scan'), 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scan, site, tab, unitSerialMode]);
 
   const refresh = async () => {
     if (!site) return;
-    await loadStock(site.code, search.trim() || undefined);
+    await loadStock(site.code);
+    await loadMovementHistory(site.code);
     if (selectedPart) await loadPartUnits(selectedPart);
   };
 
@@ -310,6 +395,27 @@ export default function PartsPage() {
   };
 
   const nonSerialized = part && String(part.serialized).toUpperCase() === 'N';
+  const stockInReady = tab === 'in' && Boolean(part) && (Boolean(nonSerialized) || Boolean(unitSerial.trim() || (!unitSerialMode && scan.trim())));
+  const stockOutReady = tab === 'out' && Boolean(serial.trim());
+  const movementReady = stockInReady || stockOutReady;
+  const movementAction = tab === 'in' ? submitIn : submitOut;
+  const tabMovements = movementHistory.filter((movement) => movement.type === (tab === 'in' ? 'IN' : 'OUT'));
+  const filteredHistory = tabMovements.filter((movement) => {
+    const query = historySearch.trim().toLowerCase();
+    if (!query) return true;
+    return `${movement.part_number} ${movement.serial || ''} ${movement.reference || ''} ${movement.occurred_date}`.toLowerCase().includes(query);
+  });
+  const stockGroups = useMemo(() => {
+    const groups = new Map<string, { partNumber: string; description: string | null | undefined; serials: number; quantity: number; date: string | null | undefined }>();
+    for (const unit of stock) {
+      const group = groups.get(unit.part_number) || { partNumber: unit.part_number, description: unit.description, serials: 0, quantity: 0, date: unit.occurred_date };
+      group.serials += unit.serial ? 1 : 0;
+      group.quantity += unit.quantity;
+      if (!group.date || (unit.occurred_date && unit.occurred_date > group.date)) group.date = unit.occurred_date;
+      groups.set(unit.part_number, group);
+    }
+    return [...groups.values()].sort((a, b) => a.partNumber.localeCompare(b.partNumber));
+  }, [stock]);
   const changeSite = () => { setSite(null); setSiteCode(''); setSiteToken(''); setPartsSiteToken(''); setCodeInput(''); setStock([]); setSelectedPart(null); setPartUnits([]); setGateDismissed(false); };
   const browseAll = () => {
     setSite({ id: 0, code: 'ALL', name: 'All sites', active: 1 });
@@ -321,13 +427,17 @@ export default function PartsPage() {
 
   return (
     <div className="min-h-[calc(100vh-128px)] bg-[#f4f3f6]">
-      <div className="w-full px-4 py-2 sm:px-6">
+      <div className="mx-auto w-full max-w-[1920px] px-4 py-3 sm:px-8 lg:px-10 xl:px-12">
         {(message || error) && (
-          <div role={error ? 'alert' : 'status'} className={`mb-4 rounded-xl px-4 py-3 text-[13px] ${error ? 'bg-[#fffafa] text-[#9b1c1c]' : 'bg-[#fbfefc] text-[#27633a]'}`}>
-            {error || message}
+          <div role={error ? 'alert' : 'status'} aria-live="polite" className="fixed right-5 top-16 z-40 flex w-[min(420px,calc(100vw-2rem))] items-start gap-3 rounded-2xl border border-black/10 bg-white/95 px-3.5 py-3 shadow-[0_12px_40px_rgba(0,0,0,.14)] backdrop-blur-xl">
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${error ? 'bg-[#fff1f2] text-[#be123c]' : 'bg-[#ecfdf3] text-[#166534]'}`} aria-hidden="true">
+              {error ? '!' : '✓'}
+            </span>
+            <span className={`min-w-0 flex-1 pt-1 text-[12px] leading-5 ${error ? 'text-[#9b1c1c]' : 'text-[#1d1d1f]'}`}>{error || message}</span>
+            <button type="button" aria-label="Dismiss notification" onClick={clearAllNotices} className="rounded-full px-1 text-[18px] leading-5 text-[#86868b] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]">×</button>
           </div>
         )}
-        <div className="grid gap-4 lg:grid-cols-[minmax(420px,560px)_minmax(0,1fr)]">
+        <div className="grid gap-5 lg:grid-cols-2">
           <section className="rounded-2xl bg-white p-4 shadow-[0_8px_28px_rgba(0,0,0,.03)]">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -391,14 +501,23 @@ export default function PartsPage() {
                     setShowSuggest(true);
                     setFieldErrors((current) => ({ ...current, scan: undefined }));
                   }}
-                  onFocus={() => setShowSuggest(true)}
+                  onFocus={() => {
+                    if (!scan.trim()) {
+                      setSuggestions([]);
+                      setSuggestionSource('master');
+                    }
+                    setShowSuggest(true);
+                  }}
                   onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void runGlobalSearch(); } }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (tab === 'find') void runGlobalSearch(); else void doResolve(scan, 'scan'); } }}
                   placeholder="Search serial or part…"
                   className={`mt-1 h-12 w-full rounded-xl border bg-white px-3 text-[15px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.scan))}`} />
               </label>
-              {showSuggest && suggestions.length > 0 && (
+              {showSuggest && tab === 'find' && suggestions.length > 0 && (
                 <div className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-[#e5e5e7] bg-white shadow-[0_12px_32px_rgba(0,0,0,.10)]">
+                  <p className="border-b border-[#f0f0f2] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[#86868b]">
+                    {suggestionSource === 'stock' ? 'In-stock suggestions' : 'Suggestions'}
+                  </p>
                   {suggestions.map((s) => (
                     <button key={s.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pickSuggestion(s)}
                       className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-[#f7f7f8]">
@@ -411,12 +530,29 @@ export default function PartsPage() {
                   ))}
                 </div>
               )}
+              {showSuggest && tab === 'find' && !scan.trim() && !unitSerialMode && frequentSearches.length > 0 && (
+                <div className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-[#e5e5e7] bg-white p-3 shadow-[0_12px_32px_rgba(0,0,0,.10)]">
+                  {frequentSearches.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-[#86868b]">Most searched</p>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {frequentSearches.map((value) => (
+                          <button key={`frequent-${value}`} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pickSavedSearch(value)}
+                            className="rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] hover:bg-[#e5e5e7]">
+                            {value}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {fieldErrors.scan && <p role="alert" className="mt-1.5 text-[11px] leading-4 text-[#b91c1c]">{fieldErrors.scan}</p>}
             {(resolving || findBusy) && <p className="mt-1.5 text-[11px] text-[#6e6e73]">{findBusy ? 'Searching…' : 'Checking…'}</p>}
-            <button type="button" onClick={() => void runGlobalSearch()} disabled={findBusy || resolving || !scan.trim()}
+            <button type="button" onClick={() => void (tab === 'find' ? runGlobalSearch() : movementAction())} disabled={busy || findBusy || resolving || (tab === 'find' ? !scan.trim() : !movementReady)}
               className="mt-3 w-full rounded-2xl bg-[#1d1d1f] py-2.5 text-[12px] font-semibold text-white disabled:opacity-40">
-              {findBusy ? 'Searching…' : 'Search'}
+              {busy ? 'Saving…' : findBusy || resolving ? 'Checking…' : tab === 'in' ? 'Stock IN' : tab === 'out' ? 'Stock OUT' : 'Search'}
             </button>
             <div className="mt-4 border-b border-[#e5e5e7]">
               <div className="flex gap-5" role="tablist" aria-label="Parts operations">
@@ -461,7 +597,7 @@ export default function PartsPage() {
                 </p>
               )}
               {findView === 'serials' && findSerialGroups.length > 0 && (
-                <div className="mt-2 overflow-x-auto rounded-xl border border-[#e5e5e7]">
+                  <div className="mt-2 overflow-x-auto rounded-xl border border-[#e5e5e7]">
                   <table className="w-full min-w-[520px] text-left text-[12px]">
                     <thead>
                       <tr className="bg-[#f7f7f8] text-[10px] uppercase tracking-wider text-[#6e6e73]">
@@ -490,6 +626,7 @@ export default function PartsPage() {
                         <th className="px-3 py-2 font-semibold">Date</th>
                         <th className="px-3 py-2 font-semibold">Part</th>
                         <th className="px-3 py-2 font-semibold">Description</th>
+                        <th className="px-3 py-2 font-semibold">Serials</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -498,6 +635,7 @@ export default function PartsPage() {
                           <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{dateOnly(m.date)}</td>
                           <td className="whitespace-nowrap px-3 py-2 font-semibold text-[#1d1d1f]">{m.part_number}</td>
                           <td className="px-3 py-2 text-[#3c3c43]">{m.description || '—'}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{m.serials.toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -543,6 +681,9 @@ export default function PartsPage() {
             <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
               <h3 className="text-[13px] font-semibold text-[#1d1d1f]">Stock In</h3>
               <p className="mt-0.5 text-[11px] text-[#6e6e73]">This writes to inventory + sheet log.</p>
+              <button type="button" onClick={() => { setHistorySearch(''); setHistoryOpen(true); }} className="mt-3 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] shadow-sm">
+                View Stock In history ({tabMovements.length})
+              </button>
               <div className="mt-4 space-y-3">
                 {part ? <PartResultCard part={part} nonSerialized={Boolean(nonSerialized)} /> : (
                   <p className="rounded-xl border border-dashed border-[#d2d2d7] px-3 py-3 text-center text-[12px] text-[#6e6e73]">Search above to fill the part automatically.</p>
@@ -559,10 +700,6 @@ export default function PartsPage() {
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                     className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
-                <button type="button" onClick={() => void submitIn()} disabled={busy}
-                  className="w-full rounded-xl bg-[#1d1d1f] py-3 text-[12px] font-semibold text-white disabled:opacity-40">
-                  {busy ? 'Saving…' : 'Stock IN'}
-                </button>
               </div>
             </div>
             )}
@@ -571,6 +708,9 @@ export default function PartsPage() {
             <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
               <h3 className="text-[13px] font-semibold text-[#1d1d1f]">Stock Out</h3>
               <p className="mt-0.5 text-[11px] text-[#6e6e73]">This writes to inventory + sheet log.</p>
+              <button type="button" onClick={() => { setHistorySearch(''); setHistoryOpen(true); }} className="mt-3 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] shadow-sm">
+                View Stock Out history ({tabMovements.length})
+              </button>
               <div className="mt-4 space-y-3">
                 {part ? <PartResultCard part={part} nonSerialized={Boolean(nonSerialized)} /> : (
                   <p className="rounded-xl border border-dashed border-[#d2d2d7] px-3 py-3 text-center text-[12px] text-[#6e6e73]">Search above to fill the part automatically.</p>
@@ -578,6 +718,7 @@ export default function PartsPage() {
                 {fieldErrors.serial && <p role="alert" className="text-[11px] leading-4 text-[#b91c1c]">{fieldErrors.serial}</p>}
                 <label className="block text-[11px] font-semibold text-[#3c3c43]">Reference number (repair / AR — required)
                   <input value={reference} onChange={(e) => { setReference(e.target.value); setFieldErrors((current) => ({ ...current, reference: undefined })); }} placeholder="e.g. AR-10234"
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (stockOutReady && reference.trim()) void submitOut(); } }}
                     className={`mt-1 h-11 w-full rounded-xl border bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.reference))}`} />
                 </label>
                 {fieldErrors.reference && <p role="alert" className="text-[11px] leading-4 text-[#b91c1c]">{fieldErrors.reference}</p>}
@@ -585,10 +726,6 @@ export default function PartsPage() {
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                     className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
-                <button type="button" onClick={() => void submitOut()} disabled={busy}
-                  className="w-full rounded-xl bg-[#1d1d1f] py-3 text-[12px] font-semibold text-white disabled:opacity-40">
-                  {busy ? 'Saving…' : 'Stock OUT'}
-                </button>
               </div>
             </div>
             )}
@@ -615,18 +752,6 @@ export default function PartsPage() {
           </section>
 
           <section className="h-full overflow-y-auto rounded-2xl bg-white p-4">
-            <div className="flex flex-wrap gap-2">
-              {[
-                { label: 'Parts', value: summary.parts },
-                { label: 'In stock', value: summary.units },
-                { label: 'Out', value: summary.out_total },
-              ].map((s) => (
-                <div key={s.label} className="min-w-[96px] flex-1 rounded-xl bg-[#f7f7f8] px-3 py-2.5">
-                  <p className="text-[20px] font-semibold tracking-tight text-[#1d1d1f]">{Number(s.value).toLocaleString()}</p>
-                  <p className="text-[11px] text-[#6e6e73]">{s.label}</p>
-                </div>
-              ))}
-            </div>
             {selectedPart ? (
               <>
                 <div className="mt-4 flex items-start justify-between gap-3">
@@ -682,25 +807,64 @@ export default function PartsPage() {
                 <div className="mt-4 flex items-center justify-between gap-3">
                   <h2 className="text-[15px] font-semibold text-[#1d1d1f]">{site ? `${site.code} stock` : 'Site stock'}</h2>
                 </div>
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search part or serial"
-                  className="mt-3 h-9 w-full rounded-full border border-[#d2d2d7] bg-[#f5f5f7] px-4 text-[13px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 <div className="mt-4 space-y-2">
-                  {stock.map((u) => (
-                    <button key={u.id} type="button" onClick={() => openPartWorkbench(u.part_number)} className="block w-full rounded-xl bg-[#f7f7f8] px-3 py-2.5 text-left">
+                  {stockGroups.map((u) => (
+                    <button key={u.partNumber} type="button" onClick={() => openPartWorkbench(u.partNumber)} className="block w-full rounded-xl bg-[#f7f7f8] px-3 py-2.5 text-left">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] font-semibold text-[#1d1d1f]">{u.serial || `${u.quantity} × ${u.part_number}`}</span>
-                        <span className="text-[10px] text-[#86868b]">{dateOnly(u.occurred_date)}</span>
+                        <span className="text-[12px] font-semibold text-[#1d1d1f]">{u.partNumber}</span>
+                        <span className="text-[10px] text-[#86868b]">{dateOnly(u.date)}</span>
                       </div>
-                      <p className="mt-0.5 text-[11px] text-[#6e6e73]">{u.part_number}{u.description ? ` · ${u.description}` : ''}</p>
+                      <p className="mt-0.5 text-[11px] text-[#6e6e73]">{u.description || '—'} · {u.serials ? `${u.serials.toLocaleString()} serial${u.serials === 1 ? '' : 's'}` : `${u.quantity.toLocaleString()} in stock`}</p>
                     </button>
                   ))}
-                  {!stock.length && <p className="py-6 text-center text-[12px] text-[#6e6e73]">No stock found.</p>}
+                  {!stockGroups.length && <p className="py-6 text-center text-[12px] text-[#6e6e73]">No stock found.</p>}
                 </div>
               </>
             )}
           </section>
         </div>
       </div>
+
+      {historyOpen && tab !== 'find' && (
+        <div className="fixed inset-0 z-50 bg-[#1d1d1f]/20" role="dialog" aria-modal="true" aria-labelledby="parts-history-title">
+          <button type="button" aria-label="Close history" onClick={() => setHistoryOpen(false)} className="absolute inset-0 h-full w-full cursor-default" />
+          <aside className="absolute right-0 top-0 flex h-full w-[min(560px,100vw)] flex-col border-l border-[#e5e5e7] bg-white shadow-[-12px_0_40px_rgba(0,0,0,.12)]">
+            <div className="flex items-start justify-between gap-4 border-b border-[#e5e5e7] px-5 py-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#86868b]">{site?.code}</p>
+                <h2 id="parts-history-title" className="mt-1 text-[17px] font-semibold text-[#1d1d1f]">Stock {tab === 'in' ? 'In' : 'Out'} history</h2>
+                <p className="mt-1 text-[11px] text-[#6e6e73]">{tabMovements.length} movement{tabMovements.length === 1 ? '' : 's'}</p>
+              </div>
+              <button type="button" aria-label="Close history" onClick={() => setHistoryOpen(false)} className="rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[16px] leading-5 text-[#6e6e73]">×</button>
+            </div>
+            <div className="border-b border-[#e5e5e7] p-4">
+              <input autoFocus value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search part, serial, reference, or date"
+                className="h-10 w-full rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[13px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {filteredHistory.length ? (
+                <div className="space-y-2">
+                  {filteredHistory.map((movement) => (
+                    <div key={movement.id} className="rounded-xl border border-[#e5e5e7] bg-[#f7f7f8] px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[12px] font-semibold text-[#1d1d1f]">{movement.part_number}</span>
+                        <span className="text-[10px] text-[#6e6e73]">{dateOnly(movement.occurred_date)}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[#6e6e73]">
+                        <span>{movement.serial || `${movement.quantity.toLocaleString()} unit${movement.quantity === 1 ? '' : 's'}`}</span>
+                        {tab === 'out' && <span>Ref: {movement.reference || '—'}</span>}
+                        <span>Qty: {movement.quantity.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-8 text-center text-[12px] text-[#6e6e73]">No matching movements.</p>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
 
       {!site && !gateDismissed && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1d1d1f]/25 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="parts-site-title">
