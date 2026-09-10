@@ -1001,7 +1001,7 @@ export default function PartsPage() {
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                     className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
-                <button type="button" onClick={() => void submitOut()} disabled={busy || resolving || !stockOutReady}
+                <button type="button" onClick={() => void submitOut()} disabled={busy || resolving || !stockOutReady || Boolean(masterMissing && !part && masterMissingPartial)}
                   className="w-full rounded-2xl bg-[#1d1d1f] py-2.5 text-[12px] font-semibold text-white disabled:opacity-40">
                   {busy ? 'Saving…' : resolving ? 'Checking…' : 'Stock OUT'}
                 </button>
