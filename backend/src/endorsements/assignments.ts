@@ -48,6 +48,25 @@ export async function assignNext(input: AssignmentInput, actorUserId: number, ex
     return { message: `AR ${record.arNumber} endorsed to ${engineer.full_name} (${record.productDivision}).`, endorsementId, engineer: { userId: engineer.user_id, name: engineer.full_name }, record };
   });
 }
+export async function assignEngineer(input: AssignmentInput, engineerName: unknown, actorUserId: number) {
+  const name = String(engineerName ?? '').trim();
+  if (!name || name.length > 150) throw new QueueError(400, 'Choose an available Engineer.');
+  return withQueue(async (connection, date) => {
+    const record = await lookupAssignment(connection, input);
+    const queue = await divisionQueue(connection, date, record.productDivision);
+    // Same freshness guarantee as next-assign, without requiring the turn.
+    if (typeof input.queueToken !== 'string' || input.queueToken !== queue.token) throw new QueueError(409, 'The queue changed. Review the Engineers again before confirming.');
+    const engineer = queue.engineers.find((row) => row.full_name === name);
+    if (!engineer) throw new QueueError(409, 'Choose an Engineer who is available today.');
+    const [result] = await connection.execute(`INSERT INTO engineer_endorsements
+      (ar_number, frontline_record_id, cso_user_id, engineer_user_id, engineer_name, device_model, issue, product_division)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [record.arNumber, record.frontlineRecordId, actorUserId, engineer.user_id, engineer.full_name, record.deviceModel, record.issue, record.productDivision]);
+    const endorsementId = Number((result as { insertId: number }).insertId);
+    // A manual pick still records a turn, so the rotation rebalances after it.
+    await recordTurn(connection, date, record.productDivision, engineer.id, endorsementId, actorUserId);
+    return { message: `AR ${record.arNumber} endorsed to ${engineer.full_name} (${record.productDivision}).`, endorsementId, engineer: { userId: engineer.user_id, name: engineer.full_name }, record };
+  });
+}
 export async function skipNext(division: unknown, reason: unknown, token: unknown, actorUserId: number, ownUserId?: number) {
   if (!DIVISIONS.includes(division as Division)) throw new QueueError(400, 'Choose a valid division.');
   const note = String(reason ?? '').trim();

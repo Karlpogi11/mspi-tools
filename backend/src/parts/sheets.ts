@@ -18,10 +18,13 @@ function config() {
     process.env.NODE_ENV === 'production'
       ? 'https://tools.mspi.io/api/parts/sheets/callback'
       : 'http://localhost:3001/api/parts/sheets/callback';
+  // NOTE: must NOT fall back to GOOGLE_SHEETS_REDIRECT_URI — that var belongs
+  // to Frontline Monitor and sharing it sent Parts OAuth codes to Frontline's
+  // callback (connecting the wrong tool and landing on the wrong page).
   return {
     clientId: process.env.GOOGLE_CLIENT_ID!,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    redirectUri: process.env.GOOGLE_SHEETS_REDIRECT_URI || defaultRedirectUri,
+    redirectUri: process.env.PARTS_GOOGLE_SHEETS_REDIRECT_URI || defaultRedirectUri,
     key: crypto.createHash('sha256').update(process.env.JWT_SECRET!).digest(),
   };
 }
@@ -173,6 +176,47 @@ export interface SheetLogRow {
   actor: string;
 }
 
+const SHEET_HEADERS = ['Timestamp', 'Site Code', 'Site Name', 'Type', 'Date', 'Part Number', 'Description', 'Serial', 'Reference', 'Quantity', 'Actor'];
+const headerEnsuredAt = new Map<string, number>();
+const HEADER_TTL_MS = 60 * 60_000;
+
+/** Sheet Timestamp as `YYYY-MM-DD HH:mm:ss` in Asia/Manila — sortable,
+ * human-readable, and parsed by Sheets as a datetime (unlike ISO `Z`). */
+function sheetTimestamp(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`;
+}
+
+/** Create the header row when the log sheet is still empty. Only fills a
+ * fully empty A1:K1 — never overwrites existing content. Cached per sheet. */
+async function ensureSheetHeader(token: string, spreadsheetId: string, sheetName: string): Promise<void> {
+  const key = `${spreadsheetId}\t${sheetName}`;
+  const at = headerEnsuredAt.get(key);
+  if (at && Date.now() - at < HEADER_TTL_MS) return;
+  const range = `${encodeURIComponent(sheetName)}!A1:K1`;
+  const current = await google<{ values?: string[][] }>(token, `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${range}`);
+  const firstRow = current.values?.[0] || [];
+  if (!firstRow.some((cell) => String(cell ?? '').trim() !== '')) {
+    await google(token, `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${range}?valueInputOption=RAW`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [SHEET_HEADERS] }),
+    });
+  }
+  headerEnsuredAt.set(key, Date.now());
+}
+
 /** Append one raw log row. Never throws — callers treat failure as unsynced. */
 export async function appendSheetRow(userId: number, row: SheetLogRow): Promise<boolean> {
   try {
@@ -181,6 +225,7 @@ export async function appendSheetRow(userId: number, row: SheetLogRow): Promise<
     const connection = await connectionFor(cfg.updated_by || userId);
     if (!connection) return false;
     const token = await accessTokenFor(connection);
+    try { await ensureSheetHeader(token, cfg.spreadsheet_id, cfg.sheet_name); } catch { /* header is best-effort; the row append below still proceeds */ }
     await google(
       token,
       `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cfg.spreadsheet_id)}/values/${encodeURIComponent(cfg.sheet_name)}!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
@@ -189,7 +234,7 @@ export async function appendSheetRow(userId: number, row: SheetLogRow): Promise<
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           values: [[
-            new Date().toISOString(),
+            sheetTimestamp(),
             row.siteCode,
             row.siteName,
             row.type,

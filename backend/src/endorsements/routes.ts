@@ -4,7 +4,7 @@ import { authenticateToken } from '../auth.js';
 import { writeAuditLog } from '../db/audit.js';
 import { ensureFrontlineTables } from '../frontline/store.js';
 import { QueueError, availableQueues, dayBounds, ensureQueueTables, lockDay, readQueues, resolveDivision, todayManila, withQueue } from './queue.js';
-import { assignNext, changeDeviceModel, changeEngineer, previewAssignment, removeEndorsement, reorderQueue, skipNext } from './assignments.js';
+import { assignEngineer, assignNext, changeDeviceModel, changeEngineer, previewAssignment, removeEndorsement, reorderQueue, skipNext } from './assignments.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -266,8 +266,11 @@ router.put('/calendar-order', async (req, res) => {
 
 router.post('/', queueRoute(async (req, res) => {
   if (!canEditCalendar(req)) { forbidden(res); return; }
-  const result = await assignNext(req.body || {}, req.user!.userId);
-  void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsed', resourceType: 'engineer_endorsement', resourceId: result.endorsementId, metadata: { engineer: result.engineer.name, division: result.record.productDivision } });
+  const chosen = text(req.body?.engineerName);
+  const result = chosen
+    ? await assignEngineer(req.body || {}, chosen, req.user!.userId)
+    : await assignNext(req.body || {}, req.user!.userId);
+  void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsed', resourceType: 'engineer_endorsement', resourceId: result.endorsementId, metadata: { engineer: result.engineer.name, division: result.record.productDivision, manualPick: Boolean(chosen) } });
   res.status(201).json(result);
 }));
 

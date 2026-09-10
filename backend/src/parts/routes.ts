@@ -327,8 +327,33 @@ router.get('/master', async (req, res) => {
   res.json({ items: rows });
 });
 
-router.post('/master', requireAdmin, async (req, res) => {
+/**
+ * Podium quick-add: any authenticated user may CREATE a missing master entry
+ * (create-only — never overwrites an existing row, so podium staff can't
+ * clobber admin catalog data). Edit/delete/import stay admin-only.
+ */
+router.post('/master/ensure', async (req, res) => {
   const item = parseMasterItem(req.body);
+  if (!item) { bad(res, 'Part number and description are required to add this part.'); return; }
+  await ensurePartsTables();
+  const [existing] = await getDbPool().query('SELECT id, part_number, description, eee_code, substitute_part, serialized FROM parts_master WHERE part_number = ? LIMIT 1', [item.part_number]);
+  const found = (existing as ResolvedPart[])[0];
+  if (found) { res.json({ item: found, created: false }); return; }
+  try {
+    const [result] = await getDbPool().execute('INSERT INTO parts_master (part_number, description, eee_code, substitute_part, serialized, created_by) VALUES (?, ?, ?, ?, ?, ?)', [item.part_number, item.description, item.eee_code, item.substitute_part, item.serialized, req.user!.userId]);
+    invalidateEeeIndex();
+    res.status(201).json({ item: { id: Number((result as { insertId: number }).insertId), ...item }, created: true });
+  } catch (error) {
+    if (String((error as Error).message).includes('Duplicate')) {
+      const [retry] = await getDbPool().query('SELECT id, part_number, description, eee_code, substitute_part, serialized FROM parts_master WHERE part_number = ? LIMIT 1', [item.part_number]);
+      res.json({ item: (retry as ResolvedPart[])[0], created: false });
+      return;
+    }
+    throw error;
+  }
+});
+
+router.post('/master', requireAdmin, async (req, res) => {  const item = parseMasterItem(req.body);
   if (!item) { bad(res, 'Part number and description are required.'); return; }
   await ensurePartsTables();
   try {
@@ -568,7 +593,39 @@ router.post('/stock/in', async (req, res) => {
   const occurredDate = parseDate(req.body?.occurredDate);
   if (!partNumber && !serial) { bad(res, 'Scan a serial or enter a part number.'); return; }
   if (!occurredDate) { bad(res, 'Date must use YYYY-MM-DD format.'); return; }
-  await ensurePartsTables();
+  // Bulk path: one serial per line from the podium multiline box — sanitized
+  // (uppercased, spaces stripped, deduped, capped) and applied inside a
+  // single transaction with per-serial errors, mirroring the import endpoints.
+  const serials = Array.isArray(req.body?.serials)
+    ? [...new Set((req.body.serials as unknown[]).map((s) => String(s ?? '').toUpperCase().replace(/\s+/g, '')).filter(Boolean))].slice(0, 200)
+    : [];
+  if (serials.length > 1) {
+    let imported = 0;
+    const errors: Array<{ serial: string; error: string }> = [];
+    try {
+      const result = await withConnection(async (conn) => {
+        for (const s of serials) {
+          try {
+            const r = await applyStockIn(conn, { site, partNumber, serial: s, quantity: 1, occurredDate, actorUserId: req.user!.userId });
+            r.sheetRow.actor = req.user!.email;
+            void appendSheetRow(req.user!.userId, r.sheetRow).then((ok) => { if (ok) void markSheetSynced(r.movementId); });
+            imported++;
+          } catch (error) {
+            errors.push({ serial: s, error: error instanceof StockError ? error.message : 'Unable to stock in this serial.' });
+          }
+        }
+        return { imported, errors };
+      });
+      if (result.imported === 0) { bad(res, result.errors[0]?.error || 'Unable to stock in these serials.'); return; }
+      res.status(201).json({
+        message: `${result.imported} × ${partNumber || 'part'} stocked in at ${site.code}${result.errors.length ? `, ${result.errors.length} need attention` : ''}.`,
+        imported: result.imported,
+        failed: result.errors.length,
+        errors: result.errors,
+      });
+    } catch (error) { stockError(res, error); }
+    return;
+  }
   try {
     const result = await withConnection((conn) =>
       applyStockIn(conn, { site, partNumber, serial, quantity, occurredDate, actorUserId: req.user!.userId })
@@ -592,7 +649,6 @@ router.post('/stock/out', async (req, res) => {
   const occurredDate = parseDate(req.body?.occurredDate);
   if (!reference) { bad(res, 'Reference number is required for stock out.'); return; }
   if (!occurredDate) { bad(res, 'Date must use YYYY-MM-DD format.'); return; }
-  await ensurePartsTables();
   try {
     const result = await withConnection((conn) =>
       applyStockOut(conn, { site, partNumber, serial, quantity, reference, occurredDate, actorUserId: req.user!.userId })
@@ -643,7 +699,6 @@ router.post('/import/out', async (req, res) => {
   const site = scope.site!;
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   if (!rows.length || rows.length > 1000) { bad(res, 'Send 1 to 1000 rows per import.'); return; }
-  await ensurePartsTables();
   let imported = 0;
   const errors: Array<{ row: number; error: string }> = [];
   for (let i = 0; i < rows.length; i++) {

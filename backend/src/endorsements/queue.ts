@@ -30,6 +30,7 @@ export interface QueueEngineer {
   status: 'active' | 'left';
   assignment_count: number;
   last_turn: number;
+  returned: number;
   joined_at: string;
   last_assigned_at: string | null;
 }
@@ -140,37 +141,43 @@ export async function withQueue<T>(work: (connection: PoolConnection, date: stri
 
 export async function divisionQueue(connection: PoolConnection, date: string, division: Division): Promise<DivisionQueue> {
   const countPeriod = division === 'iOS/ACCS' ? 'day' : 'month';
+  // Yesterday (Manila): active today after being away yesterday = back from rest.
+  const prevDate = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) - 86_400_000).toISOString().slice(0, 10);
   if (countPeriod === 'month') {
     const monthStart = `${date.slice(0, 7)}-01`;
     const monthEndDate = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 1));
     const monthEnd = `${monthEndDate.getUTCFullYear()}-${String(monthEndDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
     const [rows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.joined_at,
-      COALESCE(turns.last_turn, 0) AS last_turn, COALESCE(monthly.total, 0) AS assignment_count, monthly.last_assigned_at
+      COALESCE(turns.last_turn, 0) AS last_turn, COALESCE(monthly.total, 0) AS assignment_count, monthly.last_assigned_at,
+      COALESCE(prev.status = 'left', 0) AS returned
       FROM engineer_daily_availability a
       LEFT JOIN (SELECT engineer_name, COUNT(*) AS total, MAX(created_at) AS last_assigned_at FROM engineer_endorsements
         WHERE created_at >= ? AND created_at < ? AND product_division = ? GROUP BY engineer_name) monthly ON monthly.engineer_name = a.engineer_name
       LEFT JOIN (SELECT prior.engineer_name, MAX(e.id) AS last_turn FROM engineer_queue_events e
         JOIN engineer_daily_availability prior ON prior.id = e.availability_id
         WHERE e.queue_date >= ? AND e.queue_date < ? AND e.product_division = ? GROUP BY prior.engineer_name) turns ON turns.engineer_name = a.engineer_name
+      LEFT JOIN engineer_daily_availability prev ON prev.engineer_name = a.engineer_name AND prev.availability_date = ?
       WHERE a.availability_date = ? AND EXISTS (SELECT 1 FROM engineer_roster r WHERE r.active = 1 AND r.engineer_name = a.engineer_name)
-      ORDER BY COALESCE(monthly.total, 0), COALESCE(turns.last_turn, 0), a.joined_at, a.id`, [dayBounds(monthStart)[0], dayBounds(monthEnd)[0], division, monthStart, dayBounds(monthEnd)[0], division, date]);
-    const roster = (rows as QueueEngineer[]).map((row) => ({ ...row, id: Number(row.id), user_id: row.user_id == null ? null : Number(row.user_id), assignment_count: Number(row.assignment_count), last_turn: Number(row.last_turn) }));
+      ORDER BY COALESCE(monthly.total, 0), COALESCE(prev.status = 'left', 0) DESC, COALESCE(turns.last_turn, 0), a.joined_at, a.id`, [dayBounds(monthStart)[0], dayBounds(monthEnd)[0], division, monthStart, dayBounds(monthEnd)[0], division, prevDate, date]);
+    const roster = (rows as QueueEngineer[]).map((row) => ({ ...row, id: Number(row.id), user_id: row.user_id == null ? null : Number(row.user_id), assignment_count: Number(row.assignment_count), last_turn: Number(row.last_turn), returned: Number(row.returned) }));
     const engineers = roster.filter((row) => row.status === 'active');
-    const token = createHash('sha256').update(JSON.stringify([date, division, countPeriod, roster.map((row) => [row.id, row.full_name, row.status, row.last_turn, row.assignment_count])])).digest('hex');
+    const token = createHash('sha256').update(JSON.stringify([date, division, countPeriod, roster.map((row) => [row.id, row.full_name, row.status, row.last_turn, row.assignment_count, row.returned])])).digest('hex');
     return { division, countPeriod, engineers, nextEngineer: engineers[0] || null, token };
   }
   const [rows] = await connection.query(`SELECT a.id, a.user_id, a.engineer_name AS full_name, a.status, a.joined_at,
-    COALESCE(e.last_turn, 0) AS last_turn, COALESCE(e.total, 0) AS assignment_count, e.last_assignment AS last_assigned_at
+    COALESCE(e.last_turn, 0) AS last_turn, COALESCE(e.total, 0) AS assignment_count, e.last_assignment AS last_assigned_at,
+    COALESCE(prev.status = 'left', 0) AS returned
     FROM engineer_daily_availability a LEFT JOIN (
       SELECT availability_id, MAX(id) AS last_turn, COUNT(endorsement_id) AS total,
         MAX(created_at) AS last_assignment
       FROM engineer_queue_events WHERE queue_date = ? AND product_division = ? GROUP BY availability_id
     ) e ON e.availability_id = a.id
+    LEFT JOIN engineer_daily_availability prev ON prev.engineer_name = a.engineer_name AND prev.availability_date = ?
     WHERE a.availability_date = ? AND EXISTS (SELECT 1 FROM engineer_roster r WHERE r.active = 1 AND r.engineer_name = a.engineer_name)
-    ORDER BY COALESCE(e.last_turn, 0), a.joined_at, a.id`, [date, division, date]);
-  const roster = (rows as QueueEngineer[]).map((row) => ({ ...row, id: Number(row.id), user_id: row.user_id == null ? null : Number(row.user_id), assignment_count: Number(row.assignment_count), last_turn: Number(row.last_turn) }));
+    ORDER BY COALESCE(e.total, 0), COALESCE(prev.status = 'left', 0) DESC, COALESCE(e.last_turn, 0), a.joined_at, a.id`, [date, division, prevDate, date]);
+  const roster = (rows as QueueEngineer[]).map((row) => ({ ...row, id: Number(row.id), user_id: row.user_id == null ? null : Number(row.user_id), assignment_count: Number(row.assignment_count), last_turn: Number(row.last_turn), returned: Number(row.returned) }));
   const engineers = roster.filter((row) => row.status === 'active');
-  const token = createHash('sha256').update(JSON.stringify([date, division, roster.map((row) => [row.id, row.full_name, row.status, row.last_turn, row.assignment_count])])).digest('hex');
+  const token = createHash('sha256').update(JSON.stringify([date, division, roster.map((row) => [row.id, row.full_name, row.status, row.last_turn, row.assignment_count, row.returned])])).digest('hex');
   return { division, countPeriod, engineers, nextEngineer: engineers[0] || null, token };
 }
 

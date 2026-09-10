@@ -27,7 +27,9 @@ async function getEeeIndex(): Promise<Map<string, ResolvedPart>> {
   const map = new Map<string, ResolvedPart>();
   for (const row of rows as ResolvedPart[]) {
     for (const raw of String(row.eee_code || '').split(';')) {
-      const code = raw.trim().toUpperCase();
+      // EEE codes never contain whitespace — strip it so entries like
+      // "P3 W9" can still match the serials that contain "P3W9".
+      const code = raw.trim().toUpperCase().replace(/\s+/g, '');
       if (code.length >= 3 && !map.has(code)) map.set(code, row);
     }
   }
@@ -51,18 +53,13 @@ export async function resolveByEee(eee: string): Promise<ResolvedPart | null> {
  * Longest match wins so short codes can't shadow longer ones.
  */
 export async function resolveBySerial(serial: string): Promise<{ part: ResolvedPart; eee: string } | null> {
-  const s = String(serial ?? '').trim().toUpperCase();
-  if (s.length < 4) return null;
+  const s = String(serial ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  if (s.length < 3) return null;
   const index = await getEeeIndex();
   let best: { code: string; part: ResolvedPart } | null = null;
   for (const [code, part] of index) {
-    if (code.length >= 4 && s.includes(code) && (!best || code.length > best.code.length)) {
+    if (code.length >= 3 && s.includes(code) && (!best || code.length > best.code.length)) {
       best = { code, part };
-    }
-  }
-  if (!best) {
-    for (const [code, part] of index) {
-      if (code.length === 3 && s.includes(code)) { best = { code, part }; break; }
     }
   }
   return best ? { part: best.part, eee: best.code } : null;

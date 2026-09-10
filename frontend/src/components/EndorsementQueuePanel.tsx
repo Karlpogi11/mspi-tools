@@ -56,11 +56,11 @@ export default function EndorsementQueuePanel({ state, canAssign, canManage, can
     onRequestHandled();
   }, [request]);
 
-  const confirm = async () => {
+  const confirm = async (engineerName?: string) => {
     if (!preview || busyRef.current) return;
     busyRef.current = true; setBusy(true); setAssignmentError('');
     try {
-      const result = await api.endorsements.create({ arNumber: preview.record.arNumber, frontlineRecordId: preview.record.frontlineRecordId, queueToken: preview.queue.token });
+      const result = await api.endorsements.create({ arNumber: preview.record.arNumber, frontlineRecordId: preview.record.frontlineRecordId, queueToken: preview.queue.token, ...(engineerName ? { engineerName } : {}) });
       setPreview(null); setAr(''); onMessage(result.message);
       await onAssignmentComplete();
     } catch (error) { setAssignmentError((error as Error).message); await onRefresh(); }
@@ -227,16 +227,33 @@ export default function EndorsementQueuePanel({ state, canAssign, canManage, can
     </div>}
 
     {preview && <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 p-4" role="dialog" aria-modal="true" aria-label="Review endorsement">
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+      <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
         <h2 className="text-[16px] font-semibold text-[#1d1d1f]">Review endorsement</h2>
         <p className="mt-4 text-[13px] font-semibold">AR {preview.record.arNumber} · {preview.record.productDivision}</p>
         <p className="mt-2 text-[12px] text-[#3c3c43]">{preview.record.deviceModel || 'Device not specified'}</p>
         <p className="mt-1 text-[12px] text-[#6e6e73]">{preview.record.issue || 'No issue provided'}</p>
         <div className="mt-4 rounded-xl bg-[#f5f5f7] p-4"><p className="text-[11px] text-[#6e6e73]">Next available Engineer</p><p className="mt-1 text-[20px] font-semibold text-[#1d1d1f]">{preview.queue.nextEngineer?.full_name || 'No Engineer available'}</p></div>
+        {preview.queue.engineers.length > 0 && <div className="mt-4">
+          <p className="text-[11px] font-semibold text-[#3c3c43]">Available Engineers <span className="font-normal text-[#86868b]">· fewest repairs first{preview.queue.countPeriod === 'month' ? ' (this month)' : ' (today)'}</span></p>
+          <ul className="mt-2 max-h-56 space-y-1.5 overflow-y-auto pr-0.5">
+            {preview.queue.engineers.map((engineer) => {
+              const isNext = engineer.id === preview.queue.nextEngineer?.id;
+              return <li key={engineer.id} className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${isNext ? 'border-[#1d1d1f] bg-white' : 'border-[#e5e5e7] bg-white'}`}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-semibold text-[#1d1d1f]">{engineer.full_name}
+                    {isNext && <span className="ml-2 rounded-full bg-[#1d1d1f] px-2 py-0.5 align-middle text-[10px] font-semibold text-white">Next</span>}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-[#6e6e73]">{engineer.assignment_count} repair{engineer.assignment_count === 1 ? '' : 's'} {preview.queue.countPeriod === 'month' ? 'this month' : 'today'}</span>
+                </span>
+                <button type="button" disabled={busy || previewStale} onClick={() => void confirm(engineer.full_name)} className="shrink-0 rounded-full bg-[#1d1d1f] px-4 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40">{busy ? 'Assigning…' : 'Assign'}</button>
+              </li>;
+            })}
+          </ul>
+        </div>}
         {previewStale && <p role="status" className="mt-3 text-[12px] text-[#6e6e73]">The queue changed. Review again to see the current Engineer.</p>}
         {assignmentError && <p role="alert" className="mt-3 text-[12px] text-[#b42318]">{assignmentError}</p>}
         <div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" disabled={busy} className={buttonClass} onClick={() => { setPreview(null); setAssignmentError(''); }}>Cancel</button>
-          {previewStale || !preview.queue.nextEngineer ? <button type="button" disabled={busy || !state} className={buttonClass} onClick={() => void review(preview.record.arNumber)}>Review again</button> : <button type="button" disabled={busy} onClick={() => void confirm()} className="rounded-full bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-40">{busy ? 'Assigning…' : `Assign to ${preview.queue.nextEngineer.full_name}`}</button>}
+          {previewStale || !preview.queue.nextEngineer ? <button type="button" disabled={busy || !state} className={buttonClass} onClick={() => void review(preview.record.arNumber)}>Review again</button> : null}
         </div>
       </div>
     </div>}

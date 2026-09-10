@@ -16,7 +16,7 @@ export async function initDb(databaseUrl?: string) {
     timezone: 'Z',
     connectTimeout: 10000,
     waitForConnections: true,
-    connectionLimit: 4,
+    connectionLimit: 10,
     queueLimit: 0,
     enableKeepAlive: true,
     keepAliveInitialDelay: 10000,

@@ -1,6 +1,16 @@
 import { getDbPool } from '../db/index.js';
 
-export async function ensurePartsTables() {
+// Tables are created once per process — awaiting 6 sequential
+// CREATE TABLE IF NOT EXISTS roundtrips on every request was the dominant
+// cost of the Stock Out serial search (~9 roundtrips per keystroke-pause).
+let ensured: Promise<void> | null = null;
+
+export function ensurePartsTables(): Promise<void> {
+  if (!ensured) ensured = createPartsTables().catch((error) => { ensured = null; throw error; });
+  return ensured;
+}
+
+async function createPartsTables() {
   const pool = getDbPool();
   await pool.query(`CREATE TABLE IF NOT EXISTS parts_sites (
     id INT AUTO_INCREMENT PRIMARY KEY,
