@@ -415,12 +415,15 @@ html::-webkit-scrollbar-thumb {
   body * { visibility: hidden !important; }
   .pcount-report-print-root,
   .pcount-report-print-root * { visibility: visible !important; }
+  .consumables-print-root,
+  .consumables-print-root * { visibility: visible !important; }
   .pcount-report-print-root { position: absolute !important; inset: 0 !important; display: block !important; width: 210mm !important; overflow: visible !important; padding: 0 !important; background: #fff !important; }
   .pcount-report-print-root > div { width: 210mm !important; max-width: 210mm !important; margin: 0 !important; }
   .pcount-report-toolbar { display: none !important; }
   .pcount-report-pages { display: block !important; width: 210mm !important; }
   .pcount-report-paper { width: 210mm !important; margin: 0 !important; }
   .pcount-report-paper:not(:last-child) { page-break-after: always; }
+  .consumables-print-root { position: absolute !important; inset: 0 !important; display: block !important; box-sizing: border-box !important; width: 100% !important; max-width: 100vw !important; overflow: hidden !important; background: #fff !important; }
   .pcount-paper { width: 210mm; height: 297mm; min-height: 297mm; overflow: hidden; padding: 14mm 16mm; break-inside: avoid; page-break-after: avoid; }
   .report-input { border-bottom-color: transparent; }
   .report-table { margin-top: 1rem !important; font-size: 9px; }

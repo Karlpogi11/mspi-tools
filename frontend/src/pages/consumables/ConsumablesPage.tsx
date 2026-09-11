@@ -702,7 +702,7 @@ export default function ConsumablesPage() {
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-[#d2d2d7] overflow-hidden print:border-0 print:rounded-none print:shadow-none print:overflow-visible">
+      <div className="consumables-print-root bg-white rounded-xl border border-[#d2d2d7] overflow-hidden print:border-0 print:rounded-none print:shadow-none print:overflow-visible">
         <div className="px-4 py-2 border-b border-[#d2d2d7]/60 print:hidden">
           <h2 className="text-[13px] font-medium text-[#1d1d1f]">Print preview</h2>
         </div>
@@ -712,7 +712,7 @@ export default function ConsumablesPage() {
               Fill in the received items above to build your label sheet preview.
             </p>
           ) : (
-            <div className="mx-auto max-w-3xl bg-white outline outline-1 outline-[#d2d2d7] rounded-lg print:max-w-none print:outline-0 print:rounded-none">
+            <div className="mx-auto w-full min-w-0 max-w-3xl bg-white outline outline-1 outline-[#d2d2d7] rounded-lg print:max-w-none print:outline-0 print:rounded-none print:w-full">
               <div className="px-4 pt-3 pb-2 text-center border-b border-[#d2d2d7] print:border-0">
                 <p className="text-[13px] font-bold text-[#1d1d1f] tracking-wide">PRINT LABELS - CUT ALONG BORDERS</p>
                 <p className="text-[11px] text-[#9ca3af] mt-0.5 print:hidden">
@@ -720,11 +720,11 @@ export default function ConsumablesPage() {
                 </p>
               </div>
               <div className="p-3 print:p-0">
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid w-full min-w-0 grid-cols-3 gap-1">
                   {labels.map((label, i) => (
                     <div
                       key={i}
-                      className="relative border border-[#1d1d1f] px-2.5 py-2 flex items-center justify-center text-center"
+                      className="relative min-w-0 border border-[#1d1d1f] px-2.5 py-2 flex items-center justify-center text-center"
                       style={{ minHeight: '34px' }}
                     >
                       <span className="absolute top-0.5 left-1 text-[8px] font-bold text-[#6e6e73] leading-none">

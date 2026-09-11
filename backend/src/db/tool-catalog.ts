@@ -10,10 +10,10 @@ const BUILTIN_TOOLS = [
   { name: 'PDF Extractor', url: '/pdf-extractor', icon: 'file', description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date, files them by month, and logs every invoice.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'Chrome Extension', url: '/chrome-extension', icon: 'extension', description: 'Install Work Permit Autofill in Chrome. For approved users with a personal-email Chrome profile only.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'AppleCare Packing Lists', url: '/applecare', icon: 'package', description: 'Connect Gmail and automatically collect AppleCare packing lists, attachments, sites, and incoming parts.', roles: ['Admin', 'PMG'] },
-  { name: 'Frontline Monitor', url: '/frontline', icon: 'monitor', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin'] },
+  { name: 'Frontline Monitor', url: '/frontline', icon: 'frontline', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin'] },
   { name: 'Engineer Endorsements', url: '/endorsements', icon: 'wrench', description: 'Podium only — join the daily Engineer queue and manage customer device endorsements from Frontline Monitor.', roles: ['Admin', 'ENGR'] },
-  { name: 'Storage Locator', url: '/storage-locator', icon: 'package', description: 'Track customer units in IOS and Mac cabinet storage with verified employee IN/OUT history.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
-  { name: 'Parts Inventory', url: '/parts', icon: 'package', description: 'Stock Apple service parts in and out per site with serial tracking and a shared Google Sheet log.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'Storage Locator', url: '/storage-locator', icon: 'storage', description: 'Track customer units in IOS and Mac cabinet storage with verified employee IN/OUT history.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'Parts Inventory', url: '/parts', icon: 'parts', description: 'Stock Apple service parts in and out per site with serial tracking and a shared Google Sheet log.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
 ] as const;
 
 const BUILTIN_ROLE_NAMES = ['Admin', 'PMG', 'CSO', 'ENGR'];
@@ -41,6 +41,8 @@ export async function syncBuiltinToolCatalog() {
       [tool] = await db.select().from(tools).where(eq(tools.id, inserted.id)).limit(1);
       isNewTool = true;
       console.log(`Registered built-in tool: ${definition.name}`);
+    } else if (tool.icon !== definition.icon) {
+      await db.update(tools).set({ icon: definition.icon }).where(eq(tools.id, tool.id));
     }
 
     if (isNewTool) {
