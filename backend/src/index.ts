@@ -5,7 +5,7 @@ import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import path from 'path';
 import http from 'http';
 import { fileURLToPath } from 'url';
@@ -84,7 +84,7 @@ const partsLimiter = rateLimit({
   max: 120,
   keyGenerator: (req) => {
     const userId = (req as typeof req & { user?: { userId?: number } }).user?.userId;
-    return userId ? `user:${userId}` : `ip:${req.ip}`;
+    return userId ? `user:${userId}` : `ip:${ipKeyGenerator(req.ip ?? 'unknown')}`;
   },
   standardHeaders: true,
   legacyHeaders: false,
