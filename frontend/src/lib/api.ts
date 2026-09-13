@@ -479,9 +479,6 @@ export const api = {
     frontlineGoogleDisconnect: () => request<{ message: string }>('/frontline/google/disconnect', { method: 'DELETE' }),
     frontlineSheets: (spreadsheetId: string) => request<{ title: string; sheets: FrontlineSheet[] }>(`/frontline/spreadsheets/${encodeURIComponent(spreadsheetId)}/sheets`),
     frontlineSource: () => request<FrontlineSource | null>('/frontline/source'),
-    frontlinePrinter: () => requestFresh<{ printerIp: string | null; printerPort: number; printEnabled: boolean }>('/frontline/printer'),
-    saveFrontlinePrinter: (printerIp: string, printerPort: number, printEnabled: boolean) => request<{ message: string; printerIp: string; printerPort: number; printEnabled: boolean }>('/frontline/printer', { method: 'PUT', body: JSON.stringify({ printerIp, printerPort, printEnabled }) }),
-    testFrontlinePrinter: () => request<{ message: string }>('/frontline/printer/test', { method: 'POST' }),
     saveFrontlineSource: (spreadsheetId: string, spreadsheetName: string, sheets: string[], writeSheetName: string) => request<{ message: string }>('/frontline/source', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, sheets, writeSheetName }) }),
     syncFrontline: () => request<{ imported: number }>('/frontline/sync', { method: 'POST' }),
     getFrontlineAccessRequests: () => request<FrontlineAccessRequest[]>('/admin/frontline/access-requests'),
@@ -514,9 +511,6 @@ export const api = {
     lookup: (payload: { ar?: string; serial?: string }) => requestFresh<FrontlineReport['records']>(`/frontline/lookup?${new URLSearchParams(payload).toString()}`),
     serialHistory: (serial: string) => requestFresh<FrontlineSerialHistory[]>(`/frontline/serial-history?serial=${encodeURIComponent(serial)}`),
     deviceModels: () => request<string[]>('/frontline/device-models'),
-    printer: () => requestFresh<{ printerIp: string | null; printerPort: number; printEnabled: boolean }>('/frontline/printer'),
-    testPrinter: () => requestFresh<{ message: string }>('/frontline/printer/test', { method: 'POST' }),
-    printRawPrinter: (arNumber: string) => request<{ message: string }>('/frontline/printer/print', { method: 'POST', body: JSON.stringify({ arNumber }) }),
     report: (params: { start?: string; end?: string; ar?: string; cso?: string[]; type?: string[]; division?: string[] } = {}) => {
       const queryParams = new URLSearchParams();
       if (params.start) queryParams.set('start', params.start);

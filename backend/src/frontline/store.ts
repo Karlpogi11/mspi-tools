@@ -86,18 +86,6 @@ async function initializeFrontlineTables(): Promise<void> {
     CONSTRAINT frontline_source_user_fk FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
   )`);
   try { await pool.query("ALTER TABLE frontline_sources ADD COLUMN write_sheet_name varchar(255) NULL AFTER selected_sheets"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
-  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_printer_settings (
-    id tinyint NOT NULL,
-    printer_ip varchar(45) NOT NULL,
-    printer_port int NOT NULL DEFAULT 8008,
-    print_enabled tinyint(1) NOT NULL DEFAULT 1,
-    updated_by int NULL,
-    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    CONSTRAINT frontline_printer_settings_user_fk FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
-  )`);
-  try { await pool.query("ALTER TABLE frontline_printer_settings ADD COLUMN printer_port int NOT NULL DEFAULT 8008 AFTER printer_ip"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
-  try { await pool.query("ALTER TABLE frontline_printer_settings ADD COLUMN print_enabled tinyint(1) NOT NULL DEFAULT 1 AFTER printer_port"); } catch (error) { if (!String((error as Error).message).includes('Duplicate column')) throw error; }
   await pool.query(`CREATE TABLE IF NOT EXISTS frontline_sheet_writes (
     id bigint AUTO_INCREMENT NOT NULL,
     source_id int NOT NULL,

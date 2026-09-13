@@ -16,11 +16,6 @@ export default function AdminFrontlinePage() {
   const [spreadsheetName, setSpreadsheetName] = useState('');
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
   const [writeSheetName, setWriteSheetName] = useState('');
-  const [printerIp, setPrinterIp] = useState('');
-  const [printerPort, setPrinterPort] = useState('8008');
-  const [printEnabled, setPrintEnabled] = useState(true);
-  const [printerSaving, setPrinterSaving] = useState(false);
-  const [printerTesting, setPrinterTesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -28,7 +23,7 @@ export default function AdminFrontlinePage() {
   const [message, setMessage] = useState('');
   const [accessRequests, setAccessRequests] = useState<FrontlineAccessRequest[]>([]);
   const [approvalSettings, setApprovalSettings] = useState<Record<number, { scope: 'cso' | 'all'; csoName: string }>>({});
-  const [activeTab, setActiveTab] = useState<'source' | 'options' | 'access' | 'printer'>('source');
+  const [activeTab, setActiveTab] = useState<'source' | 'options' | 'access' >('source');
   const [optionLists, setOptionLists] = useState<FrontlineOptionLists>({ product_division: [], transaction_type: [], cso: [] });
   const [newOptions, setNewOptions] = useState<Record<FrontlineOptionKey, string>>({ product_division: '', transaction_type: '', cso: '' });
   const [editingOption, setEditingOption] = useState<{ key: FrontlineOptionKey; id: number; label: string } | null>(null);
@@ -39,11 +34,10 @@ export default function AdminFrontlinePage() {
   const messageStyle = messageTone(message);
 
   const load = async () => {
-    const [nextStatus, nextSource, nextRequests, nextOptions, nextPrinter] = await Promise.all([api.admin.frontlineGoogleStatus(), api.admin.frontlineSource(), api.admin.getFrontlineAccessRequests(), api.frontline.options(), api.admin.frontlinePrinter()]);
+    const [nextStatus, nextSource, nextRequests, nextOptions] = await Promise.all([api.admin.frontlineGoogleStatus(), api.admin.frontlineSource(), api.admin.getFrontlineAccessRequests(), api.frontline.options()]);
     setStatus(nextStatus); setSource(nextSource);
     setAccessRequests(nextRequests);
     setOptionLists(nextOptions);
-    setPrinterIp(nextPrinter.printerIp || ''); setPrinterPort(String(nextPrinter.printerPort || 8008)); setPrintEnabled(nextPrinter.printEnabled !== false);
     if (nextSource) { setSpreadsheetId(nextSource.spreadsheet_id); setSpreadsheetName(nextSource.spreadsheet_name); setSelectedSheets(nextSource.selected_sheets); setWriteSheetName(nextSource.write_sheet_name || ''); }
   };
 
@@ -77,19 +71,6 @@ export default function AdminFrontlinePage() {
     try { await api.admin.saveFrontlineSource(spreadsheetId, spreadsheetName || spreadsheetId, selectedSheets, writeSheetName); await api.admin.syncFrontline(); setMessage('Source saved and records refreshed.'); await load(); }
     catch (error) { setMessage((error as Error).message); } finally { setBusy(false); setSaving(false); }
   };
-  const savePrinter = async () => {
-    setPrinterSaving(true); setMessage('Saving printer configuration…');
-    try { const result = await api.admin.saveFrontlinePrinter(printerIp.trim(), Number(printerPort), printEnabled); setPrinterIp(result.printerIp); setPrinterPort(String(result.printerPort)); setPrintEnabled(result.printEnabled); setMessage('Printer configuration saved.'); }
-    catch (error) { setMessage((error as Error).message); }
-    finally { setPrinterSaving(false); }
-  };
-  const testPrinter = async () => {
-    setPrinterTesting(true); setMessage('Testing printer connection…');
-    try { const result = await api.admin.testFrontlinePrinter(); setMessage(result.message); }
-    catch (error) { setMessage((error as Error).message); }
-    finally { setPrinterTesting(false); }
-  };
-
   const sync = async () => {
     setBusy(true); setMessage('Importing frontline records…');
     try { const result = await api.admin.syncFrontline(); setMessage(`${result.imported.toLocaleString()} records imported.`); await load(); }
@@ -123,17 +104,9 @@ export default function AdminFrontlinePage() {
           <button type="button" role="tab" aria-selected={activeTab === 'source'} onClick={() => setActiveTab('source')} className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${activeTab === 'source' ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>Report source</button>
           <button type="button" role="tab" aria-selected={activeTab === 'options'} onClick={() => setActiveTab('options')} className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${activeTab === 'options' ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>Entry lists</button>
           <button type="button" role="tab" aria-selected={activeTab === 'access'} onClick={() => setActiveTab('access')} className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${activeTab === 'access' ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>Access requests</button>
-          <button type="button" role="tab" aria-selected={activeTab === 'printer'} onClick={() => setActiveTab('printer')} className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${activeTab === 'printer' ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>Printer</button>
         </div>
       </div>
 
-      {activeTab === 'printer' && <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">
-        <h2 className="text-[15px] font-semibold text-[#1d1d1f]">AR label printer</h2>
-        <p className="mt-1 text-[12px] text-[#6e6e73]">Configure the TM-P20II Wi-Fi printer used for AR-only labels and Code 128 barcodes.</p>
-        <div className="mt-4 flex max-w-xl gap-2"><input value={printerIp} onChange={(event) => setPrinterIp(event.target.value)} placeholder="Printer IP address" inputMode="decimal" className="h-10 min-w-0 flex-1 rounded-lg border border-[#d2d2d7] px-3 text-[13px]" /><input value={printerPort} onChange={(event) => setPrinterPort(event.target.value)} placeholder="Port" inputMode="numeric" aria-label="Printer port" className="h-10 w-24 rounded-lg border border-[#d2d2d7] px-3 text-[13px]" /><button type="button" onClick={() => void savePrinter()} disabled={printerSaving || printerTesting || !printerIp.trim() || !printerPort.trim()} className="rounded-lg bg-[#1d1d1f] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-40">{printerSaving ? 'Saving…' : 'Save printer'}</button><button type="button" onClick={() => void testPrinter()} disabled={printerSaving || printerTesting || !printerIp.trim() || !printerPort.trim()} className="rounded-lg border border-[#d2d2d7] px-4 py-2 text-[12px] font-medium text-[#3c3c43] disabled:opacity-40">{printerTesting ? 'Testing…' : 'Test connection'}</button></div>
-        <label className="mt-4 flex items-center gap-2 text-[12px] text-[#3c3c43]"><input type="checkbox" checked={printEnabled} onChange={(event) => setPrintEnabled(event.target.checked)} />Show print button to Frontline users</label>
-        <p className="mt-2 text-[11px] text-[#86868b]">The printer must be reachable from the user’s local network.</p>
-      </section>}
 
       {activeTab === 'source' && !status.connected && <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5"><h2 className="text-[15px] font-semibold text-[#1d1d1f]">Report source</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Connect a Google account above to configure the spreadsheet and worksheets.</p></section>}
 
