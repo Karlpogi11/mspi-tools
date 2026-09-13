@@ -30,6 +30,7 @@ import endorsementRoutes from './endorsements/routes.js';
 import storageLocatorRoutes from './storage-locator/routes.js';
 import partsRoutes from './parts/routes.js';
 import { authenticateToken, requireToolAccess } from './auth.js';
+import { isAllowedOrigin } from './config/origins.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -54,7 +55,13 @@ app.use(compression());
 app.use(helmet());
 app.use(httpLogger);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Request origin not allowed'));
+  },
   credentials: true,
 }));
 app.use((req, res, next) => {

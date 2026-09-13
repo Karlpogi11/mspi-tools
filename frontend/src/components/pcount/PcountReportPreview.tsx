@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import type { Product, Session } from '../../lib/api';
+import PcountComparison from './PcountComparison';
 
 const DEFAULT_CATEGORIES = [
   'APPLE', 'AUDIO', 'PROTECTION A', 'PROTECTION B', 'CCPS', 'ENHCANCEMENTS', 'MAC ACCS',
@@ -87,6 +88,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
   const [summaryEdits, setSummaryEdits] = useState<Record<string, Record<string, string>>>({});
   const [appleTotalOverride, setAppleTotalOverride] = useState<string | null>(null);
   const [tppTotalOverride, setTppTotalOverride] = useState<string | null>(null);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
 
   const countedProducts = products.filter(product => !isExcludedProduct(product));
 
@@ -344,11 +346,12 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
   return (
     <div className="pcount-report-print-root fixed inset-0 z-50 overflow-auto bg-[#111827]/60 p-4 print:static print:overflow-visible print:bg-white print:p-0">
       <div className="pcount-report-preview-content mx-auto w-full max-w-none print:max-w-none">
-        <div className="pcount-report-toolbar print:hidden"><div className="pcount-report-toolbar-actions"><button onClick={() => void exportPdf()} disabled={exportingPdf} title="Download the report as a PDF" className="pcount-report-export-button">{exportingPdf ? 'Exporting…' : 'Export PDF'}</button><button onClick={() => window.print()} className="pcount-report-print-button">Print A4</button><button onClick={onClose} aria-label="Close report preview" title="Close" className="pcount-report-close-button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button></div>{exportError && <span className="pcount-report-export-error" role="alert">{exportError}</span>}</div>
+        <div className="pcount-report-toolbar print:hidden"><div className="pcount-report-toolbar-actions"><button onClick={() => setComparisonOpen(true)} className="pcount-report-print-button">Compare report</button><button onClick={() => void exportPdf()} disabled={exportingPdf} title="Download the report as a PDF" className="pcount-report-export-button">{exportingPdf ? 'Exporting…' : 'Export PDF'}</button><button onClick={() => window.print()} className="pcount-report-print-button">Print A4</button><button onClick={onClose} aria-label="Close report preview" title="Close" className="pcount-report-close-button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button></div>{exportError && <span className="pcount-report-export-error" role="alert">{exportError}</span>}</div>
         <div ref={reportPagesRef} className="pcount-report-pages">
           <section className="pcount-paper pcount-report-paper bg-white text-[#4b4540] shadow-xl print:shadow-none p-[14mm_16mm] relative">{reportHeader}<table className="report-table mt-8"><thead><tr><th>Category</th><th colSpan={5}></th></tr></thead><tbody>{defaultSummaries.map(row => <tr key={row.category}><td className="p-1"><input value={summaryValue(row.category, 'category', row.category)} onChange={e => editSummary(row.category, 'category', e.target.value)} className="w-full bg-transparent border-0 outline-none text-left font-bold text-[#1d1d1f] focus:ring-0 p-0 text-[11px]" /></td><td colSpan={5} className="p-1"><input value={summaryValue(row.category, 'description', row.description)} onChange={e => editSummary(row.category, 'description', e.target.value)} className="w-full bg-transparent border-0 outline-none text-left text-[11px] text-[#6e6e73] focus:ring-0 p-0" /></td></tr>)}</tbody></table>{signatures}</section>
           <section className="pcount-paper pcount-report-paper bg-white text-[#4b4540] shadow-xl print:shadow-none p-[14mm_16mm] relative">{reportHeader}{actualTable}{signatures}</section>
         </div>
+        {comparisonOpen && <PcountComparison currentSessionId={session.id} onClose={() => setComparisonOpen(false)} />}
       </div>
     </div>
   );
@@ -376,6 +379,9 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
             </button>
           </div>
           <div className="pcount-report-toolbar-actions">
+            <button onClick={() => setComparisonOpen(true)} className="pcount-report-print-button">
+              Compare report
+            </button>
             <button
               onClick={() => window.print()}
               title="Export the report as a PDF"
@@ -589,6 +595,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
             </div>
           </div>
         </section>
+        {comparisonOpen && <PcountComparison currentSessionId={session.id} onClose={() => setComparisonOpen(false)} />}
       </div>
     </div>
   );

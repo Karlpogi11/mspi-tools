@@ -1,6 +1,6 @@
 import { getDb, getDbPool } from '../db/index.js';
 import { pcountSessions, pcountSessionMembers, pcountDisplayColumns, pcountProducts, pcountProductExtra, users } from '../db/schema.js';
-import { eq, and, desc, asc, like, inArray, or } from 'drizzle-orm';
+import { eq, and, desc, asc, like, inArray, or, sql } from 'drizzle-orm';
 
 let dbAvailable = false;
 
@@ -50,6 +50,21 @@ export interface ProductRow {
 
 export interface ProductWithExtra extends ProductRow {
   extra: Record<string, string>;
+}
+
+export interface ProductComparisonRow {
+  product_code: string;
+  description: string;
+  brand: string;
+  previous_category: string;
+  current_category: string;
+  category_changed: boolean;
+  previous_count: number;
+  current_count: number;
+  difference: number;
+  previous_status: string | null;
+  current_status: string | null;
+  change: 'added' | 'removed' | 'changed' | 'unchanged';
 }
 
 export interface SessionWithProgress extends SessionRow {
@@ -487,6 +502,70 @@ export async function listProducts(sessionId: number, opts?: { status?: string; 
   return memListProducts(sessionId, opts);
 }
 
+function productBrand(product: ProductWithExtra | undefined): string {
+  if (!product) return '';
+  return Object.entries(product.extra || {}).find(([key]) => key.trim().toLowerCase() === 'brand')?.[1]?.trim() || '';
+}
+
+function productCategory(product: ProductWithExtra | undefined): string {
+  if (!product) return '';
+  return productBrand(product).toLowerCase().includes('apple') ? 'Apple' : '3PP';
+}
+
+export async function compareProducts(currentSessionId: number, previousSessionId: number): Promise<ProductComparisonRow[]> {
+  const [currentProducts, previousProducts] = await Promise.all([
+    listProducts(currentSessionId),
+    listProducts(previousSessionId),
+  ]);
+  const currentByCode = new Map(currentProducts.map(product => [product.product_code.trim().toUpperCase(), product]));
+  const previousByCode = new Map(previousProducts.map(product => [product.product_code.trim().toUpperCase(), product]));
+  const codes = new Set([...currentByCode.keys(), ...previousByCode.keys()]);
+
+  return Array.from(codes).filter(code => {
+    const current = currentByCode.get(code);
+    const previous = previousByCode.get(code);
+    return current?.status !== 'excluded' && previous?.status !== 'excluded';
+  }).map(code => {
+    const current = currentByCode.get(code);
+    const previous = previousByCode.get(code);
+    const currentCount = current?.counted_qty || 0;
+    const previousCount = previous?.counted_qty || 0;
+    const description = current?.description || previous?.description || '';
+    const brand = productBrand(current) || productBrand(previous);
+    const previousCategory = productCategory(previous);
+    const currentCategory = productCategory(current);
+    const categoryChanged = Boolean(current && previous && previousCategory !== currentCategory);
+    const sameDetails = current && previous
+      && currentCount === previousCount
+      && current.status === previous.status
+      && description === (previous.description || '')
+      && brand === productBrand(previous)
+      && !categoryChanged;
+    const change: ProductComparisonRow['change'] = !previous
+      ? 'added'
+      : !current
+        ? 'removed'
+        : sameDetails
+          ? 'unchanged'
+          : 'changed';
+
+    return {
+      product_code: current?.product_code || previous?.product_code || code,
+      description,
+      brand,
+      previous_category: previousCategory,
+      current_category: currentCategory,
+      category_changed: categoryChanged,
+      previous_count: previousCount,
+      current_count: currentCount,
+      difference: currentCount - previousCount,
+      previous_status: previous?.status || null,
+      current_status: current?.status || null,
+      change,
+    };
+  }).sort((a, b) => a.product_code.localeCompare(b.product_code));
+}
+
 export async function getProduct(sessionId: number, code: string): Promise<ProductWithExtra | null> {
   if (dbAvailable) return dbGetProduct(sessionId, code);
   return memGetProduct(sessionId, code);
@@ -503,6 +582,80 @@ export async function updateProduct(sessionId: number, code: string, data: Parti
   const updated = { ...p, ...data };
   memProducts.set(updated.id, updated);
   return { ...updated, extra: memProductExtras.get(updated.id) || {} };
+}
+
+export async function bulkUpdateProducts(
+  sessionId: number,
+  codes: string[],
+  action: 'complete' | 'exclude',
+): Promise<{ products: ProductWithExtra[]; missingCodes: string[] }> {
+  const requested = Array.from(new Set(codes.map(code => code.trim()).filter(Boolean)));
+  if (requested.length === 0) return { products: [], missingCodes: [] };
+
+  if (dbAvailable) {
+    const db = getDb();
+    const rows = await db
+      .select({ product_code: pcountProducts.product_code })
+      .from(pcountProducts)
+      .where(eq(pcountProducts.session_id, sessionId));
+    const actualByNormalizedCode = new Map(rows.map(row => [row.product_code.trim().toUpperCase(), row.product_code]));
+    const matchedCodes = requested
+      .map(code => actualByNormalizedCode.get(code.toUpperCase()))
+      .filter((code): code is string => Boolean(code));
+    const matchedSet = new Set(matchedCodes);
+
+    if (matchedCodes.length > 0) {
+      if (action === 'complete') {
+        await db.update(pcountProducts).set({
+          counted_qty: sql`${pcountProducts.system_qty}`,
+          status: 'matched',
+        }).where(and(
+          eq(pcountProducts.session_id, sessionId),
+          inArray(pcountProducts.product_code, matchedCodes),
+          sql`${pcountProducts.status} <> 'excluded'`,
+        ));
+      } else {
+        await db.update(pcountProducts).set({ status: 'excluded' }).where(and(
+          eq(pcountProducts.session_id, sessionId),
+          inArray(pcountProducts.product_code, matchedCodes),
+        ));
+      }
+    }
+
+    const updatedCodeSet = new Set(matchedCodes);
+    return {
+      products: matchedCodes.length > 0
+        ? (await dbListProducts(sessionId)).filter(product => updatedCodeSet.has(product.product_code))
+        : [],
+      missingCodes: requested.filter(code => !matchedSet.has(actualByNormalizedCode.get(code.toUpperCase()) || '')),
+    };
+  }
+
+  const actualByNormalizedCode = new Map(
+    Array.from(memProducts.values())
+      .filter(product => product.session_id === sessionId)
+      .map(product => [product.product_code.trim().toUpperCase(), product]),
+  );
+  const updatedProducts: ProductWithExtra[] = [];
+  const matchedCodes = new Set<string>();
+  for (const code of requested) {
+    const product = actualByNormalizedCode.get(code.toUpperCase());
+    if (!product) continue;
+    matchedCodes.add(product.product_code);
+    if (action === 'complete' && product.status !== 'excluded') {
+      product.counted_qty = product.system_qty;
+      product.status = 'matched';
+    } else if (action === 'exclude') {
+      product.status = 'excluded';
+    }
+    memProducts.set(product.id, product);
+    updatedProducts.push({ ...product, extra: memProductExtras.get(product.id) || {} });
+  }
+
+  return {
+    products: updatedProducts,
+    missingCodes: requested.filter(code => !matchedCodes.has(actualByNormalizedCode.get(code.toUpperCase())?.product_code || '')),
+  };
 }
 
 export async function createProducts(sessionId: number, products: { product_code: string; description: string; system_qty: number; extra?: Record<string, string> }[]): Promise<number> {

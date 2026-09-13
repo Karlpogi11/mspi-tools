@@ -228,6 +228,27 @@ export interface Product {
   extra: Record<string, string>;
 }
 
+export interface PcountComparisonRow {
+  product_code: string;
+  description: string;
+  brand: string;
+  previous_category: string;
+  current_category: string;
+  category_changed: boolean;
+  previous_count: number;
+  current_count: number;
+  difference: number;
+  previous_status: string | null;
+  current_status: string | null;
+  change: 'added' | 'removed' | 'changed' | 'unchanged';
+}
+
+export interface PcountComparison {
+  currentSession: Session;
+  previousSession: Session;
+  products: PcountComparisonRow[];
+}
+
 export interface ScanResult extends Product {
   match: boolean;
 }
@@ -614,6 +635,13 @@ export const api = {
       request<Session>(`/pcount/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: number) =>
       request<{ message: string }>(`/pcount/sessions/${id}`, { method: 'DELETE' }),
+    bulkUpdate: (id: number, codes: string[], action: 'complete' | 'exclude') =>
+      request<{ action: string; updated: number; missingCodes: string[] }>(`/pcount/sessions/${id}/products/bulk`, {
+        method: 'POST',
+        body: JSON.stringify({ codes, action }),
+      }),
+    compare: (currentId: number, previousId: number) =>
+      request<PcountComparison>(`/pcount/sessions/${currentId}/compare/${previousId}`),
   },
 
   pcountAdmin: {

@@ -24,6 +24,11 @@ interface Props {
   onExcludeSelectedStatus?: () => void;
   selectionAction?: 'exclude' | 'restore';
   excludingPending?: boolean;
+  showProductSelection?: boolean;
+  selectedProductCodes?: string[];
+  onToggleProduct?: (code: string) => void;
+  onToggleAllProducts?: () => void;
+  productSelectionDisabled?: boolean;
 }
 
 export const ALL_COLUMNS = [
@@ -103,7 +108,7 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   </div>;
 }
 
-export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false }: Props) {
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false, showProductSelection = false, selectedProductCodes = [], onToggleProduct, onToggleAllProducts, productSelectionDisabled = false }: Props) {
   const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
@@ -173,11 +178,15 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
   );
 
   const shown = ALL_COLUMNS.filter(c => (visibleColumns ?? visible).includes(c.key) || (editMode && c.key === 'Is Match'));
-  const selectableProducts = products.filter(product => product.status === selectableStatus);
+  const selectableProducts = showProductSelection
+    ? products.filter(product => product.status !== 'excluded')
+    : products.filter(product => product.status === selectableStatus);
   const selectedStatusSet = new Set(selectedStatusCodes);
   const allStatusSelected = selectableProducts.length > 0 && selectableProducts.every(product => selectedStatusSet.has(product.product_code));
   const selectableLabel = selectableStatus === 'missing' ? 'missing' : selectableStatus === 'excluded' ? 'excluded' : 'pending';
   const actionLabel = selectionAction === 'restore' ? 'Re-include selected' : 'Exclude selected';
+  const selectedProductSet = new Set(selectedProductCodes);
+  const allProductsSelected = selectableProducts.length > 0 && selectableProducts.every(product => selectedProductSet.has(product.product_code));
 
   function beginEdit(product: Product) {
     if (!editMode || readOnly || savingCode) return;
@@ -238,7 +247,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
         <table className="w-full text-[13px]">
           <thead>
             <tr className="pcount-table-head sticky top-0 z-10">
-              {shown.map(col => (
+                  {shown.map(col => (
                 <th
                   key={col.key}
                   onClick={col.key === 'Product Code' ? onToggleSort : undefined}
@@ -249,6 +258,9 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                       : col.key === 'Is Match' ? 'text-center' : 'text-left'
                   }`}
                 >
+                  {col.key === 'Product Code' && showProductSelection && (
+                    <input type="checkbox" checked={allProductsSelected} onChange={onToggleAllProducts} disabled={productSelectionDisabled} onClick={e => e.stopPropagation()} className="mr-2 h-4 w-4 align-middle accent-[#2563eb]" aria-label="Select all products" />
+                  )}
                   {editMode && col.key === 'System Qty' ? 'System Quantity' :
                     editMode && col.key === 'Qty' ? 'Actual Quantity' : col.label}
                   {col.key === 'Product Code' ? ` ${sortDesc ? '\u2193' : '\u2191'}` : ''}
@@ -282,6 +294,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                       return (
                         <td key={col.key} className="px-4 py-3">
                           <div className="flex items-center gap-2 min-w-0">
+                            {showProductSelection && p.status !== 'excluded' && <input type="checkbox" checked={selectedProductSet.has(p.product_code)} onChange={() => onToggleProduct?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={productSelectionDisabled} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} to complete`} />}
                             {showStatusSelection && p.status === selectableStatus && <input type="checkbox" checked={selectedStatusSet.has(p.product_code)} onChange={() => onToggleStatus?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={excludingPending} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} for exclusion`} />}
                             <span className={`w-2 h-2 rounded-full ${st.dot} flex-shrink-0`} />
                             <span className="font-mono text-[12px] text-[#1d1d1f] font-medium">{p.product_code}</span>

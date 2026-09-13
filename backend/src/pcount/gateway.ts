@@ -8,18 +8,11 @@ import sessionRoutes from './routes/sessions.js';
 import productRoutes from './routes/products.js';
 import adminRoutes from './routes/admin.js';
 import { requireAdmin } from '../auth.js';
-
-const allowedOrigins = new Set(
-  [
-    process.env.FRONTEND_URL,
-    'https://tools.mspi.io',
-    'http://localhost:5173',
-  ].filter(Boolean) as string[]
-);
+import { isAllowedOrigin } from '../config/origins.js';
 
 const originCheck: RequestHandler = (req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && !allowedOrigins.has(origin)) {
+  if (!isAllowedOrigin(origin)) {
     res.status(403).json({ error: 'Request origin not allowed' });
     return;
   }

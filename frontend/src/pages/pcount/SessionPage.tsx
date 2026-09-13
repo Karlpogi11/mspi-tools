@@ -8,6 +8,8 @@ import ProductTable, { ALL_COLUMNS, ColumnPicker } from '../../components/pcount
 import ScanPanel from '../../components/pcount/ScanPanel';
 import ScanBar from '../../components/pcount/ScanBar';
 import ToolHelp from '../../components/ToolHelp';
+import { createClientId } from '../../lib/clientId';
+import { useAuth } from '../../lib/auth';
 
 const PcountReportPreview = lazy(() => import('../../components/pcount/PcountReportPreview'));
 
@@ -34,7 +36,9 @@ function normalizeProductStatus(product: Product): Product {
 export default function PcountSessionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const sessionId = parseInt(id || '0');
+  const isSuperAdmin = Boolean(user?.isSuperAdmin);
 
   const [session, setSession] = useState<Session | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -48,8 +52,12 @@ export default function PcountSessionPage() {
   const [detailSource, setDetailSource] = useState<'scan' | 'selection'>('scan');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedStatusCodes, setSelectedStatusCodes] = useState<string[]>([]);
+  const [selectedProductCodes, setSelectedProductCodes] = useState<string[]>([]);
   const [excludingPending, setExcludingPending] = useState(false);
   const [pendingExclusionError, setPendingExclusionError] = useState('');
+  const [excludeCodes, setExcludeCodes] = useState('');
+  const [bulkPending, setBulkPending] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
   const [scannerCount, setScannerCount] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
   const [scanSequence, setScanSequence] = useState(0);
@@ -62,7 +70,7 @@ export default function PcountSessionPage() {
   const [exportError, setExportError] = useState('');
   const [tableColumns, setTableColumns] = useState<string[]>(ALL_COLUMNS.map(column => column.key));
   const scanBarRef = useRef<HTMLInputElement>(null);
-  const scannerId = useRef<string>(crypto.randomUUID());
+  const scannerId = useRef<string>(createClientId());
   const hasBeenInVerify = useRef(false);
   const productsRef = useRef<Product[]>([]);
   const pendingScansRef = useRef(new Map<string, number>());
@@ -74,7 +82,9 @@ export default function PcountSessionPage() {
 
   useEffect(() => {
     setSelectedStatusCodes([]);
+    setSelectedProductCodes([]);
     setPendingExclusionError('');
+    setBulkMessage('');
   }, [statusFilter]);
 
   useEffect(() => {
@@ -250,6 +260,54 @@ export default function PcountSessionPage() {
     const selectableCodes = products.filter(product => product.status === statusFilter).map(product => product.product_code);
     setSelectedStatusCodes(previous => previous.length === selectableCodes.length ? [] : selectableCodes);
   }, [products, statusFilter]);
+
+  const toggleProductSelection = useCallback((code: string) => {
+    setSelectedProductCodes(previous => previous.includes(code)
+      ? previous.filter(value => value !== code)
+      : [...previous, code]);
+  }, []);
+
+  const toggleAllProductSelection = useCallback(() => {
+    const selectableCodes = products
+      .filter(product => statusFilter === 'all' && product.status !== 'excluded')
+      .filter(product => categoryFilter === 'all' || (product.category || '') === categoryFilter)
+      .filter(product => !searchQuery || product.product_code.toLowerCase().includes(searchQuery.toLowerCase()) || product.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      .map(product => product.product_code);
+    setSelectedProductCodes(previous => previous.length === selectableCodes.length ? [] : selectableCodes);
+  }, [categoryFilter, products, searchQuery, statusFilter]);
+
+  const completeSelectedProducts = useCallback(async () => {
+    if (!isSuperAdmin || selectedProductCodes.length === 0 || bulkPending) return;
+    setBulkPending(true);
+    setBulkMessage('');
+    try {
+      const result = await api.sessions.bulkUpdate(sessionId, selectedProductCodes, 'complete');
+      setSelectedProductCodes([]);
+      setBulkMessage(`${result.updated} product${result.updated === 1 ? '' : 's'} completed.`);
+      await loadSession();
+    } catch (error) {
+      setBulkMessage(error instanceof Error ? error.message : 'Could not complete selected products.');
+    } finally {
+      setBulkPending(false);
+    }
+  }, [bulkPending, isSuperAdmin, loadSession, selectedProductCodes, sessionId]);
+
+  const excludeListedProducts = useCallback(async () => {
+    const codes = Array.from(new Set(excludeCodes.split(/\r?\n/).map(code => code.trim()).filter(Boolean)));
+    if (!isSuperAdmin || codes.length === 0 || bulkPending) return;
+    setBulkPending(true);
+    setBulkMessage('');
+    try {
+      const result = await api.sessions.bulkUpdate(sessionId, codes, 'exclude');
+      setExcludeCodes('');
+      setBulkMessage(`${result.updated} product${result.updated === 1 ? '' : 's'} excluded${result.missingCodes.length ? `; ${result.missingCodes.length} code${result.missingCodes.length === 1 ? '' : 's'} not found.` : '.'}`);
+      await loadSession();
+    } catch (error) {
+      setBulkMessage(error instanceof Error ? error.message : 'Could not exclude the listed products.');
+    } finally {
+      setBulkPending(false);
+    }
+  }, [bulkPending, excludeCodes, isSuperAdmin, loadSession, sessionId]);
 
   const excludeSelectedStatus = useCallback(async () => {
     const selected = new Set(selectedStatusCodes);
@@ -729,6 +787,24 @@ export default function PcountSessionPage() {
               </div>
             </div>
           </div>
+          {isSuperAdmin && statusFilter === 'all' && (
+            <div className="pcount-card flex flex-col gap-3 p-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => void completeSelectedProducts()} disabled={selectedProductCodes.length === 0 || bulkPending} className="pcount-primary-button disabled:cursor-not-allowed">
+                  {bulkPending ? 'Updating…' : `Complete selected${selectedProductCodes.length ? ` (${selectedProductCodes.length})` : ''}`}
+                </button>
+                <span className="text-[11px] text-[#6e6e73]">Super Admin tools</span>
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-2 lg:max-w-xl">
+                <label htmlFor="pcount-exclude-codes" className="text-[12px] font-medium text-[#3c3c43]">Exclude product codes</label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <textarea id="pcount-exclude-codes" value={excludeCodes} onChange={event => setExcludeCodes(event.target.value)} rows={2} placeholder="One product code per line" className="min-h-16 min-w-0 flex-1 rounded-lg border border-[#d8dee8] bg-white px-3 py-2 text-[12px] text-[#1d1d1f] outline-none focus:border-[#5274a8] focus:ring-2 focus:ring-[#5274a8]/15" />
+                  <button type="button" onClick={() => void excludeListedProducts()} disabled={!excludeCodes.trim() || bulkPending} className="pcount-secondary-button self-end disabled:cursor-not-allowed">Exclude listed</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {bulkMessage && <p className="mt-2 text-[12px] text-[#3c3c43]" role="status">{bulkMessage}</p>}
           {pendingExclusionError && <p className="mt-2 text-[12px] text-[#b45309]">{pendingExclusionError}</p>}
 
           <ScanBar
@@ -766,6 +842,11 @@ export default function PcountSessionPage() {
                 onExcludeSelectedStatus={() => void excludeSelectedStatus()}
                 selectionAction={statusFilter === 'excluded' ? 'restore' : 'exclude'}
                 excludingPending={excludingPending}
+                showProductSelection={isSuperAdmin && statusFilter === 'all'}
+                selectedProductCodes={selectedProductCodes}
+                onToggleProduct={toggleProductSelection}
+                onToggleAllProducts={toggleAllProductSelection}
+                productSelectionDisabled={bulkPending}
               />
             </div>
             <div ref={verifyPanelRef} className="self-start min-h-0 min-w-0 lg:col-span-1">

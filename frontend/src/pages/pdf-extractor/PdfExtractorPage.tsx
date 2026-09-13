@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { api, type AwbLogRow, type ExtractDownload, type ExtractResult, type ExtractStatus, type PdfDiagnostic } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import ToolHelp from '../../components/ToolHelp';
+import { createClientId } from '../../lib/clientId';
 
 const LOG_COLUMNS = ['HAWB', 'InvoiceReference', 'InvoiceTotalAmount', 'DeliveryDate', 'TotalQty', 'ReceivedDate', 'OriginalFilename', 'DateLogged'];
 
@@ -341,7 +342,7 @@ export default function PdfExtractorPage() {
   async function processQueue() {
     if (busyRef.current || queueRef.current.length === 0) return;
     if (!runIdRef.current) {
-      runIdRef.current = crypto.randomUUID();
+      runIdRef.current = createClientId();
       cancelledRef.current = false;
       runStartedAtRef.current = Date.now();
       runTotalFilesRef.current = queueRef.current.length;
@@ -359,7 +360,7 @@ export default function PdfExtractorPage() {
     }
     busyRef.current = true;
     const pdfs = nextUploadGroup(queueRef.current, uploadGroupSizeRef.current);
-    const batchId = activeBatchIdRef.current ?? crypto.randomUUID();
+    const batchId = activeBatchIdRef.current ?? createClientId();
     // Completed-file offsets stay unique and ordered even when a proxy rejection
     // causes later upload groups to use a smaller adaptive size.
     const batchNumber = runCompletedFilesRef.current;

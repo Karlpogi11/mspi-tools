@@ -48,6 +48,36 @@ router.get('/sessions/search', async (req, res) => {
   }
 });
 
+router.get('/sessions/:id/compare/:otherId', requireMember, async (req, res) => {
+  try {
+    const currentId = parseInt(req.params.id);
+    const otherId = parseInt(req.params.otherId);
+    if (!Number.isInteger(otherId) || currentId === otherId) {
+      res.status(400).json({ error: 'Choose a different PCount session to compare' });
+      return;
+    }
+    await store.assertExists(otherId);
+    await store.assertMember(otherId, req.user!.userId);
+    const [currentSession, previousSession, products] = await Promise.all([
+      store.getSession(currentId, req.user!.userId),
+      store.getSession(otherId, req.user!.userId),
+      store.compareProducts(currentId, otherId),
+    ]);
+    if (!currentSession || !previousSession) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json({ currentSession, previousSession, products });
+  } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Failed to compare sessions' });
+  }
+});
+
 router.post('/sessions/join', async (req, res) => {
   try {
     const { code } = req.body;

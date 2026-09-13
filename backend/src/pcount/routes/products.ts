@@ -1,6 +1,7 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import * as store from '../store.js';
 import { broadcast, getScannerCountWs } from '../ws.js';
+import { requireSuperAdmin } from '../../auth.js';
 
 const router = Router();
 
@@ -18,6 +19,10 @@ async function requireMember(req: any, res: any, next: any) {
     res.status(500).json({ error: 'Internal server error' });
   }
 }
+
+const requireSuperAdminAccess: RequestHandler = (req, res, next) => {
+  requireSuperAdmin(req, res, next);
+};
 
 router.get('/sessions/:id/products', requireMember, async (req, res) => {
   try {
@@ -78,6 +83,37 @@ router.put('/sessions/:id/products/:code', requireMember, async (req, res) => {
       return;
     }
     res.status(500).json({ error: 'Failed to update product' });
+  }
+});
+
+router.post('/sessions/:id/products/bulk', requireMember, requireSuperAdminAccess, async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id);
+    const { codes, action } = req.body as { codes?: unknown; action?: unknown };
+    if (!Array.isArray(codes) || !codes.every(code => typeof code === 'string')) {
+      res.status(400).json({ error: 'codes must be an array of strings' });
+      return;
+    }
+    if (action !== 'complete' && action !== 'exclude') {
+      res.status(400).json({ error: 'action must be complete or exclude' });
+      return;
+    }
+
+    await store.assertWritable(sessionId);
+    const result = await store.bulkUpdateProducts(sessionId, codes, action);
+    for (const product of result.products) broadcast(sessionId, { type: 'product_updated', product });
+    res.json({
+      action,
+      updated: result.products.filter(product => action === 'exclude' || product.status === 'matched').length,
+      missingCodes: result.missingCodes,
+    });
+  } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update products' });
   }
 });
 
