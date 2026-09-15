@@ -70,6 +70,7 @@ export default function AdminToolsPage() {
   const toolIconOptions = [
     { value: 'monitor', label: 'Monitor' },
     { value: 'tools', label: 'Tools' },
+    { value: 'merge', label: 'Merge' },
     { value: 'chart', label: 'Chart' },
     { value: 'database', label: 'Database' },
     { value: 'clipboard', label: 'Clipboard' },

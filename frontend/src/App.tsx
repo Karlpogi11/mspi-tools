@@ -19,6 +19,7 @@ const loadAdminPcountPage = () => import('./pages/admin/AdminPcountPage');
 const loadPcountIndexPage = () => import('./pages/pcount/IndexPage');
 const loadPcountSessionPage = () => import('./pages/pcount/SessionPage');
 const loadRfpuPage = () => import('./pages/RfpuPage');
+const loadLabelMergerPage = () => import('./pages/LabelMergerPage');
 const loadReformatPage = () => import('./pages/reformat/ReformatPage');
 const loadConsumablesPage = () => import('./pages/consumables/ConsumablesPage');
 const loadPdfExtractorPage = () => import('./pages/pdf-extractor/PdfExtractorPage');
@@ -38,6 +39,7 @@ const AdminPcountPage = lazy(loadAdminPcountPage);
 const PcountIndexPage = lazy(loadPcountIndexPage);
 const PcountSessionPage = lazy(loadPcountSessionPage);
 const RfpuPage = lazy(loadRfpuPage);
+const LabelMergerPage = lazy(loadLabelMergerPage);
 const ReformatPage = lazy(loadReformatPage);
 const ConsumablesPage = lazy(loadConsumablesPage);
 const PdfExtractorPage = lazy(loadPdfExtractorPage);
@@ -53,7 +55,7 @@ const StorageLocatorPage = lazy(loadStorageLocatorPage);
 const PartsPage = lazy(loadPartsPage);
 const AdminPartsPage = lazy(loadAdminPartsPage);
 
-const TOOL_PATHS = ['/pcount', '/rfpu', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator', '/parts'];
+const TOOL_PATHS = ['/pcount', '/rfpu', '/label-merger', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator', '/parts'];
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -104,6 +106,7 @@ function PrefetchCommonRoutes() {
         loadPcountIndexPage(),
         loadPcountSessionPage(),
         loadRfpuPage(),
+        loadLabelMergerPage(),
         loadReformatPage(),
         loadConsumablesPage(),
         loadPdfExtractorPage(),
@@ -226,6 +229,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <RfpuPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/label-merger"
+                element={
+                  <ProtectedRoute>
+                    <LabelMergerPage />
                   </ProtectedRoute>
                 }
               />

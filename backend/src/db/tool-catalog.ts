@@ -4,6 +4,7 @@ import { roles, tools, roleToolAccess } from './schema.js';
 
 const BUILTIN_TOOLS = [
   { name: 'Site Monitor', url: '/rfpu', icon: 'monitor', description: 'Real-time site monitoring and performance tracking for RFPU deployments.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'Label Merger', url: '/label-merger', icon: 'merge', description: 'Quickly merge label PDFs with a standard overlay. Download and install on your Mac, then drag labels to merge.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'PCount', url: '/pcount', icon: 'clipboard', description: 'Weekly merchandise inventory — import system export, scan products, and reconcile counts.', roles: ['Admin', 'PMG', 'CSO'] },
   { name: 'ReFormat', url: '/reformat', icon: 'table', description: 'Import Excel/CSV files, map and rearrange columns, and export the reformatted result.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'Label Maker', url: '/consumables', icon: 'tag', description: 'Consumables label maker - log parts, auto-compute production/expiry from the 9D code, and print cut-out labels.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },

@@ -62,6 +62,7 @@ async function seed() {
     { name: 'ReFormat', url: '/reformat', icon: 'table', description: 'Import Excel/CSV files, map and rearrange columns, and export the reformatted result.', roles: [pmgRole, csoRole, engrRole] },
     { name: 'Label Maker', url: '/consumables', icon: 'tag', description: 'Consumables label maker — log parts, auto-compute production/expiry from the 9D code, and print cut-out labels.', roles: [pmgRole, csoRole, engrRole] },
     { name: 'PDF Extractor', url: '/pdf-extractor', icon: 'file', description: 'Drop or import AWB/invoice PDFs — extracts HAWB, invoice ref, amount, and delivery date.', roles: [pmgRole, csoRole, engrRole] },
+    { name: 'Label Merger', url: '/label-merger', icon: 'merge', description: 'Quickly merge label PDFs with a standard overlay.', roles: [pmgRole, csoRole, engrRole] },
   ];
   for (const definition of definitions) {
     const toolId = await getOrCreateTool({ name: definition.name, url: definition.url, icon: definition.icon, description: definition.description });

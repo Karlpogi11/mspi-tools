@@ -17,6 +17,7 @@ import adminRoutes from './routes/admin.js';
 import { pcountRouter, pcountAdminRouter, initPcount } from './pcount/gateway.js';
 import rfpuRoutes from './rfpu/routes.js';
 import reformatRoutes from './reformat/routes.js';
+import labelMergerRoutes from './label-merger/routes.js';
 import consumablesRoutes from './consumables/routes.js';
 import pdfExtractorRoutes from './pdf-extractor/routes.js';
 import { ensureAwbLogTable } from './pdf-extractor/store.js';
@@ -114,6 +115,7 @@ app.use('/api/parts', authenticateToken, requireToolAccess('/parts'), partsLimit
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
   { name: 'rfpu', router: rfpuRoutes, hasGateway: false },
+  { name: 'label-merger', router: labelMergerRoutes, hasGateway: false },
   { name: 'reformat', router: reformatRoutes, hasGateway: false },
   { name: 'consumables', router: consumablesRoutes, hasGateway: false },
   { name: 'pdf-extractor', router: pdfExtractorRoutes, hasGateway: false },

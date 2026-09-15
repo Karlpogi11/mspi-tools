@@ -910,6 +910,10 @@ export const api = {
   },
 };
 
+export const labelMergerApi = {
+  downloadUrl: () => request<{ url: string }>('/label-merger/download-url'),
+};
+
 export async function saveBlob(blob: Blob, filename: string): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
