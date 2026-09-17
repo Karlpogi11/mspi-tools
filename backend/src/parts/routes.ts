@@ -5,6 +5,7 @@ import { authenticateToken, requireAdmin } from '../auth.js';
 import { getDbPool } from '../db/index.js';
 import { ensurePartsTables } from './store.js';
 import { resolveByEee, resolveByPartNumber, resolveBySerial, invalidateEeeIndex, type ResolvedPart } from './eee.js';
+import { linkifyRefs, postBotMessage } from '../messenger/bot.js';
 import {
   appendSheetRow,
   connectUrl,
@@ -20,6 +21,12 @@ import {
 
 const router = Router();
 router.use(authenticateToken);
+
+/** Fire-and-forget Pulse announcement — a failed post never breaks the stock transaction. */
+function announceParts(text: string): void {
+  void postBotMessage('general', text, { refs: linkifyRefs(text) })
+    .catch((error) => console.error('Parts Pulse announcement failed:', error));
+}
 
 function value(input: unknown) { return String(input ?? '').trim(); }
 function upper(input: unknown) { return value(input).toUpperCase(); }
@@ -617,6 +624,7 @@ router.post('/stock/in', async (req, res) => {
         return { imported, errors };
       });
       if (result.imported === 0) { bad(res, result.errors[0]?.error || 'Unable to stock in these serials.'); return; }
+      announceParts(`${result.imported} × ${partNumber || 'part'} stocked in at ${site.code} via bulk entry${result.errors.length ? ` (${result.errors.length} failed)` : ''}.`);
       res.status(201).json({
         message: `${result.imported} × ${partNumber || 'part'} stocked in at ${site.code}${result.errors.length ? `, ${result.errors.length} need attention` : ''}.`,
         imported: result.imported,
@@ -632,6 +640,7 @@ router.post('/stock/in', async (req, res) => {
     );
     result.sheetRow.actor = req.user!.email;
     void appendSheetRow(req.user!.userId, result.sheetRow).then((ok) => { if (ok) void markSheetSynced(result.movementId); });
+    announceParts(result.message);
     res.status(201).json({ message: result.message });
   } catch (error) { stockError(res, error); }
 });
@@ -655,6 +664,7 @@ router.post('/stock/out', async (req, res) => {
     );
     result.sheetRow.actor = req.user!.email;
     void appendSheetRow(req.user!.userId, result.sheetRow).then((ok) => { if (ok) void markSheetSynced(result.movementId); });
+    announceParts(result.message);
     res.json({ message: result.message });
   } catch (error) { stockError(res, error); }
 });
@@ -688,6 +698,7 @@ router.post('/import/in', async (req, res) => {
       errors.push({ row: i + 1, error: error instanceof StockError ? error.message : 'Unable to import this row.' });
     }
   }
+  if (imported > 0) announceParts(`${imported} × parts stocked in at ${site.code} via import${errors.length ? ` (${errors.length} failed)` : ''}.`);
   res.json({ imported, failed: errors.length, errors });
 });
 
@@ -720,6 +731,7 @@ router.post('/import/out', async (req, res) => {
       errors.push({ row: i + 1, error: error instanceof StockError ? error.message : 'Unable to import this row.' });
     }
   }
+  if (imported > 0) announceParts(`${imported} × parts stocked out from ${site.code} via import${errors.length ? ` (${errors.length} failed)` : ''}.`);
   res.json({ imported, failed: errors.length, errors });
 });
 

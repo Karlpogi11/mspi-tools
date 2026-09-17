@@ -1,0 +1,22 @@
+{
+  "name": "mspi-pulse",
+  "displayName": "MSPI Pulse",
+  "description": "Trial MSPI Pulse messenger inside VS Code on Windows. Same tools.mspi.io login, channels, smart AR/serial cards, and Excel/Sheet backup.",
+  "version": "0.1.0",
+  "publisher": "mspi",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:mspi-pulse.open", "onCommand:mspi-pulse.lookup"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "mspi-pulse.open", "title": "MSPI: Open Pulse" },
+      { "command": "mspi-pulse.lookup", "title": "MSPI: Quick lookup AR / serial" }
+    ],
+    "viewsContainers": { "activitybar": [{ "id": "pulse", "title": "Pulse", "icon": "media/pulse.svg" }] },
+    "views": { "pulse": [{ "id": "pulse.chat", "name": "Pulse Chat" }] },
+    "keybindings": [{ "command": "mspi-pulse.lookup", "key": "ctrl+shift+m", "mac": "cmd+shift+m" }]
+  },
+  "scripts": { "compile": "tsc -p ./", "package": "vsce package" },
+  "devDependencies": { "typescript": "^5.5.0", "@types/vscode": "^1.85.0", "@vscode/vsce": "^2.26.0" }
+}

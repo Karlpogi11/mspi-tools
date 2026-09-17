@@ -1,0 +1,70 @@
+
+> dev
+> vite --host 0.0.0.0
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m579[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.1.30:[1m5173[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.20.240.1:[1m5173[22m/[39m
+[2m10:31:22 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx[22m
+[2m10:31:25 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx[22m
+[2m10:31:40 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:31:46 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:31:55 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:32:22 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:32:29 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:32:36 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:32:49 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:32:54 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m10:48:06 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MacAppPage.tsx, /src/index.css[22m
+[2m10:50:40 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/DashboardPage.tsx, /src/index.css[22m
+[2m10:58:51 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx[22m
+[2m10:58:56 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx[22m
+[2m10:59:29 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/EngineerEndorsementsPage.tsx, /src/index.css[22m
+[2m10:59:36 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/EngineerEndorsementsPage.tsx, /src/index.css[22m
+[2m10:59:44 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/EngineerEndorsementsPage.tsx, /src/index.css[22m
+[2m10:59:59 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/EngineerEndorsementsPage.tsx, /src/index.css[22m
+[2m11:01:01 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/EngineerEndorsementsPage.tsx, /src/index.css[22m
+[2m11:07:39 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MacAppPage.tsx, /src/index.css[22m
+[2m11:36:22 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx, /src/pages/EngineerEndorsementsPage.tsx[22m
+[2m11:36:31 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx, /src/pages/EngineerEndorsementsPage.tsx[22m
+[2m11:36:41 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:36:46 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:37:15 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:37:30 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:37:36 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:37:47 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:39:43 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m11:39:43 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m11:39:54 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m11:39:59 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m11:40:04 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m11:44:46 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx, /src/pages/EngineerEndorsementsPage.tsx, /src/pages/FrontlinePage.tsx[22m
+[2m11:45:02 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx, /src/pages/EngineerEndorsementsPage.tsx, /src/pages/FrontlinePage.tsx[22m
+[2m11:45:07 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx, /src/pages/EngineerEndorsementsPage.tsx, /src/pages/FrontlinePage.tsx[22m
+[2m11:45:12 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx, /src/pages/EngineerEndorsementsPage.tsx, /src/pages/FrontlinePage.tsx[22m
+[2m11:45:18 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/MacAppPage.tsx, /src/pages/MessengerPage.tsx, /src/pages/EngineerEndorsementsPage.tsx, /src/pages/FrontlinePage.tsx[22m
+[2m11:45:25 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:45:31 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:45:42 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:45:52 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:45:57 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:46:06 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:46:14 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:46:20 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m11:46:26 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MessengerPage.tsx, /src/index.css[22m
+[2m12:02:22 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m12:02:29 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m12:02:43 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m12:02:53 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m12:02:53 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m12:07:00 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/index.css, /src/lib/auth.tsx, /src/components/Layout.tsx, /src/pages/LoginPage.tsx, /src/pages/DashboardPage.tsx, /src/pages/AdminUsersPage.tsx, /src/pages/admin/AdminPage.tsx, /src/pages/AdminToolsPage.tsx, /src/pages/admin/AdminPcountPage.tsx, /src/pages/pcount/IndexPage.tsx, /src/pages/pcount/SessionPage.tsx, /src/pages/LabelMergerPage.tsx, /@fs/C:\Users\K\Desktop\mspi-tools\frontend\src\components\pcount\ScanBar.tsx, /@fs/C:\Users\K\Desktop\mspi-tools\frontend\src\components\pcount\ImportCount.tsx, /@fs/C:\Users\K\Desktop\mspi-tools\frontend\src\components\pcount\ProductTable.tsx, /src/pages/reformat/ReformatPage.tsx, /src/pages/consumables/ConsumablesPage.tsx, /@fs/C:\Users\K\Desktop\mspi-tools\frontend\src\components\pcount\ImportSystem.tsx, /src/pages/ApplecarePage.tsx, /src/pages/pdf-extractor/PdfExtractorPage.tsx, /src/pages/FrontlinePage.tsx, /src/pages/admin/AdminFrontlinePage.tsx, /src/pages/FrontlineDataEntryPage.tsx, /src/pages/admin/AdminEngineersPage.tsx, /src/pages/admin/AdminStorageLocatorPage.tsx, /src/pages/EngineerEndorsementsPage.tsx, /@fs/C:\Users\K\Desktop\mspi-tools\frontend\src\components\reformat\TemplateSidebar.tsx, /src/pages/StorageLocatorPage.tsx, /src/pages/PartsPage.tsx, /src/pages/admin/AdminPartsPage.tsx, /@fs/C:\Users\K\Desktop\mspi-tools\frontend\src\components\EndorsementQueuePanel.tsx[22m
+[2m12:07:01 AM[22m [36m[1m[vite][22m[39m [33mhmr invalidate [39m[2m/src/lib/auth.tsx[22m Could not Fast Refresh ("useAuth" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m12:07:01 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/index.css, /src/components/Layout.tsx, /src/pages/LoginPage.tsx, /src/pages/DashboardPage.tsx, /src/pages/AdminUsersPage.tsx, /src/pages/admin/AdminPage.tsx, /src/pages/AdminToolsPage.tsx, /src/pages/pcount/SessionPage.tsx, /src/pages/ApplecarePage.tsx, /src/pages/pdf-extractor/PdfExtractorPage.tsx, /src/pages/FrontlinePage.tsx, /src/pages/EngineerEndorsementsPage.tsx, /src/pages/PartsPage.tsx[22m
+[2m12:07:01 AM[22m [36m[1m[vite][22m[39m [33mhmr invalidate [39m[2m/@fs/C:\Users\K\Desktop\mspi-tools\frontend\src\components\pcount\ProductTable.tsx[22m Could not Fast Refresh ("ALL_COLUMNS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m12:07:01 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/pcount/SessionPage.tsx[22m
+[2m12:07:06 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m12:07:13 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m
+[2m12:07:23 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/FrontlinePage.tsx, /src/index.css[22m

@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { Server } from 'http';
 import { IncomingMessage } from 'http';
+import type { Duplex } from 'stream';
 import { verifyAccessToken } from '../auth.js';
 import { isMember } from './store.js';
 
@@ -10,8 +10,10 @@ const heartbeats = new Map<WebSocket, number>();
 
 let wss: WebSocketServer;
 
-export function initWs(server: Server, _options: { allowUnauthenticated?: boolean } = {}) {
-  wss = new WebSocketServer({ server, path: '/ws' });
+export function initWs() {
+  // noServer: a single upgrade router in index.ts dispatches by pathname.
+  // (A second { server, path } instance would 400 every foreign upgrade.)
+  wss = new WebSocketServer({ noServer: true });
 
   wss.on('connection', async (ws, request) => {
     const auth = await getSessionAuth(request);
@@ -86,6 +88,16 @@ export function initWs(server: Server, _options: { allowUnauthenticated?: boolea
       }
     }
   }, 15_000);
+}
+
+export function upgradeToPcountWs(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  if (!wss) {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit('connection', ws, req);
+  });
 }
 
 async function getSessionAuth(request: IncomingMessage): Promise<{ userId: number } | null> {

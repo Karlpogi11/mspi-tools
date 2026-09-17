@@ -7,6 +7,8 @@ import {
   primaryKey,
   index,
   uniqueIndex,
+  mysqlEnum,
+  json,
 } from 'drizzle-orm/mysql-core';
 
 export const roles = mysqlTable('roles', {
@@ -278,3 +280,41 @@ export const applecarePackingListItems = mysqlTable('applecare_packing_list_item
   quantity: int('quantity').default(0).notNull(),
   raw_text: text('raw_text'),
 });
+
+export const pulseMessages = mysqlTable('pulse_messages', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  type: mysqlEnum('type', ['ENDORSE', 'RELEASE', 'PARTS_REQUEST', 'CABINET_QUERY', 'STATUS_CHECK', 'SHIFT_HANDOVER', 'ALERT']).notNull(),
+  ar_number: varchar('ar_number', { length: 50 }),
+  payload: json('payload').notNull(),
+  posted_by: int('posted_by').references(() => users.id, { onDelete: 'set null' }),
+  target_role: mysqlEnum('target_role', ['ENGR', 'PMG', 'CSO', 'Admin', 'ALL']).notNull(),
+  target_user_id: int('target_user_id').references(() => users.id, { onDelete: 'set null' }),
+  status: mysqlEnum('status', ['OPEN', 'ACKNOWLEDGED', 'RESOLVED']).default('OPEN').notNull(),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  feedIdx: index('pulse_messages_feed_idx').on(table.created_at, table.target_role),
+  arIdx: index('pulse_messages_ar_idx').on(table.ar_number, table.created_at),
+}));
+
+export const pulseAcknowledgments = mysqlTable('pulse_acknowledgments', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  message_id: int('message_id').notNull().references(() => pulseMessages.id, { onDelete: 'cascade' }),
+  user_id: int('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  acknowledged_at: timestamp('acknowledged_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqueAck: uniqueIndex('pulse_ack_message_user_unique').on(table.message_id, table.user_id),
+}));
+
+export const pulseSubscriptions = mysqlTable('pulse_subscriptions', {
+  id: int('id').autoincrement().notNull().primaryKey(),
+  user_id: int('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  device_label: varchar('device_label', { length: 100 }),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  last_used_at: timestamp('last_used_at'),
+}, (table) => ({
+  userEndpointUnique: uniqueIndex('pulse_subscriptions_user_endpoint_unique').on(table.user_id, table.endpoint),
+}));

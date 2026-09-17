@@ -86,3 +86,14 @@ export function useWebSocket({ sessionId, scannerId, onMessage, enabled = true, 
     };
   }, [enabled, connect]);
 }
+
+export function usePulseWebSocket(onMessage: (msg: WsMessage) => void, enabled = true) {
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const ws = new WebSocket(`${WS_BASE}/ws-pulse`);
+    ws.onmessage = (event) => { try { onMessageRef.current(JSON.parse(event.data) as WsMessage); } catch { /* ignore malformed frames */ } };
+    return () => ws.close();
+  }, [enabled]);
+}

@@ -38,5 +38,5 @@ export async function initPcount(server: http.Server) {
     console.warn('PCount database unavailable — using in-memory store');
     console.warn('Set DATABASE_URL and restart to use MySQL');
   }
-  initWs(server, { allowUnauthenticated: false });
+  initWs();
 }

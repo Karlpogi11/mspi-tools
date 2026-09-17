@@ -5,6 +5,7 @@ import { writeAuditLog } from '../db/audit.js';
 import { ensureFrontlineTables } from '../frontline/store.js';
 import { QueueError, availableQueues, dayBounds, ensureQueueTables, lockDay, readQueues, resolveDivision, todayManila, withQueue } from './queue.js';
 import { assignEngineer, assignNext, changeDeviceModel, changeEngineer, previewAssignment, removeEndorsement, reorderQueue, skipNext } from './assignments.js';
+import { postPulseCard } from '../pulse/routes.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -270,6 +271,26 @@ router.post('/', queueRoute(async (req, res) => {
   const result = chosen
     ? await assignEngineer(req.body || {}, chosen, req.user!.userId)
     : await assignNext(req.body || {}, req.user!.userId);
+  try {
+    await postPulseCard({
+      type: 'ENDORSE',
+      arNumber: result.record.arNumber,
+      payload: {
+        arNumber: result.record.arNumber,
+        deviceModel: result.record.deviceModel,
+        faultDescription: result.record.issue,
+        priority: req.body?.priority === 'URGENT' ? 'URGENT' : 'NORMAL',
+        assignedEngineerName: result.engineer.name,
+        assignedEngineerId: result.engineer.userId ?? 0,
+        waitingHours: 0,
+      },
+      postedBy: req.user!.userId,
+      targetRole: 'ENGR',
+      targetUserId: result.engineer.userId,
+    });
+  } catch (error) {
+    console.warn('Pulse endorsement card could not be posted:', error instanceof Error ? error.message : error);
+  }
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsed', resourceType: 'engineer_endorsement', resourceId: result.endorsementId, metadata: { engineer: result.engineer.name, division: result.record.productDivision, manualPick: Boolean(chosen) } });
   res.status(201).json(result);
 }));

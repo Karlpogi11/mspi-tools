@@ -30,6 +30,11 @@ import { ensureFrontlineTables } from './frontline/store.js';
 import endorsementRoutes from './endorsements/routes.js';
 import storageLocatorRoutes from './storage-locator/routes.js';
 import partsRoutes from './parts/routes.js';
+import pulseRoutes, { ensurePulseTables } from './pulse/routes.js';
+import messengerRoutes from './messenger/routes.js';
+import { initMessengerWs, upgradeToPulseWs } from './messenger/ws.js';
+import { upgradeToPcountWs } from './pcount/ws.js';
+import type { Duplex } from 'stream';
 import { authenticateToken, requireToolAccess } from './auth.js';
 import { isAllowedOrigin } from './config/origins.js';
 
@@ -111,6 +116,8 @@ app.use('/api/frontline', frontlineRoutes);
 app.use('/api/endorsements', authenticateToken, requireToolAccess('/endorsements'), endorsementRoutes);
 app.use('/api/storage-locator', authenticateToken, requireToolAccess('/storage-locator'), storageLocatorRoutes);
 app.use('/api/parts', authenticateToken, requireToolAccess('/parts'), partsLimiter, partsRoutes);
+app.use('/api/messenger', authenticateToken, requireToolAccess('/messenger'), messengerRoutes);
+app.use('/api/pulse', pulseRoutes);
 
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
@@ -201,6 +208,11 @@ async function start() {
     const { ensurePartsTables } = await import('./parts/store.js');
     await ensurePartsTables();
     logger.info('Parts Inventory tables ready');
+    const { ensureMessengerTables } = await import('./messenger/store.js');
+    await ensureMessengerTables();
+    logger.info('Messenger tables ready');
+    await ensurePulseTables();
+    logger.info('Pulse tables ready');
     await syncBuiltinToolCatalog();
     logger.info('Built-in tool catalog synchronized');
   } catch (error) {
@@ -215,6 +227,20 @@ async function start() {
       await tool.init(server);
     }
   }
+  initMessengerWs();
+
+  // ws@8 path-bound servers 400 every foreign upgrade, so one router owns
+  // all upgrades on this server and dispatches by exact pathname.
+  server.on('upgrade', (req, socket, head) => {
+    const pathname = (req.url || '').split('?')[0];
+    if (pathname === '/ws-pulse') {
+      upgradeToPulseWs(req, socket as Duplex, head);
+    } else if (pathname === '/ws') {
+      upgradeToPcountWs(req, socket as Duplex, head);
+    } else {
+      socket.destroy();
+    }
+  });
 
   if (!startupError) {
     appReady = true;

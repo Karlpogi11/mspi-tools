@@ -398,6 +398,18 @@ let partsSiteToken = '';
 export function setPartsSiteToken(token: string) {
   partsSiteToken = token;
 }
+/** Verified Parts site code for this session (e.g. PODIUM), or null. Display-only. */
+export function getPartsSiteCode(): string | null {
+  try {
+    const payload = partsSiteToken.split('.')[0];
+    if (!payload) return null;
+    const data = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { code?: string; exp?: number };
+    if (!data.code || !(data.exp! > Date.now())) return null;
+    return data.code;
+  } catch {
+    return null;
+  }
+}
 function siteHeaders(): Record<string, string> {
   return partsSiteToken ? { 'x-site-token': partsSiteToken } : {};
 }

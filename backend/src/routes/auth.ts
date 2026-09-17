@@ -292,32 +292,37 @@ router.post('/change-password', authenticateToken, passwordChangeLimiter, authSl
 });
 
 router.get('/me', authenticateToken, async (req: Request, res: Response) => {
-  const db = getDb();
-  const result = await db
-    .select({
-      user: users,
-      roleName: roles.name,
-    })
-    .from(users)
-    .leftJoin(roles, eq(users.role_id, roles.id))
-    .where(eq(users.id, req.user!.userId))
-    .limit(1);
+  try {
+    const db = getDb();
+    const result = await db
+      .select({
+        user: users,
+        roleName: roles.name,
+      })
+      .from(users)
+      .leftJoin(roles, eq(users.role_id, roles.id))
+      .where(eq(users.id, req.user!.userId))
+      .limit(1);
 
-  if (result.length === 0) {
-    res.status(404).json({ error: 'User not found' });
-    return;
+    if (result.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const { user, roleName } = result[0];
+    res.json({
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      roleId: user.role_id,
+      roleName,
+      isSuperAdmin: Boolean(user.is_super_admin),
+      createdAt: user.created_at,
+    });
+  } catch (error) {
+    console.error('me error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  const { user, roleName } = result[0];
-  res.json({
-    id: user.id,
-    email: user.email,
-    fullName: user.full_name,
-    roleId: user.role_id,
-    roleName,
-    isSuperAdmin: Boolean(user.is_super_admin),
-    createdAt: user.created_at,
-  });
 });
 
 export default router;

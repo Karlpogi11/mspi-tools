@@ -17,6 +17,8 @@ const iconMap: Record<string, string> = {
   parts: 'M12 3 3 8l9 5 9-5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5',
   wrench: 'M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.1 2.1-2.1-2.1 2.1-2.1Z',
   merge: 'M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z',
+  chat: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z',
+  download: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12',
   default: 'M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z M20.488 9H15V3.512a9.025 9.025 0 015.488 5.488z',
 };
 
@@ -45,7 +47,14 @@ export default function DashboardPage() {
   const [partsVerificationError, setPartsVerificationError] = useState('');
   const [partsVerificationBusy, setPartsVerificationBusy] = useState(false);
 
-  const visibleTools = tools.filter(tool => tool.name.trim().toLowerCase() !== 'site monitor');
+  // These new communication/install tools are deliberately invisible to
+  // non-super-admin users. They must not appear as disabled launcher cards.
+  const SUPER_ADMIN_ONLY_URLS = new Set(['/pulse', '/messenger', '/mac-app', '/mspi-tools']);
+  const SUPER_ADMIN_ONLY_NAMES = new Set(['mspi pulse', 'pulse messenger', 'desktop app', 'mspi tools']);
+  const visibleTools = tools
+    .filter(tool => tool.name.trim().toLowerCase() !== 'site monitor')
+    .filter(tool => user?.isSuperAdmin === true
+      || (!SUPER_ADMIN_ONLY_URLS.has(tool.url) && !SUPER_ADMIN_ONLY_NAMES.has(tool.name.trim().toLowerCase())));
 
   const openStorageLocator = (event: React.MouseEvent<HTMLAnchorElement>, tool: Tool) => {
     if (tool.name.trim().toLowerCase() !== 'storage locator') return;

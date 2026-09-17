@@ -1,0 +1,272 @@
+[2m10:08:24 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:08:25 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:08:27 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:08:35 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:08:36 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:08:36 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:08:37 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:34 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:35 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:36 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:37 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:37 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:38 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:41 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:09:42 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:12:19 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
+[2m10:12:52 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:13:19 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:14:02 PM[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:30:24 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m10:31:46 PM[22m [31m[1m[vite][22m[39m [31mInternal server error: C:\Users\K\Desktop\mspi-tools\frontend\src\pages\MessengerPage.tsx: 'return' outside of function. (23:96)
+
+[0m [90m 21 |[31m }
+ [90m 22 |[31m   [36mconst[31m refs [33m=[31m message[33m.[31mmeta[33m?[31m[33m.[31mrefs[33m;[31m
+[31m[1m>[22m[31m[90m 23 |[31m   [36mif[31m ([33m![31mrefs [33m||[31m (refs[33m.[31mars[33m.[31mlength [33m===[31m [35m0[31m [33m&&[31m refs[33m.[31mserials[33m.[31mlength [33m===[31m [35m0[31m [33m&&[31m refs[33m.[31mparts[33m.[31mlength [33m===[31m [35m0[31m)) [36mreturn[31m [36mnull[31m[33m;[31m
+ [90m    |[31m                                                                                                 [31m[1m^[22m[31m
+ [90m 24 |[31m   [36mreturn[31m (
+ [90m 25 |[31m     [33m<[31m[33mdiv[31m className[33m=[31m[32m"mt-1.5 flex flex-wrap gap-1.5"[31m[33m>[31m
+ [90m 26 |[31m       {refs[33m.[31mars[33m.[31mmap((ar) [33m=>[31m ([0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36mC:/Users/K/Desktop/mspi-tools/frontend/src/pages/MessengerPage.tsx[39m:23:96
+[33m  21 |  }
+  22 |    const refs = message.meta?.refs;
+  23 |    if (!refs || (refs.ars.length === 0 && refs.serials.length === 0 && refs.parts.length === 0)) return null;
+     |                                                                                                  ^
+  24 |    return (
+  25 |      <div className="mt-1.5 flex flex-wrap gap-1.5">[39m
+      at constructor (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at TypeScriptParserMixin.raise (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:6616:19)
+      at TypeScriptParserMixin.parseReturnStatement (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13153:12)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12815:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseStatementOrSloppyAnnexBFunctionDeclaration (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12774:17)
+      at TypeScriptParserMixin.parseIfStatement (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12813:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseModuleItem (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12761:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13333:36)
+      at TypeScriptParserMixin.parseBlockBody (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13326:10)
+      at TypeScriptParserMixin.parseProgram (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12639:10)
+      at TypeScriptParserMixin.parseTopLevel (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12629:25)
+      at TypeScriptParserMixin.parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:14505:25)
+      at TypeScriptParserMixin.parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:10143:18)
+      at parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parser (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+      at parser.next (<anonymous>)
+      at normalizeFile (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:51:37)
+      at normalizeFile.next (<anonymous>)
+      at run (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+      at run.next (<anonymous>)
+      at transform (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+      at transform.next (<anonymous>)
+      at step (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:261:32)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:223:11)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:189:28
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\gensync-utils\async.js:67:7
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:113:33
+      at step (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:287:14)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:223:11)
+[2m10:55:46 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
+[2m10:56:16 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
+[2m10:56:46 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
+[2m10:59:44 PM[22m [31m[1m[vite][22m[39m [31mInternal server error: Transform failed with 1 error:
+C:/Users/K/Desktop/mspi-tools/frontend/src/pages/EngineerEndorsementsPage.tsx:268:1123: ERROR: The character "}" is not valid inside a JSX element[39m
+  Plugin: [35mvite:esbuild[39m
+  File: [36mC:/Users/K/Desktop/mspi-tools/frontend/src/pages/EngineerEndorsementsPage.tsx[39m:249:1121
+[33m  
+  [33mThe character "}" is not valid inside a JSX element[33m
+  266|                  <div className="flex items-center justify-between gap-3"><div><h2 className="text-[13px] font-semibold text-[#1d1d1f]">Recent endorsements</h2><p className="mt-1 text-[12px] text-[#6e6e73]">Delete an endorsement without deleting the original Frontline record.</p></div><span className="text-[11px] text-[#6e6e73]">{dashboard.endorsements.length}</span></div>
+  267|                  <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-1">
+  268|                    {dashboard.endorsements.length ? dashboard.endorsements.map((row) => <div key={row.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#f5f5f7] px-3 py-2.5"><div className="min-w-0"><p className="truncate text-[12px] font-medium text-[#1d1d1f]">AR {row.ar_number} <span className="font-normal text-[#6e6e73]">· {row.engineer_name}</span></p><p className="mt-0.5 truncate text-[11px] text-[#6e6e73]">{row.device_model || 'Device not specified'} · CSO: {row.cso_name || 'Unknown'} · {row.issue || 'No issue provided'}</p></div>{canEditEndorsement && <button type="button" onClick={() => void deleteEndorsement(row.id)} disabled={deletingEndorsementId === row.id} className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium text-[#b42318] hover:bg-[#feeceb] disabled:cursor-not-allowed disabled:opacity-40">{deletingEndorsementId === row.id ? 'Deleting…' : 'Delete'}</button>}<button type="button" onClick={() => void openPhotos(row)} className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium text-[#0071e3] hover:bg-[#eef4ff]">Photos</button>}</div>) : <p className="text-[12px] text-[#6e6e73]">No endorsements yet.</p>}
+     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ^
+  269|                  </div>
+  270|                </section>
+  [39m
+      at failureErrorWithLog (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\esbuild\lib\main.js:1472:15)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\esbuild\lib\main.js:755:50
+      at responseCallbacks.<computed> (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\esbuild\lib\main.js:622:9)
+      at handleIncomingPacket (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\esbuild\lib\main.js:677:12)
+      at Socket.readFromStdout (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\esbuild\lib\main.js:600:7)
+      at Socket.emit (node:events:524:28)
+      at addChunk (node:internal/streams/readable:561:12)
+      at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+      at Readable.push (node:internal/streams/readable:392:5)
+      at Pipe.onStreamRead (node:internal/stream_base_commons:189:23)
+[2m11:07:45 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
+[2m11:07:46 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/my-tools[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
+[2m11:07:46 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=72[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
+[2m11:35:37 PM[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m11:36:41 PM[22m [31m[1m[vite][22m[39m [31mInternal server error: C:\Users\K\Desktop\mspi-tools\frontend\src\pages\MessengerPage.tsx: 'return' outside of function. (22:32)
+
+[0m [90m 20 |[31m   )[33m;[31m
+ [90m 21 |[31m }
+[31m[1m>[22m[31m[90m 22 |[31m   [36mif[31m (attachments[33m.[31mlength [33m===[31m [35m0[31m) [36mreturn[31m [36mnull[31m[33m;[31m
+ [90m    |[31m                                 [31m[1m^[22m[31m
+ [90m 23 |[31m   [36mreturn[31m (
+ [90m 24 |[31m     [33m<[31m[33mdiv[31m className[33m=[31m[32m"mt-1.5 flex flex-wrap gap-1.5"[31m[33m>[31m
+ [90m 25 |[31m       {attachments[33m.[31mmap((a) [33m=>[31m ([0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36mC:/Users/K/Desktop/mspi-tools/frontend/src/pages/MessengerPage.tsx[39m:22:32
+[33m  20 |    );
+  21 |  }
+  22 |    if (attachments.length === 0) return null;
+     |                                  ^
+  23 |    return (
+  24 |      <div className="mt-1.5 flex flex-wrap gap-1.5">[39m
+      at constructor (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at TypeScriptParserMixin.raise (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:6616:19)
+      at TypeScriptParserMixin.parseReturnStatement (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13153:12)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12815:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseStatementOrSloppyAnnexBFunctionDeclaration (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12774:17)
+      at TypeScriptParserMixin.parseIfStatement (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12813:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseModuleItem (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12761:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13333:36)
+      at TypeScriptParserMixin.parseBlockBody (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13326:10)
+      at TypeScriptParserMixin.parseProgram (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12639:10)
+      at TypeScriptParserMixin.parseTopLevel (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12629:25)
+      at TypeScriptParserMixin.parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:14505:25)
+      at TypeScriptParserMixin.parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:10143:18)
+      at parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parser (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+      at parser.next (<anonymous>)
+      at normalizeFile (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:51:37)
+      at normalizeFile.next (<anonymous>)
+      at run (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+      at run.next (<anonymous>)
+      at transform (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+      at transform.next (<anonymous>)
+      at step (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:261:32)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:223:11)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:189:28
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\gensync-utils\async.js:67:7
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:113:33
+      at step (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:287:14)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:223:11)
+[2m11:39:21 PM[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m11:45:32 PM[22m [31m[1m[vite][22m[39m [31mInternal server error: C:\Users\K\Desktop\mspi-tools\frontend\src\pages\MessengerPage.tsx: 'return' outside of function. (58:32)
+
+[0m [90m 56 |[31m   )[33m;[31m
+ [90m 57 |[31m }
+[31m[1m>[22m[31m[90m 58 |[31m   [36mif[31m (attachments[33m.[31mlength [33m===[31m [35m0[31m) [36mreturn[31m [36mnull[31m[33m;[31m
+ [90m    |[31m                                 [31m[1m^[22m[31m
+ [90m 59 |[31m   [36mreturn[31m (
+ [90m 60 |[31m     [33m<[31m[33mdiv[31m className[33m=[31m[32m"mt-1.5 flex flex-wrap gap-1.5"[31m[33m>[31m
+ [90m 61 |[31m       {attachments[33m.[31mmap((a) [33m=>[31m ([0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36mC:/Users/K/Desktop/mspi-tools/frontend/src/pages/MessengerPage.tsx[39m:58:32
+[33m  56 |    );
+  57 |  }
+  58 |    if (attachments.length === 0) return null;
+     |                                  ^
+  59 |    return (
+  60 |      <div className="mt-1.5 flex flex-wrap gap-1.5">[39m
+      at constructor (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at TypeScriptParserMixin.raise (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:6616:19)
+      at TypeScriptParserMixin.parseReturnStatement (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13153:12)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12815:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseStatementOrSloppyAnnexBFunctionDeclaration (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12774:17)
+      at TypeScriptParserMixin.parseIfStatement (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12813:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseModuleItem (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12761:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13333:36)
+      at TypeScriptParserMixin.parseBlockBody (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:13326:10)
+      at TypeScriptParserMixin.parseProgram (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12639:10)
+      at TypeScriptParserMixin.parseTopLevel (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:12629:25)
+      at TypeScriptParserMixin.parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:14505:25)
+      at TypeScriptParserMixin.parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:10143:18)
+      at parse (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parser (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+      at parser.next (<anonymous>)
+      at normalizeFile (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:51:37)
+      at normalizeFile.next (<anonymous>)
+      at run (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+      at run.next (<anonymous>)
+      at transform (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+      at transform.next (<anonymous>)
+      at step (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:261:32)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:223:11)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:189:28
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\@babel\core\lib\gensync-utils\async.js:67:7
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:113:33
+      at step (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:287:14)
+      at C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (C:\Users\K\Desktop\mspi-tools\frontend\node_modules\gensync\index.js:223:11)
+[2m12:00:02 AM[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m12:04:39 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/endorsements/notifications?afterId=73[39m
+Error: connect ECONNREFUSED ::1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1615:16)
