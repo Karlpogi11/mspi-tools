@@ -6,6 +6,7 @@ import { ensureFrontlineTables } from '../frontline/store.js';
 import { QueueError, availableQueues, dayBounds, ensureQueueTables, lockDay, readQueues, resolveDivision, todayManila, withQueue } from './queue.js';
 import { assignEngineer, assignNext, changeDeviceModel, changeEngineer, previewAssignment, removeEndorsement, reorderQueue, skipNext } from './assignments.js';
 import { postPulseCard } from '../pulse/routes.js';
+import { broadcastPulse } from '../messenger/ws.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -23,6 +24,9 @@ function canEditCalendar(req: Request) { return canEndorse(req) || isEngineer(re
 function canDeleteEndorsement(req: Request) { return canEndorse(req) || isEngineer(req); }
 function forbidden(res: Response) { res.status(403).json({ error: 'Engineer Endorsements access required' }); }
 function endorsementDivision(deviceModel: string, sourceDivision: string) { return resolveDivision(deviceModel, sourceDivision) || sourceDivision; }
+function broadcastEndorsementChanged(endorsementId: number) {
+  broadcastPulse({ type: 'endorsement:changed', endorsementId });
+}
 function queueRoute(handler: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response) => { void handler(req, res).catch((error) => {
     if (error instanceof QueueError) { res.status(error.status).json({ error: error.message }); return; }
@@ -231,7 +235,7 @@ router.get('/calendar', async (req, res) => {
   const nextMonth = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
   const pool = getDbPool();
 
-  const [detailRows] = await pool.query(`SELECT id, DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '+08:00'), '%Y-%m-%d') AS endorsement_date, ar_number, device_model, issue, product_division, status, engineer_name, created_at FROM engineer_endorsements WHERE created_at >= ? AND created_at < ? ORDER BY created_at ASC`, [dayBounds(`${month}-01`)[0], dayBounds(nextMonth)[0]]);
+  const [detailRows] = await pool.query(`SELECT e.id, DATE_FORMAT(CONVERT_TZ(e.created_at, '+00:00', '+08:00'), '%Y-%m-%d') AS endorsement_date, e.ar_number, COALESCE(fr.serial_number, '') AS serial_number, e.device_model, e.issue, e.product_division, e.status, e.engineer_name, e.created_at FROM engineer_endorsements e LEFT JOIN frontline_records fr ON fr.id = e.frontline_record_id OR (fr.id IS NULL AND fr.ar_number = e.ar_number) WHERE e.created_at >= ? AND e.created_at < ? ORDER BY e.created_at ASC`, [dayBounds(`${month}-01`)[0], dayBounds(nextMonth)[0]]);
   const [manualRows] = await pool.query(`SELECT id, DATE_FORMAT(entry_date, '%Y-%m-%d') AS endorsement_date, entry_count AS manual_count, details, product_division, engineer_name, created_at FROM engineer_calendar_entries WHERE entry_date >= ? AND entry_date < ?`, [`${month}-01`, nextMonth]);
   const preferredDivisions = ['iOS/ACCS', 'MacBook', 'iMac']; const allowedDivisions = new Set(preferredDivisions); const canonicalDivision = (value: string) => { const normalized = value.trim().toLowerCase(); if (normalized.includes('accs') || ['iphone', 'ipad', 'watch', 'ipod', 'ios/accs'].includes(normalized)) return 'iOS/ACCS'; if (normalized === 'macbook') return 'MacBook'; if (normalized === 'imac') return 'iMac'; return value; }; const divisions = preferredDivisions;
   const [rosterRows] = await pool.query(`SELECT DISTINCT NULLIF(TRIM(engineer_name), '') AS engineer_name FROM engineer_roster WHERE active = 1`);
@@ -271,6 +275,7 @@ router.post('/', queueRoute(async (req, res) => {
   const result = chosen
     ? await assignEngineer(req.body || {}, chosen, req.user!.userId)
     : await assignNext(req.body || {}, req.user!.userId);
+  broadcastEndorsementChanged(result.endorsementId);
   try {
     await postPulseCard({
       type: 'ENDORSE',
@@ -331,6 +336,7 @@ router.delete('/calendar-entry', async (req, res) => {
 router.post('/:id/pass', queueRoute(async (req, res) => {
   if (!canEditCalendar(req)) { forbidden(res); return; }
   const result = await changeEngineer(Number(req.params.id), null, req.user!.userId);
+  broadcastEndorsementChanged(Number(req.params.id));
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_passed', resourceType: 'engineer_endorsement', resourceId: req.params.id, metadata: result });
   res.json(result);
 }));
@@ -340,6 +346,7 @@ router.patch('/:id/engineer', queueRoute(async (req, res) => {
   const name = canonicalEngineerName(text(req.body?.engineerName));
   if (!name || name.length > 150) throw new QueueError(400, 'Choose an Engineer.');
   const result = await changeEngineer(Number(req.params.id), name, req.user!.userId);
+  broadcastEndorsementChanged(Number(req.params.id));
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_engineer_updated', resourceType: 'engineer_endorsement', resourceId: req.params.id, metadata: result });
   res.json(result);
 }));
@@ -347,6 +354,7 @@ router.patch('/:id/engineer', queueRoute(async (req, res) => {
 router.post('/:id/cancel', queueRoute(async (req, res) => {
   if (!canEditCalendar(req)) { forbidden(res); return; }
   const result = await removeEndorsement(Number(req.params.id), true);
+  broadcastEndorsementChanged(Number(req.params.id));
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_cancelled', resourceType: 'engineer_endorsement', resourceId: req.params.id, metadata: result });
   res.json(result);
 }));
@@ -354,6 +362,7 @@ router.post('/:id/cancel', queueRoute(async (req, res) => {
 router.delete('/:id', queueRoute(async (req, res) => {
   if (!canDeleteEndorsement(req)) { forbidden(res); return; }
   const result = await removeEndorsement(Number(req.params.id));
+  broadcastEndorsementChanged(Number(req.params.id));
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_deleted', resourceType: 'engineer_endorsement', resourceId: req.params.id, metadata: result });
   res.json(result);
 }));
@@ -361,6 +370,7 @@ router.delete('/:id', queueRoute(async (req, res) => {
 router.patch('/:id', queueRoute(async (req, res) => {
   if (!canEditCalendar(req)) { forbidden(res); return; }
   const result = await changeDeviceModel(Number(req.params.id), text(req.body?.deviceModel), req.user!.userId);
+  broadcastEndorsementChanged(Number(req.params.id));
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsement_device_model_updated', resourceType: 'engineer_endorsement', resourceId: req.params.id, metadata: result });
   res.json(result);
 }));
@@ -372,7 +382,7 @@ router.get('/dashboard', async (req, res) => {
   const [availabilityRows] = await pool.query(`SELECT user_id, status, joined_at, left_at, assignment_count FROM engineer_daily_availability WHERE availability_date = ? ${engineerId ? 'AND user_id = ?' : ''}`, engineerId ? [todayManila(), engineerId] : [todayManila()]);
   const [countRows] = await pool.query(`SELECT COUNT(*) AS total, SUM(status = 'endorsed') AS pending FROM engineer_endorsements ${engineerId ? 'WHERE engineer_user_id = ?' : ''}`, engineerId ? [engineerId] : []);
   const [divisionRows] = await pool.query(`SELECT product_division, COUNT(*) AS total FROM engineer_endorsements ${engineerId ? 'WHERE engineer_user_id = ?' : ''} GROUP BY product_division ORDER BY total DESC`, engineerId ? [engineerId] : []);
-  const [endorsementRows] = await pool.query(`SELECT e.id, e.ar_number, e.device_model, e.issue, e.product_division, e.status, e.created_at, e.engineer_name, cso.full_name AS cso_name FROM engineer_endorsements e LEFT JOIN users cso ON cso.id = e.cso_user_id ${engineerId ? 'WHERE e.engineer_user_id = ? OR (e.engineer_user_id IS NULL AND e.engineer_name = (SELECT engineer_name FROM engineer_daily_availability WHERE user_id = ? ORDER BY id DESC LIMIT 1))' : ''} ORDER BY e.created_at DESC LIMIT 100`, engineerId ? [engineerId, engineerId] : []);
+  const [endorsementRows] = await pool.query(`SELECT e.id, e.ar_number, COALESCE(fr.serial_number, '') AS serial_number, e.device_model, e.issue, e.product_division, e.status, e.created_at, e.engineer_name, cso.full_name AS cso_name FROM engineer_endorsements e LEFT JOIN frontline_records fr ON fr.id = e.frontline_record_id OR (fr.id IS NULL AND fr.ar_number = e.ar_number) LEFT JOIN users cso ON cso.id = e.cso_user_id ${engineerId ? 'WHERE e.engineer_user_id = ? OR (e.engineer_user_id IS NULL AND e.engineer_name = (SELECT engineer_name FROM engineer_daily_availability WHERE user_id = ? ORDER BY id DESC LIMIT 1))' : ''} ORDER BY e.created_at DESC LIMIT 100`, engineerId ? [engineerId, engineerId] : []);
   res.json({ date: todayManila(), availability: (availabilityRows as Array<Record<string, unknown>>)[0] || null, totals: (countRows as Array<Record<string, unknown>>)[0] || { total: 0, pending: 0 }, divisions: divisionRows, endorsements: endorsementRows });
 });
 

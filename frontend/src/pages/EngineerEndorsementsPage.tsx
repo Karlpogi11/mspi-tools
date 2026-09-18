@@ -3,6 +3,7 @@ import { api, type EndorsementEngineer, type EndorsementQueues, type EngineerCal
 import { pulseApi, type PulseMessage } from '../lib/messenger';
 import { useAuth } from '../lib/auth';
 import EndorsementQueuePanel from '../components/EndorsementQueuePanel';
+import { usePulseWebSocket } from '../hooks/useWebSocket';
 
 function LegacyEngineerEndorsementsPage() {
   const { user } = useAuth();
@@ -86,6 +87,11 @@ function LegacyEngineerEndorsementsPage() {
     window.addEventListener('focus', refreshQueues); document.addEventListener('visibilitychange', refreshQueues);
     return () => { window.clearInterval(queueTimer); window.clearInterval(pageTimer); window.removeEventListener('focus', refreshQueues); document.removeEventListener('visibilitychange', refreshQueues); ++loadVersion.current; ++queueLoadVersion.current; };
   }, [calendarMonth, showDetails]);
+  usePulseWebSocket((event) => {
+    if (event.type !== 'endorsement:changed' || document.visibilityState !== 'visible') return;
+    void loadQueues();
+    if (showDetails) void loadHistory(true);
+  }, Boolean(user));
   useEffect(() => { if (!message) return; const timer = window.setTimeout(() => setMessage(''), 6000); return () => window.clearTimeout(timer); }, [message]);
 
   const formatDate = (value: string | null | undefined) => {
