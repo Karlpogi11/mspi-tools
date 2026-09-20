@@ -18,6 +18,13 @@ swift build --package-path "$MAC_APP_DIR" --configuration release --product "$AP
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$MAC_APP_DIR/.build/arm64-apple-macosx/release/$APP_NAME" "$APP_DIR/Contents/MacOS/$APP_NAME"
 cp "$MAC_APP_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+actool \
+  --compile "$APP_DIR/Contents/Resources" \
+  --platform macosx \
+  --minimum-deployment-target 14.0 \
+  --app-icon AppIcon \
+  --output-partial-info-plist "$STAGING_DIR/Assets-partial.plist" \
+  "$MAC_APP_DIR/Resources/Assets.xcassets"
 chmod 755 "$APP_DIR/Contents/MacOS/$APP_NAME"
 
 if [[ -n "${SIGNING_IDENTITY:-}" ]]; then

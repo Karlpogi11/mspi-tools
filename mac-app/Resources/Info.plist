@@ -10,6 +10,8 @@
 	<string>com.mspi.storage-locator</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleName</key>
 	<string>Storage Locator</string>
 	<key>CFBundlePackageType</key>
