@@ -5,6 +5,8 @@ dist/
 *.tsbuildinfo
 frontend/dist/
 backend/data/
+mac-app/.build/
+mac-app/.swiftpm/
 *.traineddata
 .turbo/
 apps/

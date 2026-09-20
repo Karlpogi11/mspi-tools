@@ -3,9 +3,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import slowDown from 'express-slow-down';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
-import { users, roles } from '../db/schema.js';
+import { users, roles, storageEmployees } from '../db/schema.js';
 import { authenticateToken } from '../auth.js';
 import { writeAuditLog } from '../db/audit.js';
 
@@ -322,6 +322,38 @@ router.get('/me', authenticateToken, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('me error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/employee-login', async (req: Request, res: Response) => {
+  try {
+    const { employeeNumber } = req.body;
+    if (!employeeNumber || typeof employeeNumber !== 'string') {
+      res.status(400).json({ error: 'Employee number is required' });
+      return;
+    }
+    const db = getDb();
+    const [employee] = await db.select().from(storageEmployees).where(eq(storageEmployees.employee_number, employeeNumber.trim().toUpperCase())).limit(1);
+    if (!employee || !(employee as { active: number }).active) {
+      res.status(404).json({ error: 'Employee not found or inactive' });
+      return;
+    }
+    const token = jwt.sign(
+      { userId: (employee as { id: number }).id, employeeNumber: employeeNumber.trim().toUpperCase(), fullName: (employee as { full_name: string }).full_name, isEmployee: true },
+      process.env.JWT_SECRET!,
+      { expiresIn: '8h' }
+    );
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production' && !['localhost', '127.0.0.1'].includes(req.hostname),
+      sameSite: 'lax',
+      domain: ['localhost', '127.0.0.1'].includes(req.hostname) ? undefined : process.env.COOKIE_DOMAIN,
+      path: '/',
+    });
+    res.json({ token, employeeNumber: employeeNumber.trim().toUpperCase(), fullName: (employee as { full_name: string }).full_name });
+  } catch (error) {
+    console.error('employee login error:', error);
+    res.status(500).json({ error: 'Unable to sign in.' });
   }
 });
 

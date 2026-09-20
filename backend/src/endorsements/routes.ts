@@ -5,8 +5,7 @@ import { writeAuditLog } from '../db/audit.js';
 import { ensureFrontlineTables } from '../frontline/store.js';
 import { QueueError, availableQueues, dayBounds, ensureQueueTables, lockDay, readQueues, resolveDivision, todayManila, withQueue } from './queue.js';
 import { assignEngineer, assignNext, changeDeviceModel, changeEngineer, previewAssignment, removeEndorsement, reorderQueue, skipNext } from './assignments.js';
-import { postPulseCard } from '../pulse/routes.js';
-import { broadcastPulse } from '../messenger/ws.js';
+
 
 const router = Router();
 router.use(authenticateToken);
@@ -25,7 +24,6 @@ function canDeleteEndorsement(req: Request) { return canEndorse(req) || isEngine
 function forbidden(res: Response) { res.status(403).json({ error: 'Engineer Endorsements access required' }); }
 function endorsementDivision(deviceModel: string, sourceDivision: string) { return resolveDivision(deviceModel, sourceDivision) || sourceDivision; }
 function broadcastEndorsementChanged(endorsementId: number) {
-  broadcastPulse({ type: 'endorsement:changed', endorsementId });
 }
 function queueRoute(handler: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response) => { void handler(req, res).catch((error) => {
@@ -276,30 +274,9 @@ router.post('/', queueRoute(async (req, res) => {
     ? await assignEngineer(req.body || {}, chosen, req.user!.userId)
     : await assignNext(req.body || {}, req.user!.userId);
   broadcastEndorsementChanged(result.endorsementId);
-  try {
-    await postPulseCard({
-      type: 'ENDORSE',
-      arNumber: result.record.arNumber,
-      payload: {
-        arNumber: result.record.arNumber,
-        deviceModel: result.record.deviceModel,
-        faultDescription: result.record.issue,
-        priority: req.body?.priority === 'URGENT' ? 'URGENT' : 'NORMAL',
-        assignedEngineerName: result.engineer.name,
-        assignedEngineerId: result.engineer.userId ?? 0,
-        waitingHours: 0,
-      },
-      postedBy: req.user!.userId,
-      targetRole: 'ENGR',
-      targetUserId: result.engineer.userId,
-    });
-  } catch (error) {
-    console.warn('Pulse endorsement card could not be posted:', error instanceof Error ? error.message : error);
-  }
   void writeAuditLog({ actorUserId: req.user!.userId, action: 'engineer.endorsed', resourceType: 'engineer_endorsement', resourceId: result.endorsementId, metadata: { engineer: result.engineer.name, division: result.record.productDivision, manualPick: Boolean(chosen) } });
   res.status(201).json(result);
 }));
-
 router.put('/calendar-entry', queueRoute(async (req, res) => {
   if (!canEditCalendar(req)) { forbidden(res); return; }
   const date = text(req.body?.date); const division = text(req.body?.division); const engineer = canonicalEngineerName(text(req.body?.engineer));

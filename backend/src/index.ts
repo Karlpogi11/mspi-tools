@@ -30,12 +30,14 @@ import { ensureFrontlineTables } from './frontline/store.js';
 import endorsementRoutes from './endorsements/routes.js';
 import storageLocatorRoutes from './storage-locator/routes.js';
 import partsRoutes from './parts/routes.js';
-import pulseRoutes, { ensurePulseTables } from './pulse/routes.js';
+import macAppRoutes from './mac-app/routes.js';
+
 import messengerRoutes from './messenger/routes.js';
 import { initMessengerWs, upgradeToPulseWs } from './messenger/ws.js';
 import { upgradeToPcountWs } from './pcount/ws.js';
-import type { Duplex } from 'stream';
+
 import { authenticateToken, requireToolAccess } from './auth.js';
+import type { Duplex } from 'stream';
 import { isAllowedOrigin } from './config/origins.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
@@ -117,7 +119,7 @@ app.use('/api/endorsements', authenticateToken, requireToolAccess('/endorsements
 app.use('/api/storage-locator', authenticateToken, requireToolAccess('/storage-locator'), storageLocatorRoutes);
 app.use('/api/parts', authenticateToken, requireToolAccess('/parts'), partsLimiter, partsRoutes);
 app.use('/api/messenger', authenticateToken, requireToolAccess('/messenger'), messengerRoutes);
-app.use('/api/pulse', pulseRoutes);
+app.use('/api/mac-app', macAppRoutes);
 
 const tools = [
   { name: 'pcount', router: pcountRouter, hasGateway: true, init: initPcount },
@@ -177,6 +179,15 @@ app.use(express.static(publicDir, {
   },
 }));
 
+const dmgPath = path.join(publicDir, 'mac-app', 'MSPIStorageLocator.dmg');
+app.get('/mac-app/download', (_req, res) => {
+  if (!existsSync(dmgPath)) { res.status(404).json({ error: 'Mac app DMG not available yet' }); return; }
+  res.setHeader('Content-Type', 'application/x-apple-diskimage');
+  res.setHeader('Content-Disposition', 'attachment; filename="MSPIStorageLocator.dmg"');
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(dmgPath);
+});
+
 const frontendIndex = path.join(publicDir, 'index.html');
 if (existsSync(frontendIndex)) {
   app.get('*', (_req, res) => {
@@ -208,11 +219,9 @@ async function start() {
     const { ensurePartsTables } = await import('./parts/store.js');
     await ensurePartsTables();
     logger.info('Parts Inventory tables ready');
-    const { ensureMessengerTables } = await import('./messenger/store.js');
+const { ensureMessengerTables } = await import('./messenger/store.js');
     await ensureMessengerTables();
     logger.info('Messenger tables ready');
-    await ensurePulseTables();
-    logger.info('Pulse tables ready');
     await syncBuiltinToolCatalog();
     logger.info('Built-in tool catalog synchronized');
   } catch (error) {

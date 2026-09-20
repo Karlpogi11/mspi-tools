@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), VitePWA({ registerType: 'autoUpdate', strategies: 'injectManifest', srcDir: 'src', filename: 'service-worker.ts', manifest: { name: 'MSPI Pulse', short_name: 'Pulse', theme_color: '#0f172a', background_color: '#0f172a', display: 'standalone', start_url: '/pulse', icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' }, { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }], share_target: { action: '/pulse/compose', method: 'GET', params: { text: 'prefill' } } }, devOptions: { enabled: true } })],
+  plugins: [react(), tailwindcss(), VitePWA({ registerType: 'autoUpdate', strategies: 'injectManifest', srcDir: 'src', filename: 'service-worker.ts', manifest: { name: 'MSPI Tools', short_name: 'MSPI', theme_color: '#0f172a', background_color: '#0f172a', display: 'standalone', start_url: '/', icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' }, { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] }, devOptions: { enabled: true } })],
   build: {
     rollupOptions: {
       output: {
@@ -31,10 +31,7 @@ export default defineConfig({
         target: 'ws://localhost:3001',
         ws: true,
       },
-      '/ws-pulse': {
-        target: 'ws://localhost:3001',
-        ws: true,
-      },
+      
     },
   },
 });

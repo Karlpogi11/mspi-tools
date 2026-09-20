@@ -926,6 +926,10 @@ export const labelMergerApi = {
   downloadUrl: () => request<{ url: string }>('/label-merger/download-url'),
 };
 
+export const macAppApi = {
+  downloadUrl: () => request<{ url: string; installPath: string; installCommand: string }>('/mac-app/download-url'),
+};
+
 export async function saveBlob(blob: Blob, filename: string): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

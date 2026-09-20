@@ -49,8 +49,8 @@ export default function DashboardPage() {
 
   // These new communication/install tools are deliberately invisible to
   // non-super-admin users. They must not appear as disabled launcher cards.
-  const SUPER_ADMIN_ONLY_URLS = new Set(['/pulse', '/messenger', '/mac-app', '/mspi-tools']);
-  const SUPER_ADMIN_ONLY_NAMES = new Set(['mspi pulse', 'pulse messenger', 'desktop app', 'mspi tools']);
+  const SUPER_ADMIN_ONLY_URLS = new Set(['/mspi-tools']);
+  const SUPER_ADMIN_ONLY_NAMES = new Set(['mspi tools']);
   const visibleTools = tools
     .filter(tool => tool.name.trim().toLowerCase() !== 'site monitor')
     .filter(tool => user?.isSuperAdmin === true

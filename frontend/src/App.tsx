@@ -34,9 +34,6 @@ const loadEngineerEndorsementsPage = () => import('./pages/EngineerEndorsementsB
 const loadStorageLocatorPage = () => import('./pages/StorageLocatorPage');
 const loadPartsPage = () => import('./pages/PartsPage');
 const loadAdminPartsPage = () => import('./pages/admin/AdminPartsPage');
-const loadMessengerPage = () => import('./pages/MessengerPage');
-const loadPulsePage = () => import('./pages/PulsePage');
-const loadMacAppPage = () => import('./pages/MacAppPage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
 const PcountIndexPage = lazy(loadPcountIndexPage);
@@ -57,11 +54,8 @@ const EngineerEndorsementsPage = lazy(loadEngineerEndorsementsPage);
 const StorageLocatorPage = lazy(loadStorageLocatorPage);
 const PartsPage = lazy(loadPartsPage);
 const AdminPartsPage = lazy(loadAdminPartsPage);
-const MessengerPage = lazy(loadMessengerPage);
-const PulsePage = lazy(loadPulsePage);
-const MacAppPage = lazy(loadMacAppPage);
 
-const TOOL_PATHS = ['/pcount', '/rfpu', '/label-merger', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator', '/parts', '/messenger', '/mac-app', '/pulse'];
+const TOOL_PATHS = ['/pcount', '/rfpu', '/label-merger', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator', '/parts'];
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -127,9 +121,6 @@ function PrefetchCommonRoutes() {
         loadStorageLocatorPage(),
         loadPartsPage(),
         loadAdminPartsPage(),
-        loadMessengerPage(),
-        loadPulsePage(),
-        loadMacAppPage(),
       ]).catch(() => undefined);
 
       void api.myTools().catch(() => undefined);
@@ -313,7 +304,6 @@ export default function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/pulse" element={<ProtectedRoute><PulsePage /></ProtectedRoute>} />
               <Route
                 path="/storage-locator"
                 element={<ProtectedRoute><StorageLocatorPage /></ProtectedRoute>}
@@ -323,22 +313,6 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <PartsPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/messenger"
-                element={
-                  <ProtectedRoute>
-                    <MessengerPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/mac-app"
-                element={
-                  <ProtectedRoute>
-                    <MacAppPage />
                   </ProtectedRoute>
                 }
               />

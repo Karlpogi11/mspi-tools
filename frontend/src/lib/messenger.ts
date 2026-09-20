@@ -83,11 +83,9 @@ export const pulseApi = {
     json<{ title: string; sheets: string[] }>(`/messenger/sheets/tabs?spreadsheetId=${encodeURIComponent(spreadsheetId)}`),
   backupToSheet: (channelId: number) =>
     json<{ pushed: number }>('/messenger/sheets/backup', { method: 'POST', body: JSON.stringify({ channelId }) }),
-  appVersion: () =>
-    json<{ name: string; version: string; notes: string; dmgUrl: string; exeUrl: string; vsixUrl: string; appcastUrl: string; minOs: string }>('/messenger/mac-app/version'),
 };
 
-/** Cookie-JWT live rail. Tauri/SwiftUI reuse the same /ws-pulse path. */
+/** Cookie-JWT live rail. */
 export function connectPulseWs(channelIds: number[], onMessage: (channelId: number, message: PulseMessage, kind: 'created' | 'updated') => void): () => void {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${protocol}://${window.location.host}/ws-pulse`);

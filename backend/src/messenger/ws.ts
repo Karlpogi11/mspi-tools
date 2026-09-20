@@ -4,16 +4,6 @@ import type { Duplex } from 'stream';
 import { verifyAccessToken } from '../auth.js';
 
 const rooms = new Map<number, Set<WebSocket>>();
-const pulseClients = new Set<WebSocket>();
-
-export function broadcastPulse(payload: unknown): void {
-  const text = JSON.stringify(payload);
-  for (const ws of pulseClients) {
-    if (ws.readyState === WebSocket.OPEN) {
-      try { ws.send(text); } catch { /* ignore disconnected clients */ }
-    }
-  }
-}
 
 function roomOf(channelId: number): Set<WebSocket> {
   let room = rooms.get(channelId);
@@ -65,7 +55,7 @@ async function tokenFrom(request: { url?: string; headers: Record<string, string
 
 let wss: WebSocketServer | null = null;
 
-/** Live rail for Pulse chat + bot alerts. Cookie-JWT auth, same as /ws (pcount). */
+/** Live rail for Messenger chat + bot alerts. Cookie-JWT auth, same as /ws (pcount). */
 export function initMessengerWs(): void {
   // noServer: the single upgrade router in index.ts dispatches by pathname.
   wss = new WebSocketServer({ noServer: true });
@@ -76,7 +66,6 @@ export function initMessengerWs(): void {
       ws.close(1008, 'Authentication required');
       return;
     }
-    pulseClients.add(ws);
     const joined = new Set<number>();
     ws.on('message', (raw) => {
       try {
@@ -102,7 +91,6 @@ export function initMessengerWs(): void {
       }
     });
     ws.on('close', () => {
-      pulseClients.delete(ws);
       for (const id of joined) rooms.get(id)?.delete(ws);
     });
     ws.on('error', () => {});

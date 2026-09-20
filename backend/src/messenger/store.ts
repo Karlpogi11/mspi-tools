@@ -49,17 +49,6 @@ export async function ensureMessengerTables(): Promise<void> {
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
-  await pool.execute(`
-    CREATE TABLE IF NOT EXISTS messenger_device_tokens (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
-      platform VARCHAR(20) NOT NULL DEFAULT 'mac',
-      app_version VARCHAR(50) NOT NULL DEFAULT '',
-      token_hash VARCHAR(128) NOT NULL DEFAULT '',
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      KEY messenger_device_user_idx (user_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
   // Seed two default channels so a fresh install has somewhere to talk.
   await pool.execute(
     `INSERT IGNORE INTO messenger_channels (name, topic, kind) VALUES

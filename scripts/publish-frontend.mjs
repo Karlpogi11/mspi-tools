@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = resolve(root, 'frontend/dist');
+const backendPublicSource = resolve(root, 'backend/public');
 const target = resolve(root, 'backend/dist/public');
 const staging = resolve(root, 'backend/dist/public.next');
 const backup = resolve(root, 'backend/dist/public.previous');
@@ -15,6 +16,9 @@ if (!existsSync(source)) {
 rmSync(staging, { recursive: true, force: true });
 mkdirSync(dirname(target), { recursive: true });
 cpSync(source, staging, { recursive: true });
+if (existsSync(backendPublicSource)) {
+  cpSync(backendPublicSource, staging, { recursive: true, force: true });
+}
 
 const hadCurrent = existsSync(target);
 rmSync(backup, { recursive: true, force: true });

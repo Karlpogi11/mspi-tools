@@ -69,7 +69,7 @@ router.delete('/employees/:id', requireAdmin, async (req, res) => {
 
 router.get('/overview', async (_req, res) => {
   await ensureStorageTables();
-  const [rows] = await getDbPool().query(`SELECT u.id, u.ar_number, u.family, u.status, u.cabinet_number, u.checked_in_at, e.full_name AS employee_name FROM storage_units u LEFT JOIN storage_employees e ON e.id = u.current_employee_id WHERE u.state = 'in' ORDER BY u.family, u.cabinet_number`);
+  const [rows] = await getDbPool().query(`SELECT u.id, u.ar_number, u.family, u.status, u.cabinet_number, u.state, u.checked_in_at, e.full_name AS employee_name FROM storage_units u LEFT JOIN storage_employees e ON e.id = u.current_employee_id WHERE u.state = 'in' ORDER BY u.family, u.cabinet_number`);
   res.json({ occupied: rows, rules: RULES });
 });
 
@@ -85,7 +85,7 @@ router.get('/units/:arNumber', async (req, res) => {
   const [unitRows] = await getDbPool().query(`SELECT u.id, u.ar_number, u.family, u.status, u.cabinet_number, u.state, u.checked_in_at, u.checked_out_at, e.full_name AS current_employee_name FROM storage_units u LEFT JOIN storage_employees e ON e.id = u.current_employee_id WHERE u.ar_number = ? LIMIT 1`, [ar]);
   const unit = (unitRows as Array<Record<string, unknown>>)[0];
   if (!unit) { res.json({ unit: null, history: [] }); return; }
-  const [history] = await getDbPool().query(`SELECT m.id, m.action, m.family, m.status, m.cabinet_number, m.occurred_at, e.employee_number, e.full_name FROM storage_movements m INNER JOIN storage_employees e ON e.id = m.employee_id WHERE m.unit_id = ? ORDER BY m.occurred_at DESC, m.id DESC`, [unit.id]);
+  const [history] = await getDbPool().query(`SELECT m.id, m.action, m.family, m.status, m.cabinet_number, m.occurred_at, u.ar_number, e.employee_number, e.full_name FROM storage_movements m INNER JOIN storage_units u ON u.id = m.unit_id INNER JOIN storage_employees e ON e.id = m.employee_id WHERE m.unit_id = ? ORDER BY m.occurred_at DESC, m.id DESC`, [unit.id]);
   res.json({ unit, history });
 });
 
@@ -100,8 +100,6 @@ router.post('/units/in', async (req, res) => {
     const [existingRows] = await connection.query('SELECT id, state FROM storage_units WHERE ar_number = ? FOR UPDATE', [ar]);
     const existing = (existingRows as Array<{ id: number; state: string }>)[0];
     if (existing?.state === 'in') { await connection.rollback(); bad(res, 'This unit is already IN. Check its current location above.', 409); return; }
-    const [occupiedRows] = await connection.query('SELECT ar_number FROM storage_units WHERE state = \'in\' AND family = ? AND cabinet_number = ? LIMIT 1 FOR UPDATE', [family, cabinet]);
-    if ((occupiedRows as Array<Record<string, unknown>>).length) { await connection.rollback(); bad(res, 'That cabinet is already occupied.', 409); return; }
     let unitId: number;
     if (existing) { unitId = existing.id; await connection.execute(`UPDATE storage_units SET family = ?, status = ?, cabinet_number = ?, state = 'in', current_employee_id = ?, checked_in_at = CURRENT_TIMESTAMP, checked_out_at = NULL WHERE id = ?`, [family, status, cabinet, employee.id, existing.id]); }
     else { const [insert] = await connection.execute(`INSERT INTO storage_units (ar_number, family, status, cabinet_number, state, current_employee_id, checked_in_at) VALUES (?, ?, ?, ?, 'in', ?, CURRENT_TIMESTAMP)`, [ar, family, status, cabinet, employee.id]); unitId = Number((insert as { insertId: number }).insertId); }

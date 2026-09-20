@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from './db/index.js';
-import { roles, users, roleToolAccess, tools } from './db/schema.js';
+import { roles, users, roleToolAccess, tools, storageEmployees } from './db/schema.js';
 
 export interface JwtPayload {
   userId: number;
@@ -10,7 +10,10 @@ export interface JwtPayload {
   roleId: number | null;
   roleName: string | null;
   isSuperAdmin: boolean;
-  tokenVersion: number;
+  tokenVersion?: number;
+  isEmployee?: boolean;
+  employeeNumber?: string;
+  fullName?: string;
 }
 
 declare global {
@@ -26,7 +29,10 @@ export async function authenticateToken(
   res: Response,
   next: NextFunction
 ) {
-  const token = req.cookies?.token;
+  const authorization = req.header('authorization');
+  const token = authorization?.startsWith('Bearer ')
+    ? authorization.slice('Bearer '.length).trim()
+    : req.cookies?.token;
 
   if (!token) {
     res.status(401).json({ error: 'Authentication required' });
@@ -57,6 +63,25 @@ export async function verifyAccessToken(token: string): Promise<JwtPayload | nul
   } catch {
     return null;
   }
+  if (payload.isEmployee === true) {
+    if (!Number.isInteger(payload.userId) || typeof payload.employeeNumber !== 'string') return null;
+    const [employee] = await getDb()
+      .select({ employeeNumber: storageEmployees.employee_number, fullName: storageEmployees.full_name })
+      .from(storageEmployees)
+      .where(and(eq(storageEmployees.id, payload.userId), eq(storageEmployees.active, 1)))
+      .limit(1);
+    if (!employee) return null;
+    return {
+      ...payload,
+      email: '',
+      roleId: null,
+      roleName: null,
+      isSuperAdmin: false,
+      employeeNumber: employee.employeeNumber,
+      fullName: employee.fullName,
+    };
+  }
+
   if (!Number.isInteger(payload.userId) || !Number.isInteger(payload.tokenVersion)) return null;
   const [user] = await getDb()
     .select({
@@ -107,7 +132,7 @@ export function requireSuperAdmin(
 
 export function requireToolAccess(toolUrl: string) {
   return async function toolAccessMiddleware(req: Request, res: Response, next: NextFunction) {
-    if (req.user?.isSuperAdmin) {
+    if (req.user?.isSuperAdmin || (req.user?.isEmployee && toolUrl === '/storage-locator')) {
       next();
       return;
     }

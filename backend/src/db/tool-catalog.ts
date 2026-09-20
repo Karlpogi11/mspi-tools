@@ -13,19 +13,16 @@ const BUILTIN_TOOLS = [
   { name: 'AppleCare Packing Lists', url: '/applecare', icon: 'package', description: 'Connect Gmail and automatically collect AppleCare packing lists, attachments, sites, and incoming parts.', roles: ['Admin', 'PMG'] },
   { name: 'Frontline Monitor', url: '/frontline', icon: 'frontline', description: 'Podium only — review CSO frontline activity, AHT, transaction trends, and operational exceptions from Google Sheets.', roles: ['Admin'] },
   { name: 'Engineer Endorsements', url: '/endorsements', icon: 'wrench', description: 'Podium only — join the daily Engineer queue and manage customer device endorsements from Frontline Monitor.', roles: ['Admin', 'ENGR'] },
-  { name: 'MSPI Pulse', url: '/pulse', icon: 'fa-bolt', description: 'Structured operational communication — endorsements, parts, releases.', roles: [] as const },
-  { name: 'Storage Locator', url: '/storage-locator', icon: 'storage', description: 'Track customer units in IOS and Mac cabinet storage with verified employee IN/OUT history.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
+  { name: 'Storage Locator', url: '/storage-locator', icon: 'storage', description: 'Track customer units in IOS and Mac cabinet storage with verified employee IN/OUT history. Download the native macOS app for quick access.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
   { name: 'Parts Inventory', url: '/parts', icon: 'parts', description: 'Stock Apple service parts in and out per site with serial tracking and a shared Google Sheet log.', roles: ['Admin', 'PMG', 'CSO', 'ENGR'] },
-  { name: 'Pulse Messenger', url: '/messenger', icon: 'chat', description: 'Fast team chat with AR/serial smart cards, bot alerts, and Sheet + Excel backup.', roles: [] as const },
-  { name: 'Desktop App', url: '/mac-app', icon: 'download', description: 'Install MSPI Pulse on macOS or Windows, or trial it as a VS Code extension.', roles: [] as const },
 ] as const;
 
 const BUILTIN_ROLE_NAMES = ['Admin', 'PMG', 'CSO', 'ENGR'];
-const REMOVED_BUILTIN_URLS = ['/permit-tracker'];
+const REMOVED_BUILTIN_URLS = ['/permit-tracker', '/messenger', '/mac-app', '/pulse'];
 // Super-admin-only tools (for now): no role grants — super-admins bypass
 // role checks in requireToolAccess()/my-tools, so this hides them from
 // everyone else on dashboard and API while staying reversible from Admin.
-const SUPER_ADMIN_ONLY_URLS = ['/messenger', '/mac-app', '/pulse', '/mspi-tools'];
+const SUPER_ADMIN_ONLY_URLS = ['/mspi-tools'];
 
 /** Register missing built-ins without overwriting tools or access configured in Admin. */
 export async function syncBuiltinToolCatalog() {

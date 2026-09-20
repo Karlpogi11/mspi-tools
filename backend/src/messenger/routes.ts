@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import Excel from 'exceljs';
 import { getDbPool } from '../db/index.js';
 import { writeAuditLog } from '../db/audit.js';
 import { ensureMessengerTables, type MessengerChannel, type MessengerMessage } from './store.js';
@@ -418,41 +417,6 @@ async function handlePhotoUpload(req: Request, res: Response, err: unknown): Pro
   }
 }
 
-/** GET /api/messenger/export.xlsx?channelId= — raw backup to Excel. */
-router.get('/export.xlsx', async (req: Request, res: Response) => {
-  try {
-    const channelId = Number(req.query.channelId) || 0;
-    const where = channelId > 0 ? 'WHERE m.channel_id = ?' : '';
-    const params = channelId > 0 ? [channelId] : [];
-    const [rows] = await getDbPool().query(
-      `SELECT m.id, c.name AS channel, m.author_name, m.kind, m.body, m.created_at
-      FROM messenger_messages m JOIN messenger_channels c ON c.id = m.channel_id
-      ${where} ORDER BY m.id DESC LIMIT 5000`,
-      params
-    );
-    const wb = new Excel.Workbook();
-    const ws = wb.addWorksheet('pulse-backup');
-    ws.columns = [
-      { header: 'Message ID', key: 'id', width: 12 },
-      { header: 'Timestamp', key: 'created_at', width: 22 },
-      { header: 'Channel', key: 'channel', width: 20 },
-      { header: 'Author', key: 'author_name', width: 24 },
-      { header: 'Kind', key: 'kind', width: 10 },
-      { header: 'Body', key: 'body', width: 80 },
-    ];
-    for (const r of rows as Array<Record<string, unknown>>) ws.addRow(r);
-    ws.getRow(1).font = { bold: true };
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="pulse-backup.xlsx"');
-    await wb.xlsx.write(res);
-    res.end();
-  } catch (error) {
-    console.error('Messenger export error:', error);
-    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
-    else res.end();
-  }
-});
-
 // ---- Google Sheet backup: paste sheet ID + choose tab (Parts-style) ----
 router.get('/sheets/status', async (req: Request, res: Response) => {
   try {
@@ -530,26 +494,6 @@ router.post('/sheets/backup', async (req: Request, res: Response) => {
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Backup failed.' });
   }
-});
-
-/** GET /api/messenger/mac-app/version — Sparkle/Tauri updater + download page. Free: GitHub Releases. */
-router.get('/mac-app/version', (_req: Request, res: Response) => {
-  res.json({
-    name: 'MSPI Pulse',
-    version: '0.1.0',
-    notes: 'Initial Pulse desktop trial.',
-    dmgUrl: '',
-    exeUrl: '',
-    vsixUrl: '',
-    appcastUrl: 'https://tools.mspi.io/api/messenger/mac-app/appcast.xml',
-    sha256: '',
-    minOs: 'macOS 13 Ventura and later / Windows 10 and later',
-  });
-});
-
-router.get('/mac-app/appcast.xml', (_req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'application/rss+xml');
-  res.send(`<?xml version="1.0" encoding="utf-8"?><rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><title>MSPI Pulse</title><item><title>0.1.0</title><sparkle:version>1</sparkle:version><description>Initial trial.</description></item></channel></rss>`);
 });
 
 export default router;
