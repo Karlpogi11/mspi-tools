@@ -1,13 +1,25 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 APP_NAME="MSPIStorageLocator"
-DOWNLOAD_URL="https://tools.mspi.io/mac-app/MSPIStorageLocator.dmg"
+DOWNLOAD_URL="https://tools.mspi.io/mac-app/MSPIStorageLocator.zip"
 INSTALL_DIR="$HOME/Applications"
+TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/storage-locator-install.XXXXXX")"
+ZIP_PATH="$TEMP_DIR/$APP_NAME.zip"
+
+cleanup() {
+  rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$DOWNLOAD_URL" -o "/tmp/$APP_NAME.dmg"
-MOUNT_PATH=$(hdiutil attach "/tmp/$APP_NAME.dmg" | tail -1 | awk '{print $3}')
+curl --fail --silent --show-error --location "$DOWNLOAD_URL" -o "$ZIP_PATH"
+ditto -xk "$ZIP_PATH" "$TEMP_DIR/extracted"
+if [[ ! -d "$TEMP_DIR/extracted/$APP_NAME.app" ]]; then
+  echo "Downloaded archive does not contain $APP_NAME.app" >&2
+  exit 1
+fi
+
 rm -rf "$INSTALL_DIR/$APP_NAME.app"
-cp -R "$MOUNT_PATH/$APP_NAME.app" "$INSTALL_DIR/"
-hdiutil detach "$MOUNT_PATH"
-rm "/tmp/$APP_NAME.dmg"
+ditto "$TEMP_DIR/extracted/$APP_NAME.app" "$INSTALL_DIR/$APP_NAME.app"
+xattr -dr com.apple.quarantine "$INSTALL_DIR/$APP_NAME.app" >/dev/null 2>&1 || true
 open "$INSTALL_DIR/$APP_NAME.app"

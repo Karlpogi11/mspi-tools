@@ -179,13 +179,13 @@ app.use(express.static(publicDir, {
   },
 }));
 
-const dmgPath = path.join(publicDir, 'mac-app', 'MSPIStorageLocator.dmg');
+const macAppPath = path.join(publicDir, 'mac-app', 'MSPIStorageLocator.zip');
 app.get('/mac-app/download', (_req, res) => {
-  if (!existsSync(dmgPath)) { res.status(404).json({ error: 'Mac app DMG not available yet' }); return; }
-  res.setHeader('Content-Type', 'application/x-apple-diskimage');
-  res.setHeader('Content-Disposition', 'attachment; filename="MSPIStorageLocator.dmg"');
+  if (!existsSync(macAppPath)) { res.status(404).json({ error: 'Mac app archive not available yet' }); return; }
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', 'attachment; filename="MSPIStorageLocator.zip"');
   res.setHeader('Cache-Control', 'no-store');
-  res.sendFile(dmgPath);
+  res.sendFile(macAppPath);
 });
 
 const frontendIndex = path.join(publicDir, 'index.html');

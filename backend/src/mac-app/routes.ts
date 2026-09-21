@@ -4,7 +4,7 @@ const router = Router();
 
 router.get('/download-url', (_req: Request, res: Response) => {
   res.json({
-    url: 'https://tools.mspi.io/mac-app/download',
+    url: 'https://tools.mspi.io/mac-app/MSPIStorageLocator.zip',
     installPath: '~/Applications/MSPIStorageLocator.app',
     installCommand: 'curl -fsSL https://tools.mspi.io/mac-app/install.sh | bash',
   });

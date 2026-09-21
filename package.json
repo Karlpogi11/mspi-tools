@@ -7,7 +7,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",
     "build": "npm ci && cd backend && npm ci && npm run build && cd ../frontend && npm ci && npm run build && cd .. && node scripts/publish-frontend.mjs",
-    "build:mac-app": "./mac-app/build-dmg.sh",
+    "build:mac-app": "./mac-app/build-zip.sh",
     "start": "node backend/dist/index.js",
     "seed": "cd backend && npm run seed",
     "db:push": "cd backend && npm run db:push",
