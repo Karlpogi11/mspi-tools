@@ -393,6 +393,7 @@ export interface ApplecarePackingList {
 }
 export interface ApplecareItem { id: number; part_number: string; description: string; po_no: string | null; serial_number: string; quantity: number; raw_text: string | null }
 export interface ApplecarePackingListDetail extends ApplecarePackingList { items: ApplecareItem[]; raw_text?: string | null }
+export interface ApplecarePackingListPage { rows: ApplecarePackingList[]; total: number; page: number; pageSize: number }
 
 let partsSiteToken = '';
 export function setPartsSiteToken(token: string) {
@@ -788,7 +789,14 @@ export const api = {
     connectUrl: () => `${BASE}/applecare/gmail/connect`,
     disconnect: () => request<{ message: string }>('/applecare/gmail/disconnect', { method: 'DELETE' }),
     sync: () => request<{ imported: number }>('/applecare/sync', { method: 'POST' }),
-    lists: () => request<ApplecarePackingList[]>('/applecare/lists'),
+    lists: (params?: { page?: number; pageSize?: number; q?: string; siteId?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      if (params?.q) query.set('q', params.q);
+      if (params?.siteId) query.set('siteId', params.siteId);
+      return request<ApplecarePackingListPage>(`/applecare/lists${query.toString() ? `?${query.toString()}` : ''}`);
+    },
     detail: (id: number) => request<ApplecarePackingListDetail>(`/applecare/lists/${id}`),
     sites: () => request<ApplecareSite[]>('/applecare/sites'),
     createSite: (shipTo: string, siteName: string) => request<ApplecareSite>('/applecare/sites', { method: 'POST', body: JSON.stringify({ shipTo, siteName }) }),

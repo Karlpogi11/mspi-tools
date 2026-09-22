@@ -20,6 +20,9 @@ export default function ApplecarePage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const pageSize = 25;
   const [newShipTo, setNewShipTo] = useState('');
   const [newSite, setNewSite] = useState('');
 
@@ -46,9 +49,14 @@ export default function ApplecarePage() {
     catch (error) { setMessage((error as Error).message); }
   };
 
+  const loadLists = async (nextPage = page) => {
+    const result = await api.applecare.lists({ page: nextPage, pageSize, q: query, siteId: selectedSite || undefined });
+    setLists(result.rows); setTotal(result.total); setPage(result.page);
+  };
+
   const refresh = async () => {
-    const [status, rows, siteRows] = await Promise.all([api.applecare.status(), api.applecare.lists(), api.applecare.sites()]);
-    setConnected(status.connected); setGmail(status.email); setLastSyncedAt(status.lastSyncedAt); setLists(rows); setSites(siteRows);
+    const [status, result, siteRows] = await Promise.all([api.applecare.status(), api.applecare.lists({ page, pageSize, q: query, siteId: selectedSite || undefined }), api.applecare.sites()]);
+    setConnected(status.connected); setGmail(status.email); setLastSyncedAt(status.lastSyncedAt); setLists(result.rows); setTotal(result.total); setPage(result.page); setSites(siteRows);
   };
   useEffect(() => {
     let mounted = true;
@@ -77,11 +85,6 @@ export default function ApplecarePage() {
     return () => { mounted = false; };
   }, []);
 
-  const filtered = useMemo(() => lists.filter((row) => {
-    const haystack = `${row.subject} ${row.ship_to} ${row.site_name || ''} ${row.attachment_name}`.toLowerCase();
-    return (!selectedSite || row.site_id === Number(selectedSite)) && haystack.includes(query.toLowerCase());
-  }), [lists, query, selectedSite]);
-
   const matchedSite = useMemo(() => sites.find((site) => site.ship_to === newShipTo.trim() || site.site_name.toLowerCase() === newSite.trim().toLowerCase()), [sites, newShipTo, newSite]);
   const siteSuggestions = useMemo(() => {
     const search = `${newShipTo} ${newSite}`.trim().toLowerCase();
@@ -94,6 +97,14 @@ export default function ApplecarePage() {
     try { const result = await api.applecare.sync(); await refresh(); setMessage(`${result.imported} new packing list${result.imported === 1 ? '' : 's'} imported`); }
     catch (error) { setMessage((error as Error).message); } finally { setBusy(false); }
   };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadLists(1).catch((error) => setMessage((error as Error).message)); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query, selectedSite]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const goToPage = (nextPage: number) => { const target = Math.max(1, Math.min(totalPages, nextPage)); setPage(target); void loadLists(target).catch((error) => setMessage((error as Error).message)); };
 
   const syncIsStale = connected && (!lastSyncedAt || Date.now() - new Date(lastSyncedAt).getTime() > 60 * 60 * 1000);
 
@@ -127,13 +138,15 @@ export default function ApplecarePage() {
         <div className="flex gap-2">{connected ? <><button className={disconnectButton} onClick={disconnect} disabled={busy}>Disconnect</button><button className={button} onClick={sync} disabled={busy}>{busy ? 'Syncing…' : 'Sync now'}</button></> : <button className={primary} onClick={() => { window.location.href = api.applecare.connectUrl(); }}>Connect Gmail</button>}</div>
       </div>
 
-      <div className="mb-5 flex flex-wrap items-center gap-3"><input className="h-9 min-w-[240px] flex-1 rounded-lg border-0 bg-white px-3.5 text-[12px] shadow-[0_1px_3px_#00000012] outline-none ring-1 ring-[#e5e5ea] focus:ring-2 focus:ring-[#0071e34d]" placeholder="Search packing lists" value={query} onChange={(e) => setQuery(e.target.value)} />{isAdmin && <select className="h-9 rounded-lg border-0 bg-white px-3 text-[12px] shadow-[0_1px_3px_#00000012] outline-none ring-1 ring-[#e5e5ea] focus:ring-2 focus:ring-[#0071e34d]" value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}><option value="">All sites</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.site_name}</option>)}</select>}</div>
+      <div className="mb-5 flex flex-wrap items-center gap-3"><input className="h-9 min-w-[240px] flex-1 rounded-lg border-0 bg-white px-3.5 text-[12px] shadow-[0_1px_3px_#00000012] outline-none ring-1 ring-[#e5e5ea] focus:ring-2 focus:ring-[#0071e34d]" placeholder="Search AR number, dispatch ID, ShipTo, or email" value={query} onChange={(e) => setQuery(e.target.value)} />{isAdmin && <select className="h-9 rounded-lg border-0 bg-white px-3 text-[12px] shadow-[0_1px_3px_#00000012] outline-none ring-1 ring-[#e5e5ea] focus:ring-2 focus:ring-[#0071e34d]" value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}><option value="">All sites</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.site_name}</option>)}</select>}<span className="text-[11px] text-[#86868b]">{total.toLocaleString()} total</span></div>
 
       {message && <p className="mb-3 text-[12px] text-[#6e6e73]">{message}</p>}
       <div className="overflow-hidden rounded-xl bg-white shadow-[0_1px_3px_#00000012]">
         <div className="grid grid-cols-[1.1fr_1fr_1fr_.8fr_.7fr_1.1fr_.15fr] gap-3 bg-[#fafafd] px-4 py-2 text-[10px] font-semibold uppercase tracking-[.08em] text-[#86868b]"><span>Date</span><span>Site</span><span>ShipTo</span><span>Status</span><span>Total qty</span><span>Email</span><span /></div>
-        {filtered.length === 0 ? <div className="p-12 text-center text-[13px] text-[#6e6e73]">{connected ? 'No AppleCare packing lists found in the last 7 days.' : 'Connect Gmail to begin.'}</div> : filtered.map((row) => <button key={row.id} className="group grid w-full cursor-pointer grid-cols-[1.1fr_1fr_1fr_.8fr_.7fr_1.1fr_.15fr] gap-3 border-t border-[#f0f0f2] px-4 py-2 text-left text-[11px] leading-4 text-[#3c3c43] transition hover:bg-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0071e34d]" onClick={async () => setSelected(await api.applecare.detail(row.id))}><span>{formatDate(row.packing_date || row.received_at)}<small className="block text-[10px] text-[#86868b]">{formatTime(row.packing_time)}</small></span><span>{row.site_name || <span className="text-[#b0b0b5]">Unmapped</span>}</span><span className="font-medium">{row.ship_to}</span><span className="capitalize">{row.status}</span><span className="font-medium">{row.total_quantity}</span><span className="min-w-0"><a className="font-medium text-[#0071e3] hover:underline" href={row.email_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Open email</a></span><span className="text-right text-[18px] leading-4 text-[#a1a1a6] transition-transform group-hover:translate-x-0.5" aria-hidden="true">›</span></button>)}
+        {lists.length === 0 ? <div className="p-12 text-center text-[13px] text-[#6e6e73]">{connected ? 'No AppleCare packing lists match your search.' : 'Connect Gmail to begin.'}</div> : lists.map((row) => <button key={row.id} className="group grid w-full cursor-pointer grid-cols-[1.1fr_1fr_1fr_.8fr_.7fr_1.1fr_.15fr] gap-3 border-t border-[#f0f0f2] px-4 py-2 text-left text-[11px] leading-4 text-[#3c3c43] transition hover:bg-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0071e34d]" onClick={async () => setSelected(await api.applecare.detail(row.id))}><span>{formatDate(row.packing_date || row.received_at)}<small className="block text-[10px] text-[#86868b]">{formatTime(row.packing_time)}</small></span><span>{row.site_name || <span className="text-[#b0b0b5]">Unmapped</span>}</span><span className="font-medium">{row.ship_to}</span><span className="capitalize">{row.status}</span><span className="font-medium">{row.total_quantity}</span><span className="min-w-0"><a className="font-medium text-[#0071e3] hover:underline" href={row.email_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Open email</a></span><span className="text-right text-[18px] leading-4 text-[#a1a1a6] transition-transform group-hover:translate-x-0.5" aria-hidden="true">›</span></button>)}
       </div>
+
+      {totalPages > 1 && <div className="mt-4 flex items-center justify-between rounded-xl border border-[#e5e5ea] bg-white px-4 py-3"><span className="text-[11px] text-[#6e6e73]">Page {page} of {totalPages}</span><div className="flex gap-2"><button className={button} onClick={() => goToPage(page - 1)} disabled={page <= 1}>Previous</button><button className={button} onClick={() => goToPage(page + 1)} disabled={page >= totalPages}>Next</button></div></div>}
 
       {selected && <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/25 p-5" onClick={() => setSelected(null)}><div className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="flex items-start justify-between"><div><h2 className="text-[19px] font-semibold tracking-[-.02em] text-[#1d1d1f]">Packing list {selected.ship_to}</h2><p className="mt-1 text-[12px] text-[#6e6e73]">{selected.subject}</p></div><button className={button} onClick={() => setSelected(null)}>Close</button></div><div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 text-[12px] sm:grid-cols-4"><div><b className="text-[#86868b]">Site</b><p className="mt-1">{selected.site_id ? sites.find((s) => s.id === selected.site_id)?.site_name : 'Unmapped'}</p></div><div><b className="text-[#86868b]">Date</b><p className="mt-1">{formatDate(selected.packing_date)}</p></div><div><b className="text-[#86868b]">Time</b><p className="mt-1">{formatTime(selected.packing_time)}</p></div><div><b className="text-[#86868b]">Attachment</b><p className="mt-1 truncate">{selected.attachment_name || '—'}</p></div></div>{selected.attachment_name && <button className="mt-5 text-[12px] font-semibold text-[#0071e3]" onClick={() => void downloadAttachment(selected.id, selected.attachment_name)}>Download attachment</button>}<table className="mt-6 w-full text-left text-[12px]"><thead><tr className="border-b text-[#86868b]"><th className="py-2">Part number</th><th>Purchase number</th><th>Description</th><th>Serial number</th><th>Qty</th></tr></thead><tbody>{selected.items.map((item) => <tr key={item.id} className="border-b border-[#f0f0f2]"><td className="py-2">{item.part_number}</td><td>{item.po_no || '—'}</td><td>{item.description}</td><td>{item.serial_number || '—'}</td><td>{item.quantity}</td></tr>)}</tbody></table></div></div>}
 

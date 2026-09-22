@@ -50,6 +50,7 @@ const state = {
   saveTimer: null,
   dialogMode: 'create',
   templateChoice: '',
+  builtinLabels: { pullout: 'Pullout', 'pest-control': 'Pest Control' },
 };
 
 const PEST_CONTROL_PRESET = {
@@ -86,7 +87,10 @@ function deepMerge(base, patch) {
 }
 
 async function loadProfile() {
-  const stored = await chrome.storage.local.get(['wpProfiles', 'wpProfile']);
+  const stored = await chrome.storage.local.get(['wpProfiles', 'wpProfile', 'wpBuiltinLabels']);
+  if (stored.wpBuiltinLabels && typeof stored.wpBuiltinLabels === 'object') {
+    state.builtinLabels = { ...state.builtinLabels, ...stored.wpBuiltinLabels };
+  }
   const savedProfiles = stored.wpProfiles;
   if (savedProfiles && typeof savedProfiles === 'object' && Object.keys(savedProfiles).length) {
     state.profiles = Object.fromEntries(Object.entries(savedProfiles).map(([id, item]) => [id, {
@@ -99,10 +103,11 @@ async function loadProfile() {
   }
   state.activeProfileId = Object.keys(state.profiles)[0];
   state.profile = structuredClone(state.profiles[state.activeProfileId].profile);
-  const activeName = state.profiles[state.activeProfileId]?.name || '';
-  state.templateChoice = /^(current permit|default permit|permit profile)$/i.test(activeName)
-    ? (state.profile.permitType || 'pullout')
+  state.templateChoice = state.profile.permitType && !state.profile.permitType.startsWith('saved:')
+    ? (state.profile.permitType === 'pest-control' ? 'pest-control' : 'pullout')
     : `saved:${state.activeProfileId}`;
+  const hiddenInput = $('f_permitType');
+  if (hiddenInput) hiddenInput.value = state.templateChoice;
   await persist();
 }
 
@@ -116,6 +121,10 @@ async function persist() {
     wpProfiles: state.profiles,
     wpProfile: state.profile,
   });
+}
+
+async function persistBuiltinLabels() {
+  await chrome.storage.local.set({ wpBuiltinLabels: state.builtinLabels });
 }
 
 function makeProfileId() {
@@ -142,44 +151,280 @@ function normalizeProfile(stored) {
   if (/pullout/i.test(work.generalScope || '') && /delivery\s*\/\s*pullout|apple products/i.test(work.specificScope || '')) {
     work.specificScope = 'Pullout of merchandise/goods/items/products/stocks';
   }
-  if (source.permitType === 'pullout' || /^pullout$/i.test(work.generalScope || '')) {
+  if (source.permitType === 'pullout') {
     if (/^disinfection$/i.test(work.detailsOfWork || '')) work.detailsOfWork = 'DELIVERY/PULLOUT OF APPLE PRODUCTS';
     if (/^homefix pest control services$/i.test(work.serviceProvider || '')) delete work.serviceProvider;
+  }
+  if (/^pullout$/i.test(work.generalScope || '')) {
     if (work.leaveScheduleBlank === true) work.leaveScheduleBlank = false;
   }
   source.work = work;
   return deepMerge(structuredClone(DEFAULT_PROFILE), source);
 }
 
-function renderTemplates() {
-  const select = $('f_permitType');
-  if (!select) return;
-  select.innerHTML = '';
-  const builtIns = [
-    ['pullout', 'Pullout'],
-    ['pest-control', 'Pest Control'],
+function getSavedProfiles() {
+  return Object.entries(state.profiles).filter(([, item]) => item?.name);
+}
+
+function getBuiltinOptions() {
+  return [
+    { value: 'pullout', label: state.builtinLabels.pullout || 'Pullout' },
+    { value: 'pest-control', label: state.builtinLabels['pest-control'] || 'Pest Control' },
   ];
-  builtIns.forEach(([value, label]) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    select.appendChild(option);
+}
+
+function getBuiltinOption() {
+  const labels = {
+    pullout: state.builtinLabels.pullout || 'Pullout',
+    'pest-control': state.builtinLabels['pest-control'] || 'Pest Control',
+  };
+  if (state.templateChoice === 'pest-control') return { value: 'pest-control', label: labels['pest-control'], builtIn: true };
+  if (state.templateChoice === 'pullout') return { value: 'pullout', label: labels.pullout, builtIn: true };
+  const type = state.profile.permitType === 'pest-control' ? 'pest-control' : 'pullout';
+  return { value: type, label: labels[type], builtIn: true };
+}
+
+function templateNameExists(name, excludeKey) {
+  const lower = name.toLowerCase();
+  for (const b of getBuiltinOptions()) {
+    const key = `builtin:${b.value}`;
+    if (key === excludeKey) continue;
+    if (b.label.toLowerCase() === lower) return true;
+  }
+  for (const [pid, p] of Object.entries(state.profiles)) {
+    const key = `profile:${pid}`;
+    if (key === excludeKey) continue;
+    if (p?.name && p.name.toLowerCase() === lower) return true;
+  }
+  return false;
+}
+
+function renderTemplates(opts = {}) {
+  const container = $('templateDropdown');
+  if (!container) return;
+  container.innerHTML = '';
+  const trigger = document.createElement('div');
+  trigger.className = 'dd-trigger';
+  trigger.tabIndex = 0;
+  trigger.setAttribute('role', 'button');
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  const selectedItem = getSelectedItem();
+  trigger.innerHTML = `<span class="dd-label">${esc(selectedItem ? selectedItem.label : 'Choose template')}</span><span class="dd-arrow">▼</span>`;
+
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu';
+  menu.hidden = !opts.open;
+  menu.dataset.menuId = 'templateMenu';
+  trigger.setAttribute('aria-expanded', String(!menu.hidden));
+
+  const setOpen = (open) => {
+    menu.hidden = !open;
+    trigger.setAttribute('aria-expanded', String(open));
+  };
+
+  getBuiltinOptions().forEach((builtin) => {
+    const isActive = state.templateChoice === builtin.value;
+    const builtinItem = document.createElement('div');
+    builtinItem.className = `dd-item built-in${isActive ? ' active' : ''}`;
+    builtinItem.dataset.builtinValue = builtin.value;
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'dd-item-label';
+    labelSpan.textContent = builtin.label;
+    builtinItem.appendChild(labelSpan);
+
+    const actions = document.createElement('div');
+    actions.className = 'dd-item-actions';
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'rename-btn';
+    renameBtn.type = 'button';
+    renameBtn.title = 'Rename';
+    renameBtn.textContent = '✎';
+    actions.appendChild(renameBtn);
+    builtinItem.appendChild(actions);
+
+    const builtinSelect = document.createElement('button');
+    builtinSelect.className = 'select-btn';
+    builtinSelect.type = 'button';
+    builtinSelect.textContent = isActive ? '✓' : 'Select';
+    builtinItem.appendChild(builtinSelect);
+
+    builtinItem.addEventListener('click', (event) => {
+      if (builtinItem.classList.contains('editing')) return;
+      event.stopPropagation();
+      if (event.target.closest('.rename-btn')) {
+        startInlineRename(builtinItem, { kind: 'builtin', value: builtin.value });
+        return;
+      }
+      if (event.target.closest('.select-btn') || !event.target.closest('button')) {
+        if (isActive) {
+          setOpen(false);
+          return;
+        }
+        applyPermitPreset(builtin.value);
+        setOpen(false);
+      }
+    });
+    menu.appendChild(builtinItem);
   });
-  Object.entries(state.profiles).forEach(([id, item]) => {
-    if (!item?.name || /^(current permit|default permit|permit profile)$/i.test(item.name)) return;
-    const option = document.createElement('option');
-    option.value = `saved:${id}`;
-    option.textContent = item.name;
-    select.appendChild(option);
+
+  const savedProfiles = getSavedProfiles();
+  savedProfiles.forEach(([id, item]) => {
+    const isActive = state.templateChoice === `saved:${id}`;
+    const row = document.createElement('div');
+    row.className = `dd-item${isActive ? ' active' : ''}`;
+    row.dataset.profileId = id;
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'dd-item-label';
+    labelSpan.textContent = item.name;
+    row.appendChild(labelSpan);
+    const actions = document.createElement('div');
+    actions.className = 'dd-item-actions';
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'rename-btn';
+    renameBtn.type = 'button';
+    renameBtn.title = 'Rename';
+    renameBtn.textContent = '✎';
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.type = 'button';
+    deleteBtn.title = 'Delete';
+    deleteBtn.textContent = '✕';
+    if (savedProfiles.length <= 1) deleteBtn.disabled = true;
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+    row.appendChild(actions);
+
+    row.addEventListener('click', (event) => {
+      if (row.classList.contains('editing')) return;
+      event.stopPropagation();
+      if (event.target.closest('.rename-btn')) {
+        startInlineRename(row, { kind: 'profile', id });
+        return;
+      }
+      if (event.target.closest('.delete-btn')) {
+        deleteProfileById(id);
+        return;
+      }
+      if (event.target.closest('.select-btn') || !event.target.closest('button')) {
+        selectProfile(id);
+        setOpen(false);
+      }
+    });
+    menu.appendChild(row);
   });
-  const newOption = document.createElement('option');
-  newOption.value = '__new__';
-  newOption.textContent = '＋ New template…';
-  select.appendChild(newOption);
+
+  if (!savedProfiles.length) {
+    const empty = document.createElement('div');
+    empty.className = 'dd-empty';
+    empty.textContent = 'No saved templates yet';
+    menu.appendChild(empty);
+  }
+
+  trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (event.target.closest('button')) return;
+    const willOpen = menu.hidden;
+    if (willOpen) closeAllDropdownMenus();
+    setOpen(willOpen);
+  });
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      const willOpen = menu.hidden;
+      if (willOpen) closeAllDropdownMenus();
+      setOpen(willOpen);
+    } else if (event.key === 'Escape') {
+      setOpen(false);
+    }
+  });
+
+  container.appendChild(trigger);
+  container.appendChild(menu);
+}
+
+function closeAllDropdownMenus() {
+  document.querySelectorAll('.dd-menu').forEach((menu) => { menu.hidden = true; });
+  document.querySelectorAll('.dd-trigger[aria-expanded="true"]').forEach((t) => {
+    t.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function getSelectedItem() {
+  if (state.templateChoice === 'pullout' || state.templateChoice === 'pest-control') return getBuiltinOption();
+  if (state.templateChoice.startsWith('saved:')) {
+    const id = state.templateChoice.slice('saved:'.length);
+    const item = state.profiles[id];
+    if (item?.name) return { label: item.name };
+  }
   const active = state.profiles[state.activeProfileId];
-  const activeIsSaved = active?.name && !/^(current permit|default permit|permit profile)$/i.test(active.name);
-  const choice = state.templateChoice || (activeIsSaved ? `saved:${state.activeProfileId}` : (state.profile.permitType || 'pullout'));
-  select.value = Array.from(select.options).some((option) => option.value === choice) ? choice : 'pullout';
+  if (active?.name) return { label: active.name };
+  return getBuiltinOption();
+}
+
+function selectProfile(profileId) {
+  state.activeProfileId = profileId;
+  state.profile = structuredClone(state.profiles[profileId].profile);
+  state.templateChoice = `saved:${profileId}`;
+  const hiddenInput = $('f_permitType');
+  if (hiddenInput) hiddenInput.value = `saved:${profileId}`;
+  persist();
+  render();
+  setStatus('Permit selected', 'ok');
+}
+
+function startInlineRename(row, target) {
+  const labelSpan = row.querySelector('.dd-item-label');
+  if (!labelSpan || row.classList.contains('editing')) return;
+  const excludeKey = target.kind === 'builtin' ? `builtin:${target.value}` : `profile:${target.id}`;
+  const currentName = target.kind === 'builtin'
+    ? (state.builtinLabels[target.value] || (target.value === 'pest-control' ? 'Pest Control' : 'Pullout'))
+    : (state.profiles[target.id]?.name || '');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentName;
+  input.maxLength = 60;
+  row.classList.add('editing');
+  labelSpan.textContent = '';
+  labelSpan.appendChild(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    const name = input.value.trim();
+    if (!name) {
+      setStatus('Template name cannot be empty', 'err');
+      renderTemplates({ open: true });
+      return;
+    }
+    if (templateNameExists(name, excludeKey)) {
+      setStatus('A template with that name already exists', 'err');
+      renderTemplates({ open: true });
+      return;
+    }
+    if (name !== currentName) {
+      if (target.kind === 'builtin') {
+        state.builtinLabels[target.value] = name;
+        persistBuiltinLabels();
+      } else {
+        state.profiles[target.id].name = name;
+        persist();
+      }
+      setStatus('Template renamed', 'ok');
+    }
+    renderTemplates({ open: true });
+  };
+  input.addEventListener('blur', finish);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); input.blur(); }
+    if (event.key === 'Escape') { event.preventDefault(); input.value = currentName; input.blur(); }
+  });
+  input.addEventListener('click', (event) => event.stopPropagation());
 }
 
 async function switchProfile(id) {
@@ -206,6 +451,12 @@ function closeProfileDialog() { $('profileDialog').hidden = true; }
 async function confirmProfileDialog() {
   const name = $('profileNameInput').value.trim();
   if (!name) { $('profileNameInput').focus(); return; }
+  const excludeKey = state.dialogMode === 'rename' ? `profile:${state.activeProfileId}` : null;
+  if (templateNameExists(name, excludeKey)) {
+    setStatus('A template with that name already exists', 'err');
+    $('profileNameInput').focus();
+    return;
+  }
   if (state.dialogMode === 'rename') {
     state.profiles[state.activeProfileId].name = name;
   } else {
@@ -218,7 +469,8 @@ async function confirmProfileDialog() {
   }
   state.profile = structuredClone(state.profiles[state.activeProfileId].profile);
   await persist();
-  renderTemplates();
+  const hiddenInput = $('f_permitType');
+  if (hiddenInput) hiddenInput.value = state.activeProfileId ? `saved:${state.activeProfileId}` : '';
   render();
   closeProfileDialog();
   setStatus(state.dialogMode === 'rename' ? 'Permit renamed' : 'New permit created', 'ok');
@@ -227,12 +479,21 @@ async function confirmProfileDialog() {
 async function deleteProfile() {
   if (Object.keys(state.profiles).length < 2) return;
   const name = state.profiles[state.activeProfileId].name;
-  if (!confirm(`Delete “${name}”? This cannot be undone.`)) return;
-  delete state.profiles[state.activeProfileId];
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  deleteProfileById(state.activeProfileId);
+}
+
+async function deleteProfileById(profileId) {
+  if (Object.keys(state.profiles).length <= 1) return;
+  const name = state.profiles[profileId]?.name;
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  delete state.profiles[profileId];
   state.activeProfileId = Object.keys(state.profiles)[0];
   state.profile = structuredClone(state.profiles[state.activeProfileId].profile);
+  state.templateChoice = `saved:${state.activeProfileId}`;
+  const hiddenInput = $('f_permitType');
+  if (hiddenInput) hiddenInput.value = state.activeProfileId ? `saved:${state.activeProfileId}` : '';
   await persist();
-  renderTemplates();
   render();
   setStatus('Permit deleted', 'ok');
 }
@@ -270,7 +531,6 @@ function render() {
   });
   $('f_people').value = p.personnel.map((x) => `${x.first}${x.mi ? ' ' + x.mi : ''} ${x.last}`.trim()).join('\n');
   $('f_equipment').value = (p.equipment || []).join('\n');
-  renderTemplates();
   syncChoice('f_tradeChoice', 'f_trade');
   syncChoice('f_branchChoice', 'f_branch');
   bindAutoSaveCollections();
@@ -340,26 +600,15 @@ function applyPermitPreset(type) {
   const preset = type === 'pest-control' ? PEST_CONTROL_PRESET : PULL_OUT_PRESET;
   state.profile = deepMerge(current, structuredClone(preset));
   state.profile.work = structuredClone(preset.work);
+  state.profile.permitType = type;
+  state.templateChoice = type;
+  const hiddenInput = $('f_permitType');
+  if (hiddenInput) hiddenInput.value = type;
   render();
   persist();
   setStatus(type === 'pest-control' ? 'Pest Control template loaded' : 'Pullout template loaded', 'ok');
 }
 
-async function onTemplateChange(event) {
-  const value = event.target.value;
-  if (value === '__new__') {
-    renderTemplates();
-    openProfileDialog('create');
-    return;
-  }
-  if (value.startsWith('saved:')) {
-    state.templateChoice = value;
-    await switchProfile(value.slice('saved:'.length));
-    return;
-  }
-  state.templateChoice = value;
-  applyPermitPreset(value);
-}
 
 function bindFields() {
   document.querySelectorAll('[data-field]').forEach((el) => {
@@ -839,7 +1088,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindChoice('f_branchChoice', 'f_branch');
   $('btnFill').addEventListener('click', onFill);
   $('btnCancel').addEventListener('click', onCancel);
-  $('f_permitType').addEventListener('change', onTemplateChange);
+  $('btnNewTemplate').addEventListener('click', () => {
+    openProfileDialog('create');
+  });
   $('btnProfileCancel').addEventListener('click', closeProfileDialog);
   $('btnProfileConfirm').addEventListener('click', confirmProfileDialog);
   $('profileNameInput').addEventListener('keydown', (event) => {
@@ -848,5 +1099,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   $('profileDialog').addEventListener('click', (event) => {
     if (event.target === $('profileDialog')) closeProfileDialog();
+  });
+  document.addEventListener('click', (event) => {
+    if (event.target === $('f_permitType')) return;
+    if (!event.target.closest('.custom-dropdown')) closeAllDropdownMenus();
   });
 });

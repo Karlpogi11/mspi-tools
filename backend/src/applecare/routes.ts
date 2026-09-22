@@ -2,9 +2,9 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import ExcelJS from 'exceljs';
-import { getDb } from '../db/index.js';
+import { getDb, getDbPool } from '../db/index.js';
 import { authenticateToken, requireAdmin } from '../auth.js';
 import { writeAuditLog } from '../db/audit.js';
 import { applecareGmailConnections, applecarePackingListItems, applecarePackingLists, applecareSites } from '../db/schema.js';
@@ -364,25 +364,39 @@ router.post('/sync', async (req: Request, res: Response) => {
 });
 
 router.get('/lists', async (req: Request, res: Response) => {
-  const db = getDb();
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 7);
+  const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10) || 1);
+  const pageSize = Math.min(100, Math.max(10, Number.parseInt(String(req.query.pageSize || '25'), 10) || 25));
+  const search = String(req.query.q || '').trim();
+  const siteId = req.query.siteId && Number.isInteger(Number(req.query.siteId)) ? Number(req.query.siteId) : null;
   let accountFilter: string | null = null;
   if (req.user!.roleName !== 'Admin') {
+    const db = getDb();
     const [connection] = await db.select({ email: applecareGmailConnections.gmail_email })
       .from(applecareGmailConnections)
       .where(eq(applecareGmailConnections.user_id, req.user!.userId))
       .limit(1);
-    if (!connection) { res.json([]); return; }
+    if (!connection) { res.json({ rows: [], total: 0, page, pageSize }); return; }
     accountFilter = connection.email;
   }
-  const visibility = accountFilter ? sql`LOWER(${applecarePackingLists.received_by}) = LOWER(${accountFilter})` : undefined;
-  const rows = await db.select({
-    list: applecarePackingLists,
-    siteName: applecareSites.site_name,
-    totalQuantity: sql<number>`COALESCE((SELECT SUM(quantity) FROM applecare_packing_list_items WHERE packing_list_id = ${applecarePackingLists.id}), 0)`,
-  }).from(applecarePackingLists).leftJoin(applecareSites, eq(applecarePackingLists.site_id, applecareSites.id)).where(visibility ? and(gte(applecarePackingLists.received_at, cutoff), visibility) : gte(applecarePackingLists.received_at, cutoff)).orderBy(desc(applecarePackingLists.received_at), desc(applecarePackingLists.id)).limit(500);
-  res.json(rows.map(({ list, siteName, totalQuantity }) => ({ ...list, site_name: siteName || null, total_quantity: Number(totalQuantity) || 0, email_url: `https://mail.google.com/mail/u/0/#all/${list.gmail_message_id}` })));
+  const pool = getDbPool();
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if (accountFilter) { conditions.push('LOWER(l.received_by) = LOWER(?)'); params.push(accountFilter); }
+  if (siteId !== null) { conditions.push('l.site_id = ?'); params.push(siteId); }
+  if (search) {
+    const like = `%${search}%`;
+    conditions.push(`(l.subject LIKE ? OR l.ship_to LIKE ? OR l.gmail_message_id LIKE ? OR l.attachment_name LIKE ? OR l.raw_text LIKE ? OR EXISTS (SELECT 1 FROM applecare_packing_list_items si WHERE si.packing_list_id = l.id AND (si.po_no LIKE ? OR si.raw_text LIKE ?)))`);
+    params.push(like, like, like, like, like, like, like);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const [countRows] = await pool.query(`SELECT COUNT(*) AS total FROM applecare_packing_lists l ${where}`, params);
+  const total = Number((countRows as Array<{ total: number }>)[0]?.total || 0);
+  const offset = (page - 1) * pageSize;
+  const [rows] = await pool.query(`SELECT l.*, s.site_name,
+    COALESCE((SELECT SUM(quantity) FROM applecare_packing_list_items WHERE packing_list_id = l.id), 0) AS total_quantity
+    FROM applecare_packing_lists l LEFT JOIN applecare_sites s ON s.id = l.site_id ${where}
+    ORDER BY l.received_at DESC, l.id DESC LIMIT ? OFFSET ?`, [...params, pageSize, offset]);
+  res.json({ rows: (rows as Array<Record<string, unknown>>).map((row) => ({ ...row, site_name: row.site_name || null, total_quantity: Number(row.total_quantity) || 0, email_url: `https://mail.google.com/mail/u/0/#all/${row.gmail_message_id}` })), total, page, pageSize });
 });
 
 router.get('/lists/:id', async (req: Request, res: Response) => {

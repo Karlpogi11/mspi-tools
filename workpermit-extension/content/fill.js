@@ -570,10 +570,8 @@ if (window.__wpDiag && names.length < 2) {
       return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
     };
     const isSpecificScopeControl = (el) => {
-      if (el.tagName === 'SELECT') return true;
       const id = norm(el.id || '');
-      const metadata = norm(fieldMetadata(el));
-      return /specific\s*scope|dropdown5/.test(id) || /specific\s*scope/.test(metadata);
+      return /specific\s*scope|dropdown5/.test(id);
     };
     const findVisibleItems = () => {
       const candidates = [];
@@ -595,13 +593,24 @@ if (window.__wpDiag && names.length < 2) {
         }
       }
 
-      // Keep the label helper as a compatibility fallback, but only after
-      // stable-control matching and never allow a scope dropdown through.
       for (const field of H.findFields(doc, itemLabels)) {
         if (seen.has(field.el) || !H.isVisible(field.el) || !H.isEditable(field.el) || isSpecificScopeControl(field.el)) continue;
         seen.add(field.el);
         candidates.push({ el: field.el, label: fieldMetadata(field.el), score: 1 });
       }
+
+      if (!candidates.length) {
+        for (const el of Array.from(doc.querySelectorAll('input, textarea, select, [role=textbox], [role=combobox], [contenteditable=true], [data-input], [class*=OSInput]'))) {
+          if (seen.has(el) || !H.isVisible(el) || !H.isEditable(el)) continue;
+          const placeholder = norm(el.placeholder || '');
+          const ariaLabel = norm(el.getAttribute('aria-label') || '');
+          if (/item.*(pull|out|deliver)|(pull|out|deliver).*item/.test(placeholder + ' ' + ariaLabel)) {
+            seen.add(el);
+            candidates.push({ el, label: `${placeholder} ${ariaLabel}`.trim(), score: 5 });
+          }
+        }
+      }
+
       return candidates.sort((a, b) => b.score - a.score);
     };
     const itemValue = String(itemValueFromConfig || '').trim();
@@ -739,14 +748,21 @@ if (window.__wpDiag && names.length < 2) {
     const section = heading
       ? H.sectionByHeading(doc, ['equipment details', 'equipment', 'tools'], ['Add Equipment']) || heading.parentElement
       : doc;
-    const findEquipmentFields = () => H.findFields(section || doc, [
-      'Equipment', 'Equipment Description', 'Tool', 'Tool Description', 'Description',
-    ]).filter((field) => !/scope|item to pull|specific/i.test(field.label));
+    const findEquipmentFields = () => {
+      const fields = H.findFields(section || doc, [
+        'Equipment', 'Equipment Description', 'Tool', 'Tool Description',
+      ]).filter((field) => !/scope|item to pull|specific/i.test(field.label));
+      if (fields.length) return fields;
+      const all = Array.from((section || doc).querySelectorAll('input, select, textarea, [role=combobox]'))
+        .filter((el) => H.isVisible(el) && H.isEditable(el));
+      return all.map((el) => {
+        const label = H.labelFor(el) || el.getAttribute('aria-label') || el.getAttribute('data-label') || el.placeholder || '';
+        return { el, label };
+      }).filter((field) => /tool|equip|description/i.test(field.label) && !/scope|item to pull|specific/i.test(field.label));
+    };
     let fields = findEquipmentFields();
     if (!fields.length) {
-      fields = H.findFields(doc, [
-        'Equipment', 'Equipment Description', 'Tool', 'Tool Description', 'Description',
-      ]).filter((field) => !/scope|item to pull|specific|work details/i.test(field.label));
+      fields = H.findFields(doc, ['Equipment', 'Tool']).filter((field) => !/scope|item to pull|specific/i.test(field.label));
     }
     let additions = 0;
     while (fields.length < list.length && additions < list.length + 2) {
@@ -756,8 +772,7 @@ if (window.__wpDiag && names.length < 2) {
       await sleep(700);
       fields = findEquipmentFields();
       if (!fields.length) {
-        fields = H.findFields(doc, ['Equipment', 'Equipment Description', 'Tool', 'Tool Description', 'Description'])
-          .filter((field) => !/scope|item to pull|specific|work details/i.test(field.label));
+        fields = H.findFields(doc, ['Equipment', 'Tool']).filter((field) => !/scope|item to pull|specific/i.test(field.label));
       }
       additions++;
     }

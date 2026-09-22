@@ -15,11 +15,16 @@
     </header>
 
     <section class="panel">
-      <div class="section-heading compact"><h2>Permit details</h2></div>
+      <div class="section-heading compact">
+        <h2>Permit template</h2>
+        <button id="btnNewTemplate" class="text-button" type="button">＋ New</button>
+      </div>
       <div class="form-grid two-col">
-        <label>Permit template
-          <select id="f_permitType" aria-label="Choose permit template"></select>
-        </label>
+        <div>
+          <span class="field-label">Permit template</span>
+          <div id="templateDropdown" class="custom-dropdown" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="Permit template"></div>
+          <input id="f_permitType" type="hidden" />
+        </div>
         <label>Number of entries
           <input id="f_num" data-field="work.numWork" type="number" min="1" max="10" />
         </label>
