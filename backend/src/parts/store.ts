@@ -42,6 +42,7 @@ async function createPartsTables() {
     serial VARCHAR(150) NULL UNIQUE,
     quantity INT NOT NULL DEFAULT 1,
     status VARCHAR(10) NOT NULL DEFAULT 'in',
+    location VARCHAR(100) NULL,
     reference VARCHAR(150) NULL,
     occurred_date DATE NULL,
     stocked_in_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
@@ -60,6 +61,7 @@ async function createPartsTables() {
     serial VARCHAR(150) NULL,
     type VARCHAR(10) NOT NULL,
     occurred_date DATE NOT NULL,
+    location VARCHAR(100) NULL,
     reference VARCHAR(150) NULL,
     quantity INT NOT NULL DEFAULT 1,
     actor_user_id INT NULL,
@@ -73,7 +75,8 @@ async function createPartsTables() {
     id INT PRIMARY KEY DEFAULT 1,
     spreadsheet_id VARCHAR(255) NOT NULL DEFAULT '',
     spreadsheet_name VARCHAR(255) NOT NULL DEFAULT '',
-    sheet_name VARCHAR(255) NOT NULL DEFAULT '',
+    stock_in_sheet_name VARCHAR(255) NOT NULL DEFAULT '',
+    stock_out_sheet_name VARCHAR(255) NOT NULL DEFAULT '',
     updated_by INT NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`);
@@ -86,4 +89,21 @@ async function createPartsTables() {
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT parts_sheet_connections_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  
+  // Migrations for existing databases
+  try { await pool.query('ALTER TABLE parts_units ADD COLUMN location VARCHAR(100) NULL'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
+  try { await pool.query('ALTER TABLE parts_movements ADD COLUMN location VARCHAR(100) NULL'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
+  try { await pool.query('ALTER TABLE parts_sheet_config ADD COLUMN stock_in_sheet_name VARCHAR(255) NOT NULL DEFAULT ""'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
+  try { await pool.query('ALTER TABLE parts_sheet_config ADD COLUMN stock_out_sheet_name VARCHAR(255) NOT NULL DEFAULT ""'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
+  // Carry the legacy single sheet_name over to both tabs when the new columns
+  // are still empty, so an already-connected log keeps writing after upgrade.
+  try {
+    await pool.query(
+      `UPDATE parts_sheet_config SET stock_in_sheet_name = sheet_name, stock_out_sheet_name = sheet_name
+       WHERE sheet_name IS NOT NULL AND sheet_name != '' AND stock_in_sheet_name = ''`
+    );
+  } catch (e: any) { if (!e.message.includes("Unknown column 'sheet_name'")) console.error(e); }
+  // Units that are OUT are no longer in any box — drop stale locations so the
+  // serials workbench never shows a box for a serial that already left.
+  try { await pool.query(`UPDATE parts_units SET location = NULL WHERE status <> 'in' AND location IS NOT NULL`); } catch (e: any) { console.error(e); }
 }

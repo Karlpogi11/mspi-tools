@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { api, setPartsSiteToken, type PartsMasterItem, type PartsMovement, type PartsSite, type PartsUnit } from '../lib/api';
+import { api, recalledPartsSiteCode, setPartsSiteToken, type PartsMasterItem, type PartsMovement, type PartsSite, type PartsUnit } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { parseStockInWorkbook, parseStockOutWorkbook, todayIso } from '../lib/parts';
 
 const dateOnly = (v: string | null | undefined) => (v ? v.slice(0, 10) : '—');
+
 const priorityPartFamilies = ['display', 'battery'] as const;
 const searchCountsKey = 'mspi.parts.search-counts';
 const hideFrequentKey = 'mspi.parts.hide-frequent';
@@ -71,6 +72,7 @@ export default function PartsPage() {
   const [partNumber, setPartNumber] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [reference, setReference] = useState('');
+  const [boxLocation, setBoxLocation] = useState('');
   const [date, setDate] = useState(todayIso());
   const [stock, setStock] = useState<PartsUnit[]>([]);
   const [movementHistory, setMovementHistory] = useState<PartsMovement[]>([]);
@@ -81,6 +83,8 @@ export default function PartsPage() {
   const [selectedSite, setSelectedSite] = useState<string | null>(null);
   // Right-panel table search — filters whichever drill level is showing.
   const [tableSearch, setTableSearch] = useState('');
+  // Serials workbench filter: show every serial or only the available ones.
+  const [onlyAvailable, setOnlyAvailable] = useState(false);
   // Exact serial hit from Find — auto-opens its table with the row marked.
   const [highlightSerial, setHighlightSerial] = useState<string | null>(null);
   const highlightSeenRef = useRef<string | null>(null);
@@ -112,6 +116,8 @@ export default function PartsPage() {
   };
   const [importErrors, setImportErrors] = useState<{ row: number; error: string }[]>([]);
   const [gateDismissed, setGateDismissed] = useState(false);
+  // Re-checking the remembered site code on open — hides the gate briefly.
+  const [restoring, setRestoring] = useState(false);
   // Switch-site holds the current site behind the modal — nothing changes
   // until Continue verifies the new code; X keeps the current site.
   const [switchingSite, setSwitchingSite] = useState(false);
@@ -176,13 +182,36 @@ export default function PartsPage() {
     finally { setBusy(false); }
   };
 
+  // Device memory: on a fresh open, re-verify the saved site code so the tool
+  // lands straight in the site — only the code is stored; a fresh 24h token is
+  // issued here. Mount-only on purpose: changeSite() shows the gate again and
+  // must not auto-restore the old site out from under it.
+  useEffect(() => {
+    if (site) return;
+    const saved = recalledPartsSiteCode();
+    if (!saved) return;
+    setRestoring(true);
+    void (async () => {
+      try {
+        const result = await api.parts.verifySite(saved);
+        setSite(result.site); setSiteCode(result.site.code); setSiteToken(result.siteToken);
+        setPartsSiteToken(result.siteToken);
+        setMessage(`Restored ${result.site.name || result.site.code}.`);
+      } catch { /* Unknown/offline — keep the saved code, show the normal gate. */ }
+      finally { setRestoring(false); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const openSwitchModal = () => {
     setError(''); setCodeInput(''); setGateDismissed(false); setSwitchingSite(true);
   };
 
   const loadStock = async (code: string) => {
     try {
-      const result = await api.parts.stock(code);
+      // includeOut: parts that hit 0 stay listed (count 0) instead of
+      // disappearing from the stock table.
+      const result = await api.parts.stock(code, undefined, undefined, true);
       setStock(result.stock);
     } catch (err) { setError((err as Error).message); }
   };
@@ -347,20 +376,35 @@ export default function PartsPage() {
 
   // Serials workbench shared by single-site level 2 and ALL level 3.
   const renderSerials = (units: PartsUnit[], title: string, subtitle: string, onBack: () => void, backLabel: string) => {
-    const shownUnits = tableTerms.length
+    const searchFiltered = tableTerms.length
       ? units.filter((u) => tableTerms.every((t) => (u.serial || '').toLowerCase().includes(t)))
       : units;
+    const shownUnits = onlyAvailable ? searchFiltered.filter((u) => u.status === 'in') : searchFiltered;
+    const description = selectedPartDescription || units.find((u) => u.description)?.description || '';
     return (
     <>
       <div className="mt-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-[15px] font-semibold text-[#1d1d1f]">{title}</h2>
+          {description && <p className="mt-0.5 text-[13px] text-[#3c3c43]">{description}</p>}
           <p className="mt-1 text-[12px] text-[#6e6e73]">{subtitle}</p>
         </div>
-        <button type="button" onClick={onBack}
-          className="shrink-0 rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43]">
-          {backLabel}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex rounded-full bg-[#f5f5f7] p-0.5 text-[11px] font-semibold" role="group" aria-label="Filter serials">
+            <button type="button" onClick={() => setOnlyAvailable(false)} aria-pressed={!onlyAvailable}
+              className={`rounded-full px-2.5 py-1 ${!onlyAvailable ? 'bg-white text-[#1d1d1f] shadow-sm' : 'text-[#6e6e73]'}`}>
+              All
+            </button>
+            <button type="button" onClick={() => setOnlyAvailable(true)} aria-pressed={onlyAvailable}
+              className={`rounded-full px-2.5 py-1 ${onlyAvailable ? 'bg-white text-[#1d1d1f] shadow-sm' : 'text-[#6e6e73]'}`}>
+              Available
+            </button>
+          </div>
+          <button type="button" onClick={onBack}
+            className="rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43]">
+            {backLabel}
+          </button>
+        </div>
       </div>
       {partUnitsBusy ? (
         <p className="py-6 text-center text-[12px] text-[#6e6e73]">Loading serials…</p>
@@ -371,6 +415,7 @@ export default function PartsPage() {
               <tr className="bg-[#f7f7f8] text-[10px] uppercase tracking-wider text-[#6e6e73]">
                 <th className="px-3 py-2 font-semibold">Serial</th>
                 <th className="px-3 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold">Location</th>
                 <th className="px-3 py-2 font-semibold">Date</th>
                 <th className="px-3 py-2 font-semibold">Remarks</th>
               </tr>
@@ -387,6 +432,7 @@ export default function PartsPage() {
                         {available ? 'Available' : 'Out'}
                       </span>
                     </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{available ? (u.location || '—') : '—'}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{dateOnly(!available && u.stocked_out_at ? u.stocked_out_at : u.occurred_date)}</td>
                     <td className="px-3 py-2 text-[#6e6e73]">{!available && u.reference ? u.reference : '—'}</td>
                   </tr>
@@ -396,7 +442,9 @@ export default function PartsPage() {
           </table>
         </div>
       ) : (
-        <p className="py-6 text-center text-[12px] text-[#6e6e73]">{tableTerms.length ? 'No matches.' : 'No serials recorded for this part.'}</p>
+        <p className="py-6 text-center text-[12px] text-[#6e6e73]">
+          {tableTerms.length ? 'No matches.' : onlyAvailable ? 'No available serials.' : 'No serials recorded for this part.'}
+        </p>
       )}
     </>
     );
@@ -577,7 +625,7 @@ export default function PartsPage() {
     setMismatchList([]);
     try {
       if (!nonSerializedSubmit && serials.length > 1) {
-        const result = await api.parts.stockIn({ siteCode: site.code, partNumber: pn, serials, occurredDate: date });
+        const result = await api.parts.stockIn({ siteCode: site.code, partNumber: pn, serials, occurredDate: date, location: boxLocation });
         const failed = new Set((result.errors || []).map((row) => row.serial));
         setBulkErrors(result.errors || []);
         if (failed.size) {
@@ -586,7 +634,7 @@ export default function PartsPage() {
           setError(`${result.imported} stocked in, ${failed.size} need attention — fix the lines and retry.`);
         } else {
           setMessage(result.message);
-          setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setMismatchList([]); manualPartRef.current = false;
+          setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setBoxLocation(''); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setMismatchList([]); manualPartRef.current = false;
         }
         await refresh();
         serialsRef.current?.focus();
@@ -599,9 +647,10 @@ export default function PartsPage() {
         serial: finalSerial,
         quantity: nonSerializedSubmit ? Number(quantity) || 1 : undefined,
         occurredDate: date,
+        location: boxLocation,
       });
       setMessage(result.message);
-      setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setBulkErrors([]); setMismatchList([]); manualPartRef.current = false;
+      setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setBoxLocation(''); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setBulkErrors([]); setMismatchList([]); manualPartRef.current = false;
       await refresh();
       scanRef.current?.focus();
     } catch (err) { setFieldError('serial', (err as Error).message); }
@@ -613,9 +662,11 @@ export default function PartsPage() {
     if (!reference.trim()) { setFieldError('reference', 'Reference number is required for stock out.'); return; }
     setBusy(true); setError(''); setMessage(''); setFieldErrors({}); setOutMissingSerial(null);
     try {
+      // No location on stock out: the unit loses its box when it leaves, and
+      // the OUT form has no location field (never reuse a stale Stock IN value).
       const result = await api.parts.stockOut({ siteCode: site.code, serial: serial.trim(), reference: reference.trim(), occurredDate: date });
       setMessage(result.message);
-      setScan(''); setSerial(''); setReference(''); setPart(null); setPartNumber(''); setDate(todayIso());
+      setScan(''); setSerial(''); setReference(''); setBoxLocation(''); setPart(null); setPartNumber(''); setDate(todayIso());
       await refresh();
       scanRef.current?.focus();
     } catch (err) {
@@ -710,22 +761,42 @@ export default function PartsPage() {
   });
   const stockGroups = useMemo(() => {
     // Single site: one row per part. ALL view: one row per site+part so the
-    // site list is visible instead of merged away.
-    const groups = new Map<string, { partNumber: string; description: string | null | undefined; serials: number; quantity: number; date: string | null | undefined; siteCode: string; siteName: string | undefined; serialKey: string }>();
+    // site list is visible instead of merged away. Out units are included
+    // (includeOut) so a part that hit 0 stays listed — they never count
+    // toward available serials/quantity and are dated by when they left.
+    const groups = new Map<string, { partNumber: string; description: string | null | undefined; serials: number; quantity: number; date: string | null | undefined; siteCode: string; siteName: string | undefined; serialKey: string; locations: Set<string> }>();
     for (const unit of stock) {
       const key = browsingAll ? `${unit.site_code}||${unit.part_number}` : unit.part_number;
-      const group = groups.get(key) || { partNumber: unit.part_number, description: unit.description, serials: 0, quantity: 0, date: unit.occurred_date, siteCode: unit.site_code, siteName: unit.site_name, serialKey: '' };
-      group.serials += unit.serial ? 1 : 0;
-      if (unit.serial) group.serialKey += ` ${unit.serial}`;
-      group.quantity += unit.quantity;
-      if (!group.date || (unit.occurred_date && unit.occurred_date > group.date)) group.date = unit.occurred_date;
+      const inStock = unit.status === 'in';
+      const group = groups.get(key) || { partNumber: unit.part_number, description: unit.description, serials: 0, quantity: 0, date: null, siteCode: unit.site_code, siteName: unit.site_name, serialKey: '', locations: new Set<string>() };
+      if (unit.serial) {
+        group.serialKey += ` ${unit.serial}`;
+        if (inStock) group.serials += 1;
+      } else if (inStock) {
+        group.quantity += unit.quantity;
+      }
+      if (unit.location) group.locations.add(unit.location);
+      const activity = !inStock && unit.stocked_out_at ? unit.stocked_out_at.slice(0, 10) : unit.occurred_date;
+      if (!group.date || (activity && activity > group.date)) group.date = activity;
       groups.set(key, group);
     }
     const byDesc = (a: { description: string | null | undefined; partNumber: string }, b: { description: string | null | undefined; partNumber: string }) =>
       (a.description || '').toLowerCase().localeCompare((b.description || '').toLowerCase()) || a.partNumber.localeCompare(b.partNumber);
     return [...groups.values()].sort((a, b) => browsingAll && a.siteCode !== b.siteCode ? a.siteCode.localeCompare(b.siteCode) : byDesc(a, b));
   }, [stock, browsingAll]);
-  const distinctParts = useMemo(() => new Set(stockGroups.map((g) => g.partNumber)).size, [stockGroups]);
+  // Distinct parts with stock vs parts fully out — in the ALL view one part
+  // spans several site rows, so count part numbers, not groups.
+  const partCounts = useMemo(() => {
+    const all = new Set<string>();
+    const stocked = new Set<string>();
+    for (const g of stockGroups) {
+      all.add(g.partNumber);
+      if (g.serials > 0 || g.quantity > 0) stocked.add(g.partNumber);
+    }
+    return { stocked: stocked.size, out: all.size - stocked.size };
+  }, [stockGroups]);
+  const distinctParts = partCounts.stocked;
+  const outParts = partCounts.out;
   const totalUnits = useMemo(() => stockGroups.reduce((n, g) => n + g.serials + (g.serials ? 0 : g.quantity), 0), [stockGroups]);
   // ALL level 1: every part merged across sites with per-site totals.
   const stockPartTotals = useMemo(() => {
@@ -746,10 +817,15 @@ export default function PartsPage() {
     const bySite = new Map<string, { siteCode: string; siteName: string | undefined; serials: number; quantity: number; date: string | null | undefined }>();
     for (const u of stock) {
       if (u.part_number !== selectedPart) continue;
-      const s = bySite.get(u.site_code) || { siteCode: u.site_code, siteName: u.site_name, serials: 0, quantity: 0, date: u.occurred_date };
-      s.serials += u.serial ? 1 : 0;
-      s.quantity += u.quantity;
-      if (!s.date || (u.occurred_date && u.occurred_date > s.date)) s.date = u.occurred_date;
+      const inStock = u.status === 'in';
+      const s = bySite.get(u.site_code) || { siteCode: u.site_code, siteName: u.site_name, serials: 0, quantity: 0, date: null };
+      if (u.serial) {
+        if (inStock) s.serials += 1;
+      } else if (inStock) {
+        s.quantity += u.quantity;
+      }
+      const activity = !inStock && u.stocked_out_at ? u.stocked_out_at.slice(0, 10) : u.occurred_date;
+      if (!s.date || (activity && activity > s.date)) s.date = activity;
       bySite.set(u.site_code, s);
     }
     return [...bySite.values()].sort((a, b) => a.siteCode.localeCompare(b.siteCode));
@@ -762,6 +838,12 @@ export default function PartsPage() {
   const selectedSiteName = useMemo(
     () => selectedPartSites.find((s) => s.siteCode === selectedSite)?.siteName || selectedSite,
     [selectedPartSites, selectedSite]
+  );
+  // Description for the selected part's headers (part-units response also
+  // carries it, but the stock-derived list survives empty workbenches).
+  const selectedPartDescription = useMemo(
+    () => stockPartTotals.find((t) => t.partNumber === selectedPart)?.description || '',
+    [stockPartTotals, selectedPart]
   );
   const panelDepth = !selectedPart ? 0 : browsingAll ? (selectedSite ? 2 : 1) : 1;
   // Search resets on every drill or site move — it always applies to one level.
@@ -785,7 +867,7 @@ export default function PartsPage() {
   }, [highlightSerial, selectedPart, selectedSite, partUnits]);
   const tableTerms = tableSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filteredGroups = useMemo(
-    () => (tableTerms.length ? stockGroups.filter((g) => tableTerms.every((t) => `${g.siteCode} ${g.partNumber} ${g.description || ''}${g.serialKey}`.toLowerCase().includes(t))) : stockGroups),
+    () => (tableTerms.length ? stockGroups.filter((g) => tableTerms.every((t) => `${g.siteCode} ${g.partNumber} ${g.description || ''}${g.serialKey} ${[...g.locations].join(' ')}`.toLowerCase().includes(t))) : stockGroups),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [stockGroups, tableSearch]
   );
@@ -843,6 +925,12 @@ export default function PartsPage() {
             </div>
 
             {!site ? (
+              restoring ? (
+                <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
+                  <p className="text-[13px] font-semibold text-[#1d1d1f]">Restoring saved site…</p>
+                  <p className="mt-1 text-[12px] leading-5 text-[#6e6e73]">Re-checking this device’s remembered site code.</p>
+                </div>
+              ) : (
               <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
                 <p className="text-[13px] font-semibold text-[#1d1d1f]">Select a site to begin</p>
                 <p className="mt-1 text-[12px] leading-5 text-[#6e6e73]">Enter your site code. You will only see and move stock for this site.</p>
@@ -862,6 +950,7 @@ export default function PartsPage() {
                   </button>
                 )}
               </div>
+              )
             ) : browsingAll ? (
               <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
                 <p className="text-[13px] font-semibold text-[#1d1d1f]">Read-only view</p>
@@ -967,6 +1056,10 @@ export default function PartsPage() {
                       className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                   </label>
                 )}
+                <label className="block text-[11px] font-semibold text-[#3c3c43]">Location (box, e.g. Box 1)
+                  <input value={boxLocation} onChange={(e) => setBoxLocation(e.target.value)} placeholder="e.g. Box 1"
+                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                </label>
                 <label className="block text-[11px] font-semibold text-[#3c3c43]">Date
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                     className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
@@ -1046,7 +1139,7 @@ export default function PartsPage() {
                         <div>
                           <h2 className="text-[15px] font-semibold text-[#1d1d1f]">ALL stock</h2>
                           <p className="mt-1 text-[12px] text-[#6e6e73]">
-                            {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}
+                            {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}
                           </p>
                         </div>
                       </div>
@@ -1084,7 +1177,7 @@ export default function PartsPage() {
                         <div>
                           <h2 className="text-[15px] font-semibold text-[#1d1d1f]">{site ? `${site.name || site.code} stock` : 'Site stock'}</h2>
                           <p className="mt-1 text-[12px] text-[#6e6e73]">
-                            {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}
+                            {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}
                           </p>
                         </div>
                       </div>
@@ -1096,6 +1189,7 @@ export default function PartsPage() {
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Date</th>
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Part</th>
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Description</th>
+                                <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Location</th>
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 text-right font-semibold">Serials</th>
                               </tr>
                             </thead>
@@ -1104,8 +1198,9 @@ export default function PartsPage() {
                                 <tr key={u.partNumber} onClick={() => openPartWorkbench(u.partNumber)} className="cursor-pointer border-t border-[#f0f0f2] transition-colors first:border-t-0 hover:bg-[#f7f7f8]">
                                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-[#6e6e73]">{dateOnly(u.date)}</td>
                                   <td className="whitespace-nowrap px-3 py-2 font-semibold text-[#1d1d1f]">{u.partNumber}</td>
-                                  <td className="max-w-[280px] truncate px-3 py-2 text-[#3c3c43]" title={u.description || undefined}>{u.description || '—'}</td>
-                                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-[#6e6e73]">{u.serials ? u.serials.toLocaleString() : u.quantity.toLocaleString()}</td>
+                                  <td className="max-w-[240px] truncate px-3 py-2 text-[#3c3c43]" title={u.description || undefined}>{u.description || '—'}</td>
+                                  <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{u.locations.size ? [...u.locations].join(', ') : '—'}</td>
+                                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-[#6e6e73]">{(u.serials || u.quantity).toLocaleString()}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1125,6 +1220,7 @@ export default function PartsPage() {
                         <div className="mt-4 flex items-start justify-between gap-3">
                           <div>
                             <h2 className="text-[15px] font-semibold text-[#1d1d1f]">{selectedPart}</h2>
+                            {selectedPartDescription && <p className="mt-0.5 text-[13px] text-[#3c3c43]">{selectedPartDescription}</p>}
                             <p className="mt-1 text-[12px] text-[#6e6e73]">
                               {selectedPartSites.length.toLocaleString()} site{selectedPartSites.length === 1 ? '' : 's'} · {selectedPartSites.reduce((n, s) => n + s.serials + (s.serials ? 0 : s.quantity), 0).toLocaleString()} serials
                             </p>
@@ -1211,6 +1307,7 @@ export default function PartsPage() {
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[#6e6e73]">
                         <span>{movement.serial || `${movement.quantity.toLocaleString()} unit${movement.quantity === 1 ? '' : 's'}`}</span>
+                        {movement.location && <span>Loc: {movement.location}</span>}
                         {tab === 'out' && <span>Ref: {movement.reference || '—'}</span>}
                         <span>Qty: {movement.quantity.toLocaleString()}</span>
                       </div>
@@ -1225,7 +1322,7 @@ export default function PartsPage() {
         </div>
       )}
 
-      {((switchingSite && site) || (!site && !gateDismissed)) && (
+      {((switchingSite && site) || (!site && !gateDismissed && !restoring)) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1d1d1f]/25 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="parts-site-title">
           <form onSubmit={(event) => { event.preventDefault(); void verifySite(codeInput); }} className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-[0_18px_60px_rgba(0,0,0,.16)]">
             <div className="flex items-start justify-between gap-4">

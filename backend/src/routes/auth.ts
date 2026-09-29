@@ -144,7 +144,7 @@ router.post('/signup', signupLimiter, authSlowDown, async (req: Request, res: Re
 
 router.post('/login', loginLimiter, authSlowDown, async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, remember } = req.body;
 
     if (!email || !password) {
       res.status(400).json({ error: 'Email and password are required' });
@@ -187,6 +187,10 @@ router.post('/login', loginLimiter, authSlowDown, async (req: Request, res: Resp
       return;
     }
 
+    // Opt-in "Remember this device": a 30-day session instead of 8 hours.
+    const rememberMe = remember === true;
+    const sessionTtlMs = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000;
+
     const token = jwt.sign(
       {
         userId: user.id,
@@ -197,17 +201,17 @@ router.post('/login', loginLimiter, authSlowDown, async (req: Request, res: Resp
         tokenVersion: user.token_version,
       },
       process.env.JWT_SECRET!,
-      { expiresIn: '8h' }
+      { expiresIn: sessionTtlMs / 1000 }
     );
 
-    void writeAuditLog({ actorUserId: user.id, action: 'auth.login', resourceType: 'user', resourceId: user.id });
+    void writeAuditLog({ actorUserId: user.id, action: 'auth.login', resourceType: 'user', resourceId: user.id, metadata: { remember: rememberMe } });
 
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production' && !['localhost', '127.0.0.1'].includes(req.hostname),
       sameSite: 'lax',
       domain: ['localhost', '127.0.0.1'].includes(req.hostname) ? undefined : process.env.COOKIE_DOMAIN,
-      maxAge: 8 * 60 * 60 * 1000,
+      maxAge: sessionTtlMs,
       path: '/',
     });
 

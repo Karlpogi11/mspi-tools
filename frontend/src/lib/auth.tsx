@@ -4,7 +4,7 @@ import { api, AUTH_UNAUTHORIZED_EVENT, type User } from './api';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, remember?: boolean) => Promise<void>;
   signup: (email: string, password: string, fullName: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -35,8 +35,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshUser().finally(() => setLoading(false));
   }, [refreshUser]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const { user } = await api.login(email, password);
+  const login = useCallback(async (email: string, password: string, remember?: boolean) => {
+    const { user } = await api.login(email, password, remember);
     setUser(user);
   }, []);
 

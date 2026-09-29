@@ -16,6 +16,8 @@ import {
   saveConnection,
   exchangeCode,
   sheetConfig,
+  lastSheetError,
+  syncFromSheet,
   type SheetLogRow,
 } from './sheets.js';
 
@@ -117,8 +119,9 @@ class StockError extends Error {
 /** Core IN logic — runs inside the caller's transaction. */
 async function applyStockIn(
   conn: any,
-  ctx: { site: Site; partNumber: string; serial: string; quantity: number; occurredDate: string; actorUserId: number }
+  ctx: { site: Site; partNumber: string; serial: string; quantity: number; occurredDate: string; actorUserId: number; location: string }
 ): Promise<{ movementId: number; sheetRow: SheetLogRow; message: string }> {
+  const location = ctx.location || null;
   const [masterRows] = await conn.query('SELECT part_number, description, eee_code, substitute_part, serialized FROM parts_master WHERE part_number = ? LIMIT 1', [ctx.partNumber]);
   let master = (masterRows as ResolvedPart[])[0];
   if (!master && ctx.serial) {
@@ -136,19 +139,19 @@ async function applyStockIn(
   if (!serialized) {
     if (ctx.serial) throw new StockError(`"${ctx.partNumber}" is a non-serialized part — leave the serial empty and enter a quantity.`, 400);
     if (!Number.isInteger(ctx.quantity) || ctx.quantity < 1) throw new StockError('Quantity must be at least 1.', 400);
-    const [rows] = await conn.query('SELECT id, quantity, status FROM parts_units WHERE site_id = ? AND part_number = ? AND serial IS NULL LIMIT 1 FOR UPDATE', [ctx.site.id, ctx.partNumber]);
+    const [rows] = await conn.query('SELECT id, quantity, status FROM parts_units WHERE site_id = ? AND part_number = ? AND serial IS NULL AND COALESCE(location, "") = ? LIMIT 1 FOR UPDATE', [ctx.site.id, ctx.partNumber, ctx.location]);
     const existing = (rows as Array<{ id: number; quantity: number; status: string }>)[0];
     if (existing) {
       await conn.execute(`UPDATE parts_units SET quantity = quantity + ?, status = 'in', occurred_date = ?, stocked_in_at = CURRENT_TIMESTAMP, stocked_out_at = NULL, created_by = ? WHERE id = ?`, [ctx.quantity, ctx.occurredDate, ctx.actorUserId, existing.id]);
     } else {
-      await conn.execute(`INSERT INTO parts_units (site_id, part_number, serial, quantity, status, occurred_date, stocked_in_at, created_by) VALUES (?, ?, NULL, ?, 'in', ?, CURRENT_TIMESTAMP, ?)`, [ctx.site.id, ctx.partNumber, ctx.quantity, ctx.occurredDate, ctx.actorUserId]);
+      await conn.execute(`INSERT INTO parts_units (site_id, part_number, serial, quantity, status, location, occurred_date, stocked_in_at, created_by) VALUES (?, ?, NULL, ?, 'in', ?, ?, CURRENT_TIMESTAMP, ?)`, [ctx.site.id, ctx.partNumber, ctx.quantity, location, ctx.occurredDate, ctx.actorUserId]);
     }
-    const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, reference, quantity, actor_user_id) VALUES (?, ?, NULL, 'IN', ?, NULL, ?, ?)`, [ctx.site.id, ctx.partNumber, ctx.occurredDate, ctx.quantity, ctx.actorUserId]);
+    const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, location, reference, quantity, actor_user_id) VALUES (?, ?, NULL, 'IN', ?, ?, NULL, ?, ?)`, [ctx.site.id, ctx.partNumber, ctx.occurredDate, location, ctx.quantity, ctx.actorUserId]);
     const movementId = Number((insert as { insertId: number }).insertId);
     return {
       movementId,
-      sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'IN', date: ctx.occurredDate, partNumber: ctx.partNumber, description: master.description, serial: '', reference: '', quantity: ctx.quantity, actor: '' },
-      message: `${ctx.quantity} × ${ctx.partNumber} stocked in at ${ctx.site.code}.`,
+      sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'IN', date: ctx.occurredDate, partNumber: ctx.partNumber, description: master.description, serial: '', reference: '', quantity: ctx.quantity, actor: '', location: ctx.location },
+      message: `${ctx.quantity} × ${ctx.partNumber} stocked in at ${ctx.site.code}${ctx.location ? ` (${ctx.location})` : ''}.`,
     };
   }
 
@@ -161,23 +164,23 @@ async function applyStockIn(
     throw new StockError(`Serial ${ctx.serial} is already in stock at ${where}.`, 409);
   }
   if (existing) {
-    await conn.execute(`UPDATE parts_units SET site_id = ?, part_number = ?, quantity = 1, status = 'in', reference = NULL, occurred_date = ?, stocked_in_at = CURRENT_TIMESTAMP, stocked_out_at = NULL, created_by = ? WHERE id = ?`, [ctx.site.id, ctx.partNumber, ctx.occurredDate, ctx.actorUserId, existing.id]);
+    await conn.execute(`UPDATE parts_units SET site_id = ?, part_number = ?, quantity = 1, status = 'in', location = ?, reference = NULL, occurred_date = ?, stocked_in_at = CURRENT_TIMESTAMP, stocked_out_at = NULL, created_by = ? WHERE id = ?`, [ctx.site.id, ctx.partNumber, location, ctx.occurredDate, ctx.actorUserId, existing.id]);
   } else {
-    await conn.execute(`INSERT INTO parts_units (site_id, part_number, serial, quantity, status, occurred_date, stocked_in_at, created_by) VALUES (?, ?, ?, 1, 'in', ?, CURRENT_TIMESTAMP, ?)`, [ctx.site.id, ctx.partNumber, ctx.serial, ctx.occurredDate, ctx.actorUserId]);
+    await conn.execute(`INSERT INTO parts_units (site_id, part_number, serial, quantity, status, location, occurred_date, stocked_in_at, created_by) VALUES (?, ?, ?, 1, 'in', ?, ?, CURRENT_TIMESTAMP, ?)`, [ctx.site.id, ctx.partNumber, ctx.serial, location, ctx.occurredDate, ctx.actorUserId]);
   }
-  const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, reference, quantity, actor_user_id) VALUES (?, ?, ?, 'IN', ?, NULL, 1, ?)`, [ctx.site.id, ctx.partNumber, ctx.serial, ctx.occurredDate, ctx.actorUserId]);
+  const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, location, reference, quantity, actor_user_id) VALUES (?, ?, ?, 'IN', ?, ?, NULL, 1, ?)`, [ctx.site.id, ctx.partNumber, ctx.serial, ctx.occurredDate, location, ctx.actorUserId]);
   const movementId = Number((insert as { insertId: number }).insertId);
   return {
     movementId,
-    sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'IN', date: ctx.occurredDate, partNumber: ctx.partNumber, description: master.description, serial: ctx.serial, reference: '', quantity: 1, actor: '' },
-    message: `${ctx.serial} (${ctx.partNumber}) stocked in at ${ctx.site.code}.`,
+    sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'IN', date: ctx.occurredDate, partNumber: ctx.partNumber, description: master.description, serial: ctx.serial, reference: '', quantity: 1, actor: '', location: ctx.location },
+    message: `${ctx.serial} (${ctx.partNumber}) stocked in at ${ctx.site.code}${ctx.location ? ` (${ctx.location})` : ''}.`,
   };
 }
 
 /** Core OUT logic — runs inside the caller's transaction. */
 async function applyStockOut(
   conn: any,
-  ctx: { site: Site; partNumber: string; serial: string; quantity: number; reference: string; occurredDate: string; actorUserId: number }
+  ctx: { site: Site; partNumber: string; serial: string; quantity: number; reference: string; occurredDate: string; actorUserId: number; location: string }
 ): Promise<{ movementId: number; sheetRow: SheetLogRow; message: string }> {
   if (!ctx.reference) throw new StockError('Reference number is required for stock out.', 400);
   const [masterRows] = await conn.query('SELECT part_number, description, serialized FROM parts_master WHERE part_number = ? LIMIT 1', [ctx.partNumber || '__none__']);
@@ -199,30 +202,34 @@ async function applyStockOut(
     }
     const [descRows] = await conn.query('SELECT description FROM parts_master WHERE part_number = ? LIMIT 1', [unit.part_number]);
     const description = (descRows as Array<{ description: string }>)[0]?.description || '';
-    await conn.execute(`UPDATE parts_units SET status = 'out', reference = ?, stocked_out_at = CURRENT_TIMESTAMP, created_by = ? WHERE id = ?`, [ctx.reference, ctx.actorUserId, unit.id]);
-    const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, reference, quantity, actor_user_id) VALUES (?, ?, ?, 'OUT', ?, ?, 1, ?)`, [ctx.site.id, unit.part_number, ctx.serial, ctx.occurredDate, ctx.reference, ctx.actorUserId]);
+    // Out units no longer sit in a box — clear the location (movements keep theirs for history).
+    await conn.execute(`UPDATE parts_units SET status = 'out', location = NULL, reference = ?, stocked_out_at = CURRENT_TIMESTAMP, created_by = ? WHERE id = ?`, [ctx.reference, ctx.actorUserId, unit.id]);
+    const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, location, reference, quantity, actor_user_id) VALUES (?, ?, ?, 'OUT', ?, ?, ?, 1, ?)`, [ctx.site.id, unit.part_number, ctx.serial, ctx.occurredDate, ctx.location || null, ctx.reference, ctx.actorUserId]);
     const movementId = Number((insert as { insertId: number }).insertId);
     return {
       movementId,
-      sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'OUT', date: ctx.occurredDate, partNumber: unit.part_number, description, serial: ctx.serial, reference: ctx.reference, quantity: 1, actor: '' },
+      sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'OUT', date: ctx.occurredDate, partNumber: unit.part_number, description, serial: ctx.serial, reference: ctx.reference, quantity: 1, actor: '', location: ctx.location },
       message: `${ctx.serial} stocked out from ${ctx.site.code} (ref ${ctx.reference}).`,
     };
   }
 
-  // Non-serialized OUT by part + quantity.
+  // Non-serialized OUT by part + quantity + location (Option A: user names the box).
   if (!Number.isInteger(ctx.quantity) || ctx.quantity < 1) throw new StockError('Quantity must be at least 1.', 400);
-  const [rows] = await conn.query('SELECT id, quantity, status FROM parts_units WHERE site_id = ? AND part_number = ? AND serial IS NULL LIMIT 1 FOR UPDATE', [ctx.site.id, ctx.partNumber]);
+  if (!ctx.location) throw new StockError('Location is required for stock out — which box did you take it from?', 400);
+  const [rows] = await conn.query('SELECT id, quantity, status FROM parts_units WHERE site_id = ? AND part_number = ? AND serial IS NULL AND COALESCE(location, "") = ? LIMIT 1 FOR UPDATE', [ctx.site.id, ctx.partNumber, ctx.location]);
   const balance = (rows as Array<{ id: number; quantity: number; status: string }>)[0];
   const available = balance && balance.status === 'in' ? balance.quantity : 0;
-  if (available < ctx.quantity) throw new StockError(`Only ${available} × ${ctx.partNumber} in stock at ${ctx.site.code}.`, 409);
+  if (available < ctx.quantity) throw new StockError(`Only ${available} × ${ctx.partNumber} in ${ctx.location} at ${ctx.site.code}.`, 409);
   const remaining = available - ctx.quantity;
-  await conn.execute(`UPDATE parts_units SET quantity = ?, status = ?, reference = ?, stocked_out_at = CURRENT_TIMESTAMP, created_by = ? WHERE id = ?`, [remaining, remaining > 0 ? 'in' : 'out', ctx.reference, ctx.actorUserId, balance!.id]);
-  const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, reference, quantity, actor_user_id) VALUES (?, ?, NULL, 'OUT', ?, ?, ?, ?)`, [ctx.site.id, ctx.partNumber, ctx.occurredDate, ctx.reference, ctx.quantity, ctx.actorUserId]);
+  // A depleted box row becomes 'out' and loses its location; a partially
+  // drawn box keeps it (stock is still there).
+  await conn.execute(`UPDATE parts_units SET quantity = ?, status = ?, location = CASE WHEN ? > 0 THEN location ELSE NULL END, reference = ?, stocked_out_at = CURRENT_TIMESTAMP, created_by = ? WHERE id = ?`, [remaining, remaining > 0 ? 'in' : 'out', remaining, ctx.reference, ctx.actorUserId, balance!.id]);
+  const [insert] = await conn.execute(`INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, location, reference, quantity, actor_user_id) VALUES (?, ?, NULL, 'OUT', ?, ?, ?, ?, ?)`, [ctx.site.id, ctx.partNumber, ctx.occurredDate, ctx.location, ctx.reference, ctx.quantity, ctx.actorUserId]);
   const movementId = Number((insert as { insertId: number }).insertId);
   return {
     movementId,
-    sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'OUT', date: ctx.occurredDate, partNumber: ctx.partNumber, description: master!.description, serial: '', reference: ctx.reference, quantity: ctx.quantity, actor: '' },
-    message: `${ctx.quantity} × ${ctx.partNumber} stocked out from ${ctx.site.code} (ref ${ctx.reference}).`,
+    sheetRow: { siteCode: ctx.site.code, siteName: ctx.site.name, type: 'OUT', date: ctx.occurredDate, partNumber: ctx.partNumber, description: master!.description, serial: '', reference: ctx.reference, quantity: ctx.quantity, actor: '', location: ctx.location },
+    message: `${ctx.quantity} × ${ctx.partNumber} stocked out from ${ctx.site.code} ${ctx.location} (ref ${ctx.reference}).`,
   };
 }
 
@@ -471,8 +478,8 @@ router.get('/resolve', async (req, res) => {
   let unit: unknown = null;
   if (serial) {
     const [rows] = scope.all
-      ? await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? LIMIT 1`, [serial])
-      : await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? AND s.code = ? LIMIT 1`, [serial, scope.site!.code]);
+      ? await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? LIMIT 1`, [serial])
+      : await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? AND s.code = ? LIMIT 1`, [serial, scope.site!.code]);
     unit = (rows as Array<Record<string, unknown>>)[0] ?? null;
   }
   res.json({ part, unit });
@@ -486,8 +493,8 @@ router.get('/lookup', async (req, res) => {
   if (!scope) return;
   const pool = getDbPool();
   const [unitRows] = scope.all
-    ? await pool.query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.occurred_date, s.code AS site_code, s.name AS site_name FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? LIMIT 1`, [serial])
-    : await pool.query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.occurred_date, s.code AS site_code, s.name AS site_name FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? AND s.code = ? LIMIT 1`, [serial, scope.site!.code]);
+    ? await pool.query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, u.occurred_date, s.code AS site_code, s.name AS site_name FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? LIMIT 1`, [serial])
+    : await pool.query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, u.occurred_date, s.code AS site_code, s.name AS site_name FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? AND s.code = ? LIMIT 1`, [serial, scope.site!.code]);
   const unit = (unitRows as Array<Record<string, unknown>>)[0] ?? null;
   if (!unit) { res.json({ unit: null, history: [] }); return; }
   const [history] = scope.all
@@ -516,8 +523,13 @@ router.get('/stock', async (req, res) => {
   if (!scope) return;
   const siteCode = scope.all ? 'ALL' : scope.site!.code;
   const q = value(req.query.q);
-  const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2000);
-  const safeLimit = Number.isInteger(limit) ? limit : 500;
+  // includeOut=1 also returns units that are out — used by the site stock
+  // list so a part that hit 0 stays visible instead of vanishing.
+  const includeOut = value(req.query.includeOut) === '1';
+  // includeOut needs complete groups (a cut group computes a wrong 0),
+  // so it defaults to the same 12 000-row ceiling as /stock/parts.
+  const limit = Math.min(Math.max(Number(req.query.limit) || (includeOut ? 12000 : 500), 1), 12000);
+  const safeLimit = Number.isInteger(limit) ? limit : (includeOut ? 12000 : 500);
   const pool = getDbPool();
   const terms = searchTerms(q);
   const filter = terms.length
@@ -528,9 +540,9 @@ router.get('/stock', async (req, res) => {
   if (siteCode && siteCode !== 'ALL') { siteFilter = 'AND s.code = ?'; params.push(siteCode); }
   for (const term of terms) params.push(`%${term}%`, `%${term}%`, `%${term}%`);
   const [rows] = await pool.query(
-    `SELECT u.id, u.part_number, m.description, u.serial, u.quantity, u.status, u.reference, u.occurred_date, s.code AS site_code, s.name AS site_name
+    `SELECT u.id, u.part_number, m.description, u.serial, u.quantity, u.status, u.reference, u.location, u.occurred_date, u.stocked_out_at, s.code AS site_code, s.name AS site_name
      FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id LEFT JOIN parts_master m ON m.part_number = u.part_number
-     WHERE u.status = 'in' ${siteFilter} ${filter} ORDER BY s.code ASC, u.part_number ASC, u.serial ASC LIMIT ${safeLimit}`,
+     WHERE ${includeOut ? '1 = 1' : "u.status = 'in'"} ${siteFilter} ${filter} ORDER BY s.code ASC, u.part_number ASC, u.serial ASC LIMIT ${safeLimit}`,
     params
   );
   const [countRows] = await pool.query(
@@ -560,7 +572,7 @@ router.get('/part-units', async (req, res) => {
   if (!partNumber) { bad(res, 'Part number is required.'); return; }
   const code = scope.all ? 'ALL' : scope.site!.code;
   const [rows] = await getDbPool().query(
-    `SELECT u.id, u.part_number, m.description, u.serial, u.quantity, u.status, u.reference, u.occurred_date, u.stocked_in_at, u.stocked_out_at, s.code AS site_code
+    `SELECT u.id, u.part_number, m.description, u.serial, u.quantity, u.status, u.reference, u.location, u.occurred_date, u.stocked_in_at, u.stocked_out_at, s.code AS site_code
      FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id LEFT JOIN parts_master m ON m.part_number = u.part_number
      WHERE u.part_number = ? ${code !== 'ALL' ? 'AND s.code = ?' : ''} ORDER BY u.serial ASC`,
     code !== 'ALL' ? [partNumber, code] : [partNumber]
@@ -576,7 +588,7 @@ router.get('/recent', async (req, res) => {
   const params: unknown[] = [];
   if (siteCode && siteCode !== 'ALL') params.push(siteCode);
   const [rows] = await getDbPool().query(
-    `SELECT m.id, m.type, m.part_number, m.serial, m.occurred_date, m.reference, m.quantity, m.created_at, s.code AS site_code
+    `SELECT m.id, m.type, m.part_number, m.serial, m.occurred_date, m.reference, m.quantity, m.location, m.created_at, s.code AS site_code
      FROM parts_movements m INNER JOIN parts_sites s ON s.id = m.site_id
      ${siteCode && siteCode !== 'ALL' ? 'WHERE s.code = ?' : ''} ORDER BY m.created_at DESC, m.id DESC LIMIT 10`,
     params
@@ -595,6 +607,7 @@ router.post('/stock/in', async (req, res) => {
   let partNumber = value(req.body?.partNumber);
   const serial = upper(req.body?.serial);
   const eee = upper(req.body?.eee);
+  const location = value(req.body?.location);
   if (!partNumber && eee) partNumber = (await resolveByEee(eee))?.part_number || '';
   const quantity = req.body?.quantity === undefined ? 1 : Number(req.body?.quantity);
   const occurredDate = parseDate(req.body?.occurredDate);
@@ -613,7 +626,7 @@ router.post('/stock/in', async (req, res) => {
       const result = await withConnection(async (conn) => {
         for (const s of serials) {
           try {
-            const r = await applyStockIn(conn, { site, partNumber, serial: s, quantity: 1, occurredDate, actorUserId: req.user!.userId });
+            const r = await applyStockIn(conn, { site, partNumber, serial: s, quantity: 1, occurredDate, actorUserId: req.user!.userId, location });
             r.sheetRow.actor = req.user!.email;
             void appendSheetRow(req.user!.userId, r.sheetRow).then((ok) => { if (ok) void markSheetSynced(r.movementId); });
             imported++;
@@ -624,9 +637,9 @@ router.post('/stock/in', async (req, res) => {
         return { imported, errors };
       });
       if (result.imported === 0) { bad(res, result.errors[0]?.error || 'Unable to stock in these serials.'); return; }
-      announceParts(`${result.imported} × ${partNumber || 'part'} stocked in at ${site.code} via bulk entry${result.errors.length ? ` (${result.errors.length} failed)` : ''}.`);
+      announceParts(`${result.imported} × ${partNumber || 'part'} stocked in at ${site.code}${location ? ` (${location})` : ''} via bulk entry${result.errors.length ? ` (${result.errors.length} failed)` : ''}.`);
       res.status(201).json({
-        message: `${result.imported} × ${partNumber || 'part'} stocked in at ${site.code}${result.errors.length ? `, ${result.errors.length} need attention` : ''}.`,
+        message: `${result.imported} × ${partNumber || 'part'} stocked in at ${site.code}${location ? ` (${location})` : ''}${result.errors.length ? `, ${result.errors.length} need attention` : ''}.`,
         imported: result.imported,
         failed: result.errors.length,
         errors: result.errors,
@@ -636,7 +649,7 @@ router.post('/stock/in', async (req, res) => {
   }
   try {
     const result = await withConnection((conn) =>
-      applyStockIn(conn, { site, partNumber, serial, quantity, occurredDate, actorUserId: req.user!.userId })
+      applyStockIn(conn, { site, partNumber, serial, quantity, occurredDate, actorUserId: req.user!.userId, location })
     );
     result.sheetRow.actor = req.user!.email;
     void appendSheetRow(req.user!.userId, result.sheetRow).then((ok) => { if (ok) void markSheetSynced(result.movementId); });
@@ -654,13 +667,14 @@ router.post('/stock/out', async (req, res) => {
   const serial = upper(req.body?.serial);
   const partNumber = value(req.body?.partNumber);
   const reference = value(req.body?.reference);
+  const location = value(req.body?.location);
   const quantity = req.body?.quantity === undefined ? 1 : Number(req.body?.quantity);
   const occurredDate = parseDate(req.body?.occurredDate);
   if (!reference) { bad(res, 'Reference number is required for stock out.'); return; }
   if (!occurredDate) { bad(res, 'Date must use YYYY-MM-DD format.'); return; }
   try {
     const result = await withConnection((conn) =>
-      applyStockOut(conn, { site, partNumber, serial, quantity, reference, occurredDate, actorUserId: req.user!.userId })
+      applyStockOut(conn, { site, partNumber, serial, quantity, reference, occurredDate, actorUserId: req.user!.userId, location })
     );
     result.sheetRow.actor = req.user!.email;
     void appendSheetRow(req.user!.userId, result.sheetRow).then((ok) => { if (ok) void markSheetSynced(result.movementId); });
@@ -689,7 +703,7 @@ router.post('/import/in', async (req, res) => {
     if (!occurredDate) { errors.push({ row: i + 1, error: 'Date must use YYYY-MM-DD format.' }); continue; }
     try {
       const result = await withConnection((conn) =>
-        applyStockIn(conn, { site, partNumber, serial, quantity: 1, occurredDate, actorUserId: req.user!.userId })
+        applyStockIn(conn, { site, partNumber, serial, quantity: 1, occurredDate, actorUserId: req.user!.userId, location: '' })
       );
       result.sheetRow.actor = req.user!.email;
       void appendSheetRow(req.user!.userId, result.sheetRow).then((ok) => { if (ok) void markSheetSynced(result.movementId); });
@@ -722,7 +736,7 @@ router.post('/import/out', async (req, res) => {
     if (!occurredDate) { errors.push({ row: i + 1, error: 'Date must use YYYY-MM-DD format.' }); continue; }
     try {
       const result = await withConnection((conn) =>
-        applyStockOut(conn, { site, partNumber, serial, quantity: 1, reference, occurredDate, actorUserId: req.user!.userId })
+        applyStockOut(conn, { site, partNumber, serial, quantity: 1, reference, occurredDate, actorUserId: req.user!.userId, location: '' })
       );
       result.sheetRow.actor = req.user!.email;
       void appendSheetRow(req.user!.userId, result.sheetRow).then((ok) => { if (ok) void markSheetSynced(result.movementId); });
@@ -747,8 +761,10 @@ router.get('/sheets/status', async (req, res) => {
     email: connection?.google_email || null,
     spreadsheetId: cfg?.spreadsheet_id || '',
     spreadsheetName: cfg?.spreadsheet_name || '',
-    sheetName: cfg?.sheet_name || '',
+    stockInSheetName: cfg?.stock_in_sheet_name || '',
+    stockOutSheetName: cfg?.stock_out_sheet_name || '',
     pendingSync: Number((pending as Array<{ count: number }>)[0]?.count || 0),
+    lastError: lastSheetError(),
   });
 });
 
@@ -790,14 +806,15 @@ router.get('/sheets/config', async (_req, res) => {
 router.post('/sheets/config', requireAdmin, async (req, res) => {
   const spreadsheetId = value(req.body?.spreadsheetId);
   const spreadsheetName = value(req.body?.spreadsheetName);
-  const sheetName = value(req.body?.sheetName);
-  if (!spreadsheetId || !sheetName) { bad(res, 'Spreadsheet ID and sheet name are required.'); return; }
+  const stockInSheetName = value(req.body?.stockInSheetName);
+  const stockOutSheetName = value(req.body?.stockOutSheetName);
+  if (!spreadsheetId || !stockInSheetName || !stockOutSheetName) { bad(res, 'Spreadsheet ID, Stock-In tab, and Stock-out tab are required.'); return; }
   await ensurePartsTables();
   await getDbPool().execute(
-    'INSERT INTO parts_sheet_config (id, spreadsheet_id, spreadsheet_name, sheet_name, updated_by) VALUES (1, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE spreadsheet_id = VALUES(spreadsheet_id), spreadsheet_name = VALUES(spreadsheet_name), sheet_name = VALUES(sheet_name), updated_by = VALUES(updated_by)',
-    [spreadsheetId, spreadsheetName, sheetName, req.user!.userId]
+    'INSERT INTO parts_sheet_config (id, spreadsheet_id, spreadsheet_name, stock_in_sheet_name, stock_out_sheet_name, updated_by) VALUES (1, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE spreadsheet_id = VALUES(spreadsheet_id), spreadsheet_name = VALUES(spreadsheet_name), stock_in_sheet_name = VALUES(stock_in_sheet_name), stock_out_sheet_name = VALUES(stock_out_sheet_name), updated_by = VALUES(updated_by)',
+    [spreadsheetId, spreadsheetName, stockInSheetName, stockOutSheetName, req.user!.userId]
   );
-  res.json({ message: 'Sheet log destination saved.' });
+  res.json({ message: 'Sheet tabs saved.' });
 });
 
 router.get('/sheets/list', requireAdmin, async (req, res) => {
@@ -816,18 +833,39 @@ router.post('/sheets/retry', requireAdmin, async (req, res) => {
   const [rows] = await getDbPool().query(
     `SELECT m.id, s.code AS site_code, s.name AS site_name, m.type, DATE_FORMAT(m.occurred_date, '%Y-%m-%d') AS date,
             m.part_number, COALESCE(pm.description, '') AS description, COALESCE(m.serial, '') AS serial,
-            COALESCE(m.reference, '') AS reference, m.quantity, COALESCE(u.email, '') AS actor
+            COALESCE(m.reference, '') AS reference, m.quantity, COALESCE(m.location, '') AS location, COALESCE(u.email, '') AS actor
      FROM parts_movements m INNER JOIN parts_sites s ON s.id = m.site_id
      LEFT JOIN parts_master pm ON pm.part_number = m.part_number LEFT JOIN users u ON u.id = m.actor_user_id
      WHERE m.sheet_synced = 0 ORDER BY m.id ASC LIMIT 200`
   );
-  const pending = rows as Array<{ id: number; site_code: string; site_name: string; type: 'IN' | 'OUT'; date: string; part_number: string; description: string; serial: string; reference: string; quantity: number; actor: string }>;
+  const pending = rows as Array<{ id: number; site_code: string; site_name: string; type: 'IN' | 'OUT'; date: string; part_number: string; description: string; serial: string; reference: string; quantity: number; location: string; actor: string }>;
   let synced = 0;
   for (const row of pending) {
-    const ok = await appendSheetRow(req.user!.userId, { siteCode: row.site_code, siteName: row.site_name, type: row.type, date: row.date, partNumber: row.part_number, description: row.description, serial: row.serial, reference: row.reference, quantity: row.quantity, actor: row.actor });
+    const ok = await appendSheetRow(req.user!.userId, { siteCode: row.site_code, siteName: row.site_name, type: row.type, date: row.date, partNumber: row.part_number, description: row.description, serial: row.serial, reference: row.reference, quantity: row.quantity, actor: row.actor, location: row.location });
     if (ok) { await markSheetSynced(row.id); synced++; }
   }
   res.json({ synced, remaining: pending.length - synced });
+});
+
+// ---------- Two-way sync (Sheet → Web) ----------
+
+router.post('/sheets/sync', requireAdmin, async (req, res) => {
+  await ensurePartsTables();
+  const siteCode = upper(req.body?.siteCode);
+  if (!siteCode || siteCode === 'ALL') { bad(res, 'Choose a site to sync from the sheet.'); return; }
+  const site = await getSite(siteCode);
+  if (!site) { bad(res, 'Site code not found.', 404); return; }
+  try {
+    const result = await syncFromSheet(req.user!.userId, site.id, site.code, site.name);
+    const dupNote = result.duplicates
+      ? ` · skipped ${result.duplicates} duplicate row${result.duplicates === 1 ? '' : 's'} (${result.duplicateSerials.length} serial${result.duplicateSerials.length === 1 ? '' : 's'})`
+      : '';
+    announceParts(`Sheet sync: rebuilt ${site.code} stock — ${result.ins} IN, ${result.outs} OUT (${result.imported} movements)${dupNote}.`);
+    res.json({ message: `Synced ${site.code} from the spreadsheet.`, ...result });
+  } catch (error) {
+    console.error('parts sheet sync error:', error);
+    res.status(500).json({ error: (error as Error).message || 'Unable to sync from the sheet.' });
+  }
 });
 
 export default router;

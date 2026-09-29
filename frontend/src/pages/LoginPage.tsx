@@ -23,6 +23,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(false);
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -70,7 +71,7 @@ export default function LoginPage() {
 
     try {
       if (mode === 'login') {
-        await login(email, password);
+        await login(email, password, remember);
         navigate('/');
       } else {
         await signup(email, password, fullName);
@@ -173,6 +174,18 @@ export default function LoginPage() {
 
           {error && (
             <p className="text-[12.5px] text-[#dc2626]">{error}</p>
+          )}
+
+          {mode === 'login' && (
+            <label className="flex cursor-pointer select-none items-center gap-2 text-[12.5px] text-[#6e6e7a]">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="h-4 w-4 rounded border-[#d4d4db] accent-[#2563eb]"
+              />
+              Remember this device for 30 days
+            </label>
           )}
 
           <button

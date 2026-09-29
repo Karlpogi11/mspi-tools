@@ -14,9 +14,10 @@ export default function AdminPartsPage() {
   const [editing, setEditing] = useState<PartsMasterItem | null>(null);
   const [stock, setStock] = useState<PartsUnit[]>([]);
   const [stockQuery, setStockQuery] = useState('');
-  const [sheet, setSheet] = useState({ connected: false, email: '', spreadsheetId: '', spreadsheetName: '', sheetName: '', pendingSync: 0 });
+  const [sheet, setSheet] = useState({ connected: false, email: '', spreadsheetId: '', spreadsheetName: '', stockInSheetName: '', stockOutSheetName: '', pendingSync: 0, lastError: '' as string });
   const [sheetIdInput, setSheetIdInput] = useState('');
   const [sheetOptions, setSheetOptions] = useState<string[]>([]);
+  const [syncSiteCode, setSyncSiteCode] = useState('');
   const [activeTab, setActiveTab] = useState<PartsTab>('stock');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -29,7 +30,7 @@ export default function AdminPartsPage() {
   const refreshMaster = async (q?: string) => setMaster((await api.admin.getPartsMaster(q)).items);
   const refreshSheet = async () => {
     const status = await api.parts.sheetStatus();
-    setSheet({ connected: status.connected, email: status.email || '', spreadsheetId: status.spreadsheetId, spreadsheetName: status.spreadsheetName, sheetName: status.sheetName, pendingSync: status.pendingSync });
+    setSheet({ connected: status.connected, email: status.email || '', spreadsheetId: status.spreadsheetId, spreadsheetName: status.spreadsheetName, stockInSheetName: status.stockInSheetName, stockOutSheetName: status.stockOutSheetName, pendingSync: status.pendingSync, lastError: status.lastError || '' });
     if (!sheetIdInput && status.spreadsheetId) setSheetIdInput(status.spreadsheetId);
   };
   const refreshStock = async () => setStock((await api.parts.stock(siteCode, stockQuery.trim() || undefined)).stock);
@@ -102,18 +103,35 @@ export default function AdminPartsPage() {
     try {
       const result = await api.parts.sheetList(sheetIdInput.trim());
       setSheetOptions(result.sheets);
-      if (result.sheets.length && !result.sheets.includes(sheet.sheetName)) {
-        await api.parts.saveSheetConfig(sheetIdInput.trim(), result.title, result.sheets[0]);
+      // Auto-pick sensible defaults when the config is still empty.
+      if (result.sheets.length && (!sheet.stockInSheetName || !sheet.stockOutSheetName)) {
+        const inName = result.sheets.find((s) => /stock.?in/i.test(s)) || result.sheets[0];
+        const outName = result.sheets.find((s) => /stock.?out/i.test(s)) || result.sheets[1] || result.sheets[0];
+        await api.parts.saveSheetConfig(sheetIdInput.trim(), result.title, inName, outName);
         await refreshSheet();
-        setMessage('Sheet log destination saved.');
+        setMessage('Sheet tabs configured.');
       }
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   };
-  const saveSheet = async (name: string) => {
+  const saveSheet = async (inName: string, outName: string) => {
     setBusy(true); setError('');
-    try { await api.parts.saveSheetConfig(sheetIdInput.trim(), sheet.spreadsheetName, name); await refreshSheet(); setMessage('Sheet log destination saved.'); }
+    try { await api.parts.saveSheetConfig(sheetIdInput.trim(), sheet.spreadsheetName, inName, outName); await refreshSheet(); setMessage('Sheet tabs saved.'); }
     catch (err) { setError((err as Error).message); }
+    finally { setBusy(false); }
+  };
+  const runSheetSync = async () => {
+    if (!syncSiteCode) return;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const r = await api.parts.syncFromSheet(syncSiteCode);
+      const dup = r.duplicates > 0
+        ? ` Skipped ${r.duplicates} duplicate row${r.duplicates === 1 ? '' : 's'}: ${r.duplicateSerials.slice(0, 6).join(', ')}${r.duplicateSerials.length > 6 ? '…' : ''} — remove them from the sheet.`
+        : '';
+      setMessage(`Synced ${syncSiteCode}: ${r.imported} movements replayed (${r.ins} IN, ${r.outs} OUT).${dup}`);
+      await refreshStock();
+      await refreshSheet();
+    } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   };
 
@@ -161,7 +179,7 @@ export default function AdminPartsPage() {
             <div key={u.id} className="flex items-center justify-between gap-3 py-2">
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-semibold text-[#1d1d1f]">{u.serial || `${u.quantity} × ${u.part_number}`}</p>
-                <p className="truncate text-[11px] text-[#6e6e73]">{u.site_code} · {u.part_number}{u.description ? ` · ${u.description}` : ''}{u.reference ? ` · ref ${u.reference}` : ''}</p>
+                <p className="truncate text-[11px] text-[#6e6e73]">{u.site_code} · {u.part_number}{u.location ? ` · ${u.location}` : ''}{u.description ? ` · ${u.description}` : ''}{u.reference ? ` · ref ${u.reference}` : ''}</p>
               </div>
             </div>
           ))}
@@ -247,7 +265,7 @@ export default function AdminPartsPage() {
 
       {activeTab === 'sheet' && <section className="rounded-2xl border border-[#e5e5e7] bg-white p-5">
         <h2 className="text-[15px] font-semibold text-[#1d1d1f]">Google Sheet log</h2>
-        <p className="mt-1 text-[12px] text-[#6e6e73]">One global append-only sheet. Every stock IN and OUT is added as a raw row.</p>
+        <p className="mt-1 text-[12px] text-[#6e6e73]">Two tabs: Stock-In and Stock-out. Every stock IN/OUT appends instantly, skipping formula columns.</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${sheet.connected ? 'bg-[#ecfdf3] text-[#166534]' : 'bg-[#f5f5f7] text-[#6e6e73]'}`}>
             {sheet.connected ? `Connected · ${sheet.email}` : 'Not connected'}
@@ -267,25 +285,66 @@ export default function AdminPartsPage() {
           <input value={sheetIdInput} onChange={(e) => setSheetIdInput(e.target.value)} placeholder="Spreadsheet ID"
             className="h-10 min-w-[240px] flex-1 rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 font-mono text-[12px] outline-none focus:border-[#1d1d1f]" />
           <button type="button" onClick={() => void loadSheetOptions()} disabled={busy || !sheetIdInput.trim()}
-            className="rounded-xl bg-[#1d1d1f] px-5 py-2 text-[12px] font-semibold text-white disabled:opacity-40">Load sheets</button>
+            className="rounded-xl bg-[#1d1d1f] px-5 py-2 text-[12px] font-semibold text-white disabled:opacity-40">Load tabs</button>
         </div>
-        {(sheetOptions.length > 0 || sheet.sheetName) && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {(sheetOptions.length ? sheetOptions : [sheet.sheetName]).map((name) => (
-              <button key={name} type="button" onClick={() => void saveSheet(name)}
-                className={`rounded-full px-4 py-1.5 text-[12px] font-semibold ${sheet.sheetName === name ? 'bg-[#1d1d1f] text-white' : 'bg-[#f5f5f7] text-[#3c3c43]'}`}>
-                {name}
-              </button>
-            ))}
+        {sheetOptions.length > 0 && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-[11px] font-semibold text-[#3c3c43]">Stock-In tab</p>
+              <select value={sheet.stockInSheetName} onChange={(e) => void saveSheet(e.target.value, sheet.stockOutSheetName || e.target.value)}
+                className="mt-1 h-10 w-full rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[13px] outline-none focus:border-[#1d1d1f]">
+                <option value="">Select tab…</option>
+                {sheetOptions.map((name) => <option key={`in-${name}`} value={name}>{name}</option>)}
+              </select>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-[#3c3c43]">Stock-out tab</p>
+              <select value={sheet.stockOutSheetName} onChange={(e) => void saveSheet(sheet.stockInSheetName || e.target.value, e.target.value)}
+                className="mt-1 h-10 w-full rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[13px] outline-none focus:border-[#1d1d1f]">
+                <option value="">Select tab…</option>
+                {sheetOptions.map((name) => <option key={`out-${name}`} value={name}>{name}</option>)}
+              </select>
+            </div>
           </div>
         )}
+        {(sheet.stockInSheetName || sheet.stockOutSheetName) && (
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[#6e6e73]">
+            <span className="rounded-full bg-[#f5f5f7] px-2.5 py-1">IN → <strong>{sheet.stockInSheetName || '—'}</strong></span>
+            <span className="rounded-full bg-[#f5f5f7] px-2.5 py-1">OUT → <strong>{sheet.stockOutSheetName || '—'}</strong></span>
+          </div>
+        )}
+        {sheet.lastError && (
+          <div role="alert" className="mt-3 rounded-xl border border-[#fecaca] bg-[#fff7f7] px-3 py-2.5 text-[12px] text-[#b91c1c]">
+            Sheet sync problem: {sheet.lastError}
+          </div>
+        )}
+        {sheet.pendingSync > 0 && !sheet.lastError && (
+          <div className="mt-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-3 py-2.5 text-[12px] text-[#92400e]">
+            {sheet.pendingSync} movement(s) not yet written to the sheet. Use “Retry {sheet.pendingSync} pending” above.
+          </div>
+        )}
+        <div className="mt-5 border-t border-[#e5e5e7] pt-4">
+          <h3 className="text-[13px] font-semibold text-[#1d1d1f]">Sync sheet → web</h3>
+          <p className="mt-1 text-[12px] text-[#6e6e73]">Rebuilds one site's stock from the spreadsheet. Use after editing the sheet directly.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <select value={syncSiteCode} onChange={(e) => setSyncSiteCode(e.target.value)}
+              className="h-10 rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[13px] outline-none focus:border-[#1d1d1f]">
+              <option value="">Choose site…</option>
+              {sites.map((s) => <option key={s.id} value={s.code}>{s.code}</option>)}
+            </select>
+            <button type="button" onClick={() => void runSheetSync()} disabled={busy || !syncSiteCode}
+              className="rounded-xl bg-[#1d1d1f] px-5 py-2 text-[12px] font-semibold text-white disabled:opacity-40">
+              {busy ? 'Syncing…' : 'Sync from sheet'}
+            </button>
+          </div>
+        </div>
       </section>}
     </div>
   );
 }
 
 function messageTone(value: string) {
-  if (/invalid|expired|failed|error|unable|required/i.test(value)) return 'error';
+  if (/invalid|expired|failed|error|unable|required|duplicate/i.test(value)) return 'error';
   if (/saved|imported|connected|success/i.test(value)) return 'success';
   return 'info';
 }

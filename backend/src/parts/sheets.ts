@@ -145,8 +145,17 @@ async function accessTokenFor(connection: PartsSheetConnection): Promise<string>
 }
 
 export async function sheetConfig() {
-  const [rows] = await getDbPool().query('SELECT spreadsheet_id, spreadsheet_name, sheet_name, updated_by, updated_at FROM parts_sheet_config WHERE id = 1 LIMIT 1');
-  return (rows as Array<{ spreadsheet_id: string; spreadsheet_name: string; sheet_name: string; updated_by: number | null; updated_at: string }>)[0] ?? null;
+  const [rows] = await getDbPool().query(
+    'SELECT spreadsheet_id, spreadsheet_name, stock_in_sheet_name, stock_out_sheet_name, updated_by, updated_at FROM parts_sheet_config WHERE id = 1 LIMIT 1'
+  );
+  return (rows as Array<{
+    spreadsheet_id: string;
+    spreadsheet_name: string;
+    stock_in_sheet_name: string;
+    stock_out_sheet_name: string;
+    updated_by: number | null;
+    updated_at: string;
+  }>)[0] ?? null;
 }
 
 export async function listSheets(spreadsheetId: string, userId: number): Promise<{ title: string; sheets: string[] }> {
@@ -174,84 +183,337 @@ export interface SheetLogRow {
   reference: string;
   quantity: number;
   actor: string;
+  location: string;
 }
 
-const SHEET_HEADERS = ['Timestamp', 'Site Code', 'Site Name', 'Type', 'Date', 'Part Number', 'Description', 'Serial', 'Reference', 'Quantity', 'Actor'];
-const headerEnsuredAt = new Map<string, number>();
-const HEADER_TTL_MS = 60 * 60_000;
+/** Last append failure reason — surfaced in admin status so a silent
+ * sheet-sync failure is visible instead of only in server logs. */
+let lastAppendError: string | null = null;
 
-/** Sheet Timestamp as `YYYY-MM-DD HH:mm:ss` in Asia/Manila — sortable,
- * human-readable, and parsed by Sheets as a datetime (unlike ISO `Z`). */
-function sheetTimestamp(now = new Date()): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(now);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
-  const hour = get('hour') === '24' ? '00' : get('hour');
-  return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`;
+export function lastSheetError(): string | null {
+  return lastAppendError;
 }
 
-/** Create the header row when the log sheet is still empty. Only fills a
- * fully empty A1:K1 — never overwrites existing content. Cached per sheet. */
-async function ensureSheetHeader(token: string, spreadsheetId: string, sheetName: string): Promise<void> {
-  const key = `${spreadsheetId}\t${sheetName}`;
-  const at = headerEnsuredAt.get(key);
-  if (at && Date.now() - at < HEADER_TTL_MS) return;
-  const range = `${encodeURIComponent(sheetName)}!A1:K1`;
-  const current = await google<{ values?: string[][] }>(token, `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${range}`);
-  const firstRow = current.values?.[0] || [];
-  if (!firstRow.some((cell) => String(cell ?? '').trim() !== '')) {
-    await google(token, `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${range}?valueInputOption=RAW`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [SHEET_HEADERS] }),
-    });
-  }
-  headerEnsuredAt.set(key, Date.now());
+/** Movement dates are stored as YYYY-MM-DD; the sheet displays MM/DD/YYYY.
+ * parseSheetDate reads M/D/YYYY back on sync, so this round-trips. */
+function toSheetDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : iso;
 }
 
-/** Append one raw log row. Never throws — callers treat failure as unsynced. */
+/**
+ * Append one raw log row to the correct tab. Never throws — callers treat
+ * failure as unsynced.
+ *
+ * Stock-In tab columns: DATE | PART NUMBER | SERIAL NUMBER | DESCRIPTION | QTY | REMARKS | STATUS/REFERENCE | LOCATION
+ *   Appends [Date, PartNumber, Serial] — trailing cells are omitted (Google
+ *   rejects JSON nulls, and omitting leaves D-G for the sheet's formulas),
+ *   then writes LOCATION to H of the newly appended row in a second call.
+ *
+ * Stock-out tab columns: DATE | SERIAL NUMBER | REFERENCE NUMBER | PART NUMBER | DESCRIPTION | QTY | REMARKS
+ *   Appends [Date, Serial, Reference] — leaves D-G for formulas.
+ *
+ * No header is written: both tabs ship with their own headers/formulas.
+ */
 export async function appendSheetRow(userId: number, row: SheetLogRow): Promise<boolean> {
   try {
     const cfg = await sheetConfig();
-    if (!cfg?.spreadsheet_id || !cfg?.sheet_name) return false;
-    const connection = await connectionFor(cfg.updated_by || userId);
-    if (!connection) return false;
+    if (!cfg?.spreadsheet_id) {
+      lastAppendError = 'No spreadsheet configured — set the Spreadsheet ID in Admin → Parts → Sheet log.';
+      console.warn('parts sheet append skipped:', lastAppendError);
+      return false;
+    }
+    const tabLabel = row.type === 'IN' ? 'Stock-In' : 'Stock-out';
+    const sheetName = row.type === 'IN' ? cfg.stock_in_sheet_name : cfg.stock_out_sheet_name;
+    if (!sheetName) {
+      lastAppendError = `No ${tabLabel} tab selected — load tabs and pick the ${tabLabel} tab in Admin → Parts → Sheet log.`;
+      console.warn('parts sheet append skipped:', lastAppendError);
+      return false;
+    }
+    // Prefer the config owner's Google connection; fall back to the acting
+    // user (config may have been saved by a different admin).
+    let connection = cfg.updated_by ? await connectionFor(cfg.updated_by) : null;
+    if (!connection) connection = await connectionFor(userId);
+    if (!connection) {
+      lastAppendError = 'Google is not connected — connect Google in Admin → Parts → Sheet log.';
+      console.warn('parts sheet append skipped:', lastAppendError);
+      return false;
+    }
     const token = await accessTokenFor(connection);
-    try { await ensureSheetHeader(token, cfg.spreadsheet_id, cfg.sheet_name); } catch { /* header is best-effort; the row append below still proceeds */ }
-    await google(
+    const isIn = row.type === 'IN';
+    const primary = isIn
+      ? [toSheetDate(row.date), row.partNumber, row.serial]
+      : [toSheetDate(row.date), row.serial, row.reference];
+    const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cfg.spreadsheet_id)}/values/${encodeURIComponent(sheetName)}`;
+    const res = await google<{ updates?: { updatedRange?: string } }>(
       token,
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cfg.spreadsheet_id)}/values/${encodeURIComponent(cfg.sheet_name)}!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      `${base}!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          values: [[
-            sheetTimestamp(),
-            row.siteCode,
-            row.siteName,
-            row.type,
-            row.date,
-            row.partNumber,
-            row.description,
-            row.serial,
-            row.reference,
-            row.quantity,
-            row.actor,
-          ]],
-        }),
+        body: JSON.stringify({ values: [primary] }),
       }
     );
+    // LOCATION lives in column H on the Stock-In tab. The row is already in
+    // the sheet at this point, so a failed H write must NOT return false —
+    // a retry would append a duplicate row.
+    lastAppendError = null;
+    if (isIn && row.location) {
+      const m = res?.updates?.updatedRange?.match(/!([A-Z]+)(\d+)/);
+      if (m) {
+        try {
+          await google(token, `${base}!H${m[2]}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[row.location]] }),
+          });
+        } catch (err) {
+          lastAppendError = `Row appended, but LOCATION (H${m[2]}) write failed: ${(err as Error).message}`;
+          console.error('parts sheet location write failed:', err);
+        }
+      }
+    }
     return true;
   } catch (error) {
+    lastAppendError = `Sheet ${row.type} append to Google failed: ${(error as Error).message}`;
     console.error('parts sheet append failed:', error);
     return false;
   }
+}
+
+// ---------- Two-way sync (Sheet → Web) ----------
+
+function parseSheetDate(raw: unknown): string | null {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  // Already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // M/D/YYYY or D/M/YYYY (Google Sheets locale dependent — prefer the first
+  // number as month when ≤ 12, otherwise day/month).
+  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  if (m) {
+    let [, a, b, y] = m;
+    if (y.length === 2) y = `20${y}`;
+    const pad = (n: string) => n.padStart(2, '0');
+    const first = Number(a); const second = Number(b);
+    if (first > 12 && second <= 12) return `${y}-${pad(b)}-${pad(a)}`;
+    return `${y}-${pad(a)}-${pad(b)}`;
+  }
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) return new Date(t).toISOString().slice(0, 10);
+  return null;
+}
+
+async function readSheetRows(token: string, spreadsheetId: string, sheetName: string, lastCol: string): Promise<string[][]> {
+  const data = await google<{ values?: string[][] }>(
+    token,
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(sheetName)}!A2:${lastCol}`
+  );
+  return data.values || [];
+}
+
+/** Rows per multi-row INSERT — well under MySQL's 65 535-placeholder limit. */
+const SYNC_BATCH = 500;
+
+/**
+ * Rebuild one site's stock from the Google Sheet tabs.
+ *
+ * Stock-In tab  (A=DATE, B=PART NUMBER, C=SERIAL, E=QTY, H=LOCATION)
+ * Stock-out tab (A=DATE, B=SERIAL, C=REFERENCE, D=PART NUMBER, F=QTY)
+ *
+ * Reads both tabs in parallel, applies every row in memory, then clears the
+ * target site's parts_units + parts_movements and writes the final state in
+ * bulk batches inside one transaction. The in-memory replay keeps sync at a
+ * handful of queries regardless of sheet size — the old per-row replay cost
+ * ~3 queries per row and made large sheets crawl.
+ *
+ * Duplicate guard: an IN row for a serial already in stock (no OUT between),
+ * or an OUT row for a serial already out (no IN between), is skipped and
+ * reported in `duplicateSerials` instead of being replayed as a double entry.
+ */
+export async function syncFromSheet(
+  userId: number,
+  siteId: number,
+  siteCode: string,
+  siteName: string
+): Promise<{ imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[] }> {
+  const cfg = await sheetConfig();
+  if (!cfg?.spreadsheet_id) throw new Error('No spreadsheet configured.');
+  if (!cfg.stock_in_sheet_name || !cfg.stock_out_sheet_name) throw new Error('Stock-In and Stock-out tabs are not configured.');
+  const connection = await connectionFor(cfg.updated_by || userId);
+  if (!connection) throw new Error('Google is not connected.');
+  const token = await accessTokenFor(connection);
+
+  const [inRows, outRows] = await Promise.all([
+    readSheetRows(token, cfg.spreadsheet_id, cfg.stock_in_sheet_name, 'H'),
+    readSheetRows(token, cfg.spreadsheet_id, cfg.stock_out_sheet_name, 'G'),
+  ]);
+
+  interface ReplayRow { date: string; type: 'IN' | 'OUT'; partNumber: string; serial: string; reference: string; location: string; quantity: number; order: number }
+  const replay: ReplayRow[] = [];
+
+  inRows.forEach((r, i) => {
+    const date = parseSheetDate(r[0]);
+    const partNumber = String(r[1] ?? '').trim();
+    const serial = String(r[2] ?? '').trim().toUpperCase();
+    if (!date || !partNumber) return;
+    const qtyRaw = Number(String(r[4] ?? '').replace(/[^\d.-]/g, ''));
+    replay.push({ date, type: 'IN', partNumber, serial, reference: '', location: String(r[7] ?? '').trim(), quantity: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1, order: i });
+  });
+
+  outRows.forEach((r, i) => {
+    const date = parseSheetDate(r[0]);
+    const serial = String(r[1] ?? '').trim().toUpperCase();
+    const reference = String(r[2] ?? '').trim();
+    const partNumber = String(r[3] ?? '').trim();
+    if (!date || (!serial && !partNumber)) return;
+    const qtyRaw = Number(String(r[5] ?? '').replace(/[^\d.-]/g, ''));
+    replay.push({ date, type: 'OUT', partNumber, serial, reference, location: '', quantity: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1, order: 100000 + i });
+  });
+
+  replay.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
+
+  // ---- Apply every row in memory (zero DB roundtrips) ----
+  interface FinalUnit {
+    partNumber: string;
+    serial: string | null;
+    quantity: number;
+    status: 'in' | 'out';
+    location: string | null;
+    reference: string | null;
+    occurredDate: string;
+    stockedOutDate: string | null;
+  }
+  interface FinalMovement {
+    partNumber: string;
+    serial: string | null;
+    type: 'IN' | 'OUT';
+    date: string;
+    location: string | null;
+    reference: string | null;
+    quantity: number;
+  }
+
+  const units = new Map<string, FinalUnit>();
+  const bucketsByPart = new Map<string, FinalUnit[]>();
+  const movements: FinalMovement[] = [];
+  let ins = 0;
+  let outs = 0;
+  // Duplicate guard: a serial already in stock cannot be stocked in again
+  // without an OUT between (and vice versa) — those sheet rows are skipped
+  // and reported instead of silently replayed as double entries.
+  let duplicates = 0;
+  const duplicateSerials = new Set<string>();
+
+  for (const row of replay) {
+    if (row.type === 'IN') {
+      if (row.serial) {
+        const existing = units.get(row.serial);
+        if (existing && existing.status === 'in') {
+          duplicates++;
+          duplicateSerials.add(row.serial);
+          continue;
+        }
+        // One unit per serial — the latest IN wins, as in SQL.
+        units.set(row.serial, {
+          partNumber: row.partNumber, serial: row.serial, quantity: 1, status: 'in',
+          location: row.location || null, reference: null, occurredDate: row.date, stockedOutDate: null,
+        });
+      } else {
+        // Non-serialized: one bucket per (part, location) — overflow lives in
+        // its own bucket, so Box 1 and Box 2 stay separate.
+        const key = `${row.partNumber}\u0000${row.location}`;
+        const ex = units.get(key);
+        if (ex) {
+          ex.quantity += row.quantity;
+          ex.status = 'in';
+          ex.occurredDate = row.date;
+          ex.stockedOutDate = null;
+        } else {
+          const bucket: FinalUnit = {
+            partNumber: row.partNumber, serial: null, quantity: row.quantity, status: 'in',
+            location: row.location || null, reference: null, occurredDate: row.date, stockedOutDate: null,
+          };
+          units.set(key, bucket);
+          const list = bucketsByPart.get(row.partNumber) || [];
+          list.push(bucket);
+          bucketsByPart.set(row.partNumber, list);
+        }
+      }
+      movements.push({ partNumber: row.partNumber, serial: row.serial || null, type: 'IN', date: row.date, location: row.location || null, reference: null, quantity: row.quantity });
+      ins++;
+    } else {
+      if (row.serial) {
+        const u = units.get(row.serial);
+        if (u && u.status !== 'in') {
+          // Duplicate guard (OUT side): the serial is already out — a second
+          // OUT with no IN between is an invalid sheet row.
+          duplicates++;
+          duplicateSerials.add(row.serial);
+          continue;
+        }
+        if (u) {
+          u.status = 'out';
+          u.location = null;
+          u.reference = row.reference || null;
+          u.stockedOutDate = row.date;
+        }
+      } else if (row.partNumber) {
+        // Deduct from the in-stock bucket holding the most of this part
+        // (same rule the per-row SQL replay used).
+        const buckets = bucketsByPart.get(row.partNumber) || [];
+        let best: FinalUnit | null = null;
+        for (const u of buckets) {
+          if (u.status !== 'in' || u.quantity <= 0) continue;
+          if (!best || u.quantity > best.quantity) best = u;
+        }
+        if (best) {
+          best.quantity = Math.max(0, best.quantity - row.quantity);
+          best.reference = row.reference || null;
+          if (best.quantity === 0) {
+            best.status = 'out';
+            best.location = null;
+            best.stockedOutDate = row.date;
+          }
+        }
+      }
+      movements.push({ partNumber: row.partNumber, serial: row.serial || null, type: 'OUT', date: row.date, location: null, reference: row.reference || null, quantity: row.quantity });
+      outs++;
+    }
+  }
+
+  // ---- Bulk write: delete + batched multi-row inserts ----
+  const pool = getDbPool();
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    // Clear only this site's rows — other sites stay untouched.
+    await conn.execute('DELETE FROM parts_movements WHERE site_id = ?', [siteId]);
+    await conn.execute('DELETE FROM parts_units WHERE site_id = ?', [siteId]);
+
+    const unitList = [...units.values()];
+    for (let i = 0; i < unitList.length; i += SYNC_BATCH) {
+      const chunk = unitList.slice(i, i + SYNC_BATCH);
+      const sql = `INSERT INTO parts_units (site_id, part_number, serial, quantity, status, location, reference, occurred_date, stocked_in_at, stocked_out_at) VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)').join(',')}`;
+      const params: unknown[] = [];
+      for (const u of chunk) params.push(siteId, u.partNumber, u.serial, u.quantity, u.status, u.location, u.reference, u.occurredDate, u.stockedOutDate);
+      await conn.query(sql, params);
+    }
+
+    for (let i = 0; i < movements.length; i += SYNC_BATCH) {
+      const chunk = movements.slice(i, i + SYNC_BATCH);
+      const sql = `INSERT INTO parts_movements (site_id, part_number, serial, type, occurred_date, location, reference, quantity, sheet_synced) VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, 1)').join(',')}`;
+      const params: unknown[] = [];
+      for (const m of chunk) params.push(siteId, m.partNumber, m.serial, m.type, m.date, m.location, m.reference, m.quantity);
+      await conn.query(sql, params);
+    }
+
+    await conn.commit();
+  } catch (error) {
+    try { await conn.rollback(); } catch { /* ignore */ }
+    throw error;
+  } finally {
+    conn.release();
+  }
+  return { imported: movements.length, ins, outs, duplicates, duplicateSerials: [...duplicateSerials] };
 }

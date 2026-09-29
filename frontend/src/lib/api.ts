@@ -176,10 +176,10 @@ export interface StorageRecentMovement extends StorageMovement { ar_number: stri
 
 export interface PartsSite { id: number; code: string; name: string; active: number }
 export interface PartsMasterItem { id: number; part_number: string; description: string; eee_code: string | null; substitute_part: string | null; serialized: string }
-export interface PartsUnit { id: number; part_number: string; description?: string | null; serial: string | null; quantity: number; status: string; reference: string | null; occurred_date: string | null; stocked_in_at?: string | null; stocked_out_at?: string | null; site_code: string; site_name?: string }
+export interface PartsUnit { id: number; part_number: string; description?: string | null; serial: string | null; quantity: number; status: string; reference: string | null; location: string | null; occurred_date: string | null; stocked_in_at?: string | null; stocked_out_at?: string | null; site_code: string; site_name?: string }
 export interface PartsStockSummary { total: number; units: number; out_total: number; parts: number }
-export interface PartsMovement { id: number; type: string; part_number: string; serial: string | null; occurred_date: string; reference: string | null; quantity: number; created_at: string; site_code: string }
-export interface PartsSheetStatus { connected: boolean; email: string | null; spreadsheetId: string; spreadsheetName: string; sheetName: string; pendingSync: number }
+export interface PartsMovement { id: number; type: string; part_number: string; serial: string | null; occurred_date: string; reference: string | null; quantity: number; location: string | null; created_at: string; site_code: string }
+export interface PartsSheetStatus { connected: boolean; email: string | null; spreadsheetId: string; spreadsheetName: string; stockInSheetName: string; stockOutSheetName: string; pendingSync: number; lastError: string | null }
 
 export interface Session {
   id: number;
@@ -399,6 +399,11 @@ let partsSiteToken = '';
 export function setPartsSiteToken(token: string) {
   partsSiteToken = token;
 }
+const partsSiteCodeKey = 'mspi.parts.site-code';
+/** Last site code verified on this device — a code only, never a token. */
+export function recalledPartsSiteCode(): string {
+  try { return window.localStorage.getItem(partsSiteCodeKey) || ''; } catch { return ''; }
+}
 /** Verified Parts site code for this session (e.g. PODIUM), or null. Display-only. */
 export function getPartsSiteCode(): string | null {
   try {
@@ -416,10 +421,10 @@ function siteHeaders(): Record<string, string> {
 }
 
 export const api = {
-  login: (email: string, password: string) =>
+  login: (email: string, password: string, remember?: boolean) =>
     request<{ message: string; user: User }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, remember: remember === true }),
     }),
 
   signup: (email: string, password: string, fullName: string) =>
@@ -582,9 +587,16 @@ export const api = {
   },
 
   parts: {
-    verifySite: (code: string) => request<{ site: PartsSite; siteToken: string }>(`/parts/sites/verify?code=${encodeURIComponent(code)}`),
+    verifySite: async (code: string) => {
+      const trimmed = code.trim();
+      const result = await request<{ site: PartsSite; siteToken: string }>(`/parts/sites/verify?code=${encodeURIComponent(trimmed)}`);
+      // Remember the verified code (never the 24h token) so /parts reopens in
+      // this site; the token is re-issued by the restore attempt on next visit.
+      try { window.localStorage.setItem(partsSiteCodeKey, trimmed.toUpperCase()); } catch { /* Ignore storage failures. */ }
+      return result;
+    },
     master: (q?: string, limit?: number) => request<{ items: PartsMasterItem[] }>(`/parts/master${q || limit ? `?${new URLSearchParams({ ...(q ? { q } : {}), ...(limit ? { limit: String(limit) } : {}) }).toString()}` : ''}`),
-    stock: (siteCode: string, q?: string, limit?: number) => requestFresh<{ stock: PartsUnit[]; summary: PartsStockSummary }>(`/parts/stock?siteCode=${encodeURIComponent(siteCode)}${q ? `&q=${encodeURIComponent(q)}` : ''}${limit ? `&limit=${limit}` : ''}`, { headers: siteHeaders() }),
+    stock: (siteCode: string, q?: string, limit?: number, includeOut?: boolean) => requestFresh<{ stock: PartsUnit[]; summary: PartsStockSummary }>(`/parts/stock?siteCode=${encodeURIComponent(siteCode)}${q ? `&q=${encodeURIComponent(q)}` : ''}${limit ? `&limit=${limit}` : ''}${includeOut ? '&includeOut=1' : ''}`, { headers: siteHeaders() }),
     partUnits: (siteCode: string, partNumber: string) => requestFresh<{ units: PartsUnit[] }>(`/parts/part-units?siteCode=${encodeURIComponent(siteCode)}&partNumber=${encodeURIComponent(partNumber)}`, { headers: siteHeaders() }),
     stockParts: (siteCode: string) => request<{ parts: { part_number: string; description: string | null; date: string | null; serials: number }[] }>(`/parts/stock/parts?siteCode=${encodeURIComponent(siteCode)}`, { headers: siteHeaders() }),
     lookup: (serial: string, siteCode: string) => requestFresh<{ unit: PartsUnit | null; history: PartsMovement[] }>(`/parts/lookup?serial=${encodeURIComponent(serial)}&siteCode=${encodeURIComponent(siteCode)}`, { headers: siteHeaders() }),
@@ -597,9 +609,9 @@ export const api = {
       return requestFresh<{ part: PartsMasterItem | null; unit: PartsUnit | null }>(`/parts/resolve?${query.toString()}`, { headers: siteHeaders() });
     },
     recent: (siteCode: string) => request<{ history: PartsMovement[] }>(`/parts/recent?siteCode=${encodeURIComponent(siteCode)}`, { headers: siteHeaders() }),
-    stockIn: (payload: { siteCode: string; partNumber: string; serial?: string; serials?: string[]; eee?: string; quantity?: number; occurredDate?: string }) => request<{ message: string; imported?: number; failed?: number; errors?: { serial: string; error: string }[] }>('/parts/stock/in', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
+    stockIn: (payload: { siteCode: string; partNumber: string; serial?: string; serials?: string[]; eee?: string; quantity?: number; occurredDate?: string; location?: string }) => request<{ message: string; imported?: number; failed?: number; errors?: { serial: string; error: string }[] }>('/parts/stock/in', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
     ensureMaster: (payload: { part_number: string; description: string; serialized?: string }) => request<{ item: PartsMasterItem; created: boolean }>('/parts/master/ensure', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
-    stockOut: (payload: { siteCode: string; serial?: string; partNumber?: string; quantity?: number; reference: string; occurredDate?: string }) => request<{ message: string }>('/parts/stock/out', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
+    stockOut: (payload: { siteCode: string; serial?: string; partNumber?: string; quantity?: number; reference: string; occurredDate?: string; location?: string }) => request<{ message: string }>('/parts/stock/out', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
     importIn: (siteCode: string, rows: { date: string; partNumber: string; serial: string }[]) => request<{ imported: number; failed: number; errors: { row: number; error: string }[] }>('/parts/import/in', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ siteCode, rows }) }),
     importOut: (siteCode: string, rows: { date: string; serial: string; reference: string; partNumber: string }[]) => request<{ imported: number; failed: number; errors: { row: number; error: string }[] }>('/parts/import/out', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ siteCode, rows }) }),
     downloadTemplate: async (kind: 'in' | 'out') => {
@@ -613,10 +625,11 @@ export const api = {
     sheetStatus: () => request<PartsSheetStatus>('/parts/sheets/status'),
     sheetConnectUrl: () => `${BASE}/parts/sheets/connect`,
     sheetDisconnect: () => request<{ message: string }>('/parts/sheets/disconnect', { method: 'DELETE' }),
-    sheetConfig: () => request<{ config: { spreadsheet_id: string; spreadsheet_name: string; sheet_name: string } | null }>('/parts/sheets/config'),
-    saveSheetConfig: (spreadsheetId: string, spreadsheetName: string, sheetName: string) => request<{ message: string }>('/parts/sheets/config', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, sheetName }) }),
+    sheetConfig: () => request<{ config: { spreadsheet_id: string; spreadsheet_name: string; stock_in_sheet_name: string; stock_out_sheet_name: string } | null }>('/parts/sheets/config'),
+    saveSheetConfig: (spreadsheetId: string, spreadsheetName: string, stockInSheetName: string, stockOutSheetName: string) => request<{ message: string }>('/parts/sheets/config', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, stockInSheetName, stockOutSheetName }) }),
     sheetList: (spreadsheetId: string) => request<{ title: string; sheets: string[] }>(`/parts/sheets/list?spreadsheetId=${encodeURIComponent(spreadsheetId)}`),
     retrySheet: () => request<{ synced: number; remaining: number }>('/parts/sheets/retry', { method: 'POST' }),
+    syncFromSheet: (siteCode: string) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[] }>('/parts/sheets/sync', { method: 'POST', body: JSON.stringify({ siteCode }) }),
   },
 
   sessions: {
