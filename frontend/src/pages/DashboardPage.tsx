@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, setPartsSiteToken, type Tool } from '../lib/api';
+import { api, recalledPartsSiteCode, setPartsSiteToken, type Tool } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useCachedQuery } from '../lib/queryCache';
 
@@ -67,9 +67,29 @@ export default function DashboardPage() {
   const openPartsInventory = (event: React.MouseEvent<HTMLAnchorElement>, tool: Tool) => {
     if (tool.name.trim().toLowerCase() !== 'parts inventory') return;
     event.preventDefault();
-    setPartsSiteCode('');
     setPartsVerificationError('');
-    setPartsVerificationOpen(true);
+    const saved = recalledPartsSiteCode();
+    if (!saved) {
+      setPartsSiteCode('');
+      setPartsVerificationOpen(true);
+      return;
+    }
+    // Remembered site on this device: re-verify silently and go straight in
+    // with a fresh token instead of asking for the code again.
+    setPartsVerificationBusy(true);
+    void (async () => {
+      try {
+        const result = await api.parts.verifySite(saved);
+        setPartsSiteToken(result.siteToken);
+        navigate('/parts', { state: { site: result.site, siteToken: result.siteToken } });
+      } catch {
+        // Unknown/offline — fall back to the manual modal, prefilled.
+        setPartsSiteCode(saved);
+        setPartsVerificationOpen(true);
+      } finally {
+        setPartsVerificationBusy(false);
+      }
+    })();
   };
 
   const verifyPartsSite = async (event: React.FormEvent) => {
