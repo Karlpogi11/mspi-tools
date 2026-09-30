@@ -632,6 +632,35 @@ export const api = {
     syncFromSheet: (siteCode: string) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[] }>('/parts/sheets/sync', { method: 'POST', body: JSON.stringify({ siteCode }) }),
   },
 
+  partsPublic: {
+    verifySite: async (code: string) => {
+      const trimmed = code.trim();
+      const result = await request<{ site: PartsSite; siteToken: string }>(`/parts/public/sites/verify?code=${encodeURIComponent(trimmed)}`);
+      try { window.localStorage.setItem(partsSiteCodeKey, trimmed.toUpperCase()); } catch { /* Ignore storage failures. */ }
+      return result;
+    },
+    stock: (siteToken: string, q?: string, includeOut?: boolean) => {
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (includeOut) params.set('includeOut', '1');
+      const qs = params.toString();
+      return requestFresh<{ stock: PartsUnit[]; summary: PartsStockSummary }>(`/parts/public/stock${qs ? `?${qs}` : ''}`, { headers: { 'x-site-token': siteToken } });
+    },
+    partUnits: (siteToken: string, partNumber: string) =>
+      requestFresh<{ units: PartsUnit[] }>(`/parts/public/part-units?partNumber=${encodeURIComponent(partNumber)}`, { headers: { 'x-site-token': siteToken } }),
+    resolve: (siteToken: string, params: { serial?: string; partNumber?: string; eee?: string }) => {
+      const query = new URLSearchParams();
+      if (params.serial) query.set('serial', params.serial);
+      if (params.partNumber) query.set('partNumber', params.partNumber);
+      if (params.eee) query.set('eee', params.eee);
+      return requestFresh<{ part: PartsMasterItem | null; unit: PartsUnit | null }>(`/parts/public/resolve?${query.toString()}`, { headers: { 'x-site-token': siteToken } });
+    },
+    recent: (siteToken: string) =>
+      request<{ history: PartsMovement[] }>(`/parts/public/recent`, { headers: { 'x-site-token': siteToken } }),
+    master: (q?: string, limit?: number) =>
+      request<{ items: PartsMasterItem[] }>(`/parts/public/master${q || limit ? `?${new URLSearchParams({ ...(q ? { q } : {}), ...(limit ? { limit: String(limit) } : {}) }).toString()}` : ''}`),
+  },
+
   sessions: {
     list: () => request<Session[]>('/pcount/sessions'),
     get: (id: number) => request<Session>(`/pcount/sessions/${id}`),

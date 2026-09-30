@@ -30,6 +30,7 @@ import { ensureFrontlineTables } from './frontline/store.js';
 import endorsementRoutes from './endorsements/routes.js';
 import storageLocatorRoutes from './storage-locator/routes.js';
 import partsRoutes from './parts/routes.js';
+import partsPublicRoutes from './parts/public-routes.js';
 import macAppRoutes from './mac-app/routes.js';
 
 import messengerRoutes from './messenger/routes.js';
@@ -117,6 +118,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/frontline', frontlineRoutes);
 app.use('/api/endorsements', authenticateToken, requireToolAccess('/endorsements'), endorsementRoutes);
 app.use('/api/storage-locator', authenticateToken, requireToolAccess('/storage-locator'), storageLocatorRoutes);
+app.use('/api/parts/public', partsLimiter, partsPublicRoutes);
 app.use('/api/parts', authenticateToken, requireToolAccess('/parts'), partsLimiter, partsRoutes);
 app.use('/api/messenger', authenticateToken, requireToolAccess('/messenger'), messengerRoutes);
 app.use('/api/mac-app', macAppRoutes);

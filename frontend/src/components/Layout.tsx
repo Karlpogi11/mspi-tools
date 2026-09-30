@@ -155,23 +155,34 @@ export default function Layout() {
             </button>
             {menuOpen && (
               <div className="absolute right-0 top-10 w-64 rounded-2xl border border-black/10 bg-white/95 backdrop-blur-xl shadow-[0_12px_36px_rgba(0,0,0,0.14)] p-2">
-                <div className="px-3 py-2.5 border-b border-[#e5e5e7] mb-1">
-                  <p className="text-[13px] font-semibold text-[#1d1d1f] truncate">{displayName}</p>
-                  {user?.email && user.email !== displayName && <p className="text-[11px] text-[#6e6e73] truncate mt-0.5">{user.email}</p>}
-                  {user?.roleName && <p className="text-[10px] text-[#86868b] mt-1">{user.roleName}</p>}
-                </div>
-                <button
-                  onClick={() => { setMenuOpen(false); setPasswordOpen(true); setPasswordError(''); }}
-                  className="w-full text-left px-3 py-2 rounded-xl text-[12px] text-[#1d1d1f] hover:bg-[#f5f5f7] transition-colors cursor-pointer"
-                >
-                  Change password
-                </button>
-                <button
-                  onClick={() => { logout(); navigate('/login'); }}
-                  className="w-full text-left px-3 py-2 rounded-xl text-[12px] text-[#dc2626] hover:bg-[#f5f5f7] transition-colors cursor-pointer"
-                >
-                  Sign out
-                </button>
+                {user ? (
+                  <>
+                    <div className="px-3 py-2.5 border-b border-[#e5e5e7] mb-1">
+                      <p className="text-[13px] font-semibold text-[#1d1d1f] truncate">{displayName}</p>
+                      {user.email !== displayName && <p className="text-[11px] text-[#6e6e73] truncate mt-0.5">{user.email}</p>}
+                      {user.roleName && <p className="text-[10px] text-[#86868b] mt-1">{user.roleName}</p>}
+                    </div>
+                    <button
+                      onClick={() => { setMenuOpen(false); setPasswordOpen(true); setPasswordError(''); }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-[12px] text-[#1d1d1f] hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+                    >
+                      Change password
+                    </button>
+                    <button
+                      onClick={() => { logout(); navigate('/login'); }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-[12px] text-[#dc2626] hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+                    >
+                      Sign out
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => { setMenuOpen(false); navigate('/login'); }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-[12px] text-[#1d1d1f] hover:bg-[#f5f5f7] transition-colors cursor-pointer"
+                  >
+                    Sign in
+                  </button>
+                )}
               </div>
             )}
           </div>
