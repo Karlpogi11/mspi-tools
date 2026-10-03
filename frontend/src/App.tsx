@@ -26,6 +26,7 @@ const loadPdfExtractorPage = () => import('./pages/pdf-extractor/PdfExtractorPag
 const loadChromeExtensionPage = () => import('./pages/ChromeExtensionPage');
 const loadApplecarePage = () => import('./pages/ApplecarePage');
 const loadFrontlinePage = () => import('./pages/FrontlinePage');
+const loadLeaderboardsPage = () => import('./pages/LeaderboardsPage');
 const loadFrontlineDataEntryPage = () => import('./pages/FrontlineDataEntryPage');
 const loadAdminFrontlinePage = () => import('./pages/admin/AdminFrontlinePage');
 const loadAdminEngineersPage = () => import('./pages/admin/AdminEngineersPage');
@@ -46,6 +47,7 @@ const PdfExtractorPage = lazy(loadPdfExtractorPage);
 const ChromeExtensionPage = lazy(loadChromeExtensionPage);
 const ApplecarePage = lazy(loadApplecarePage);
 const FrontlinePage = lazy(loadFrontlinePage);
+const LeaderboardsPage = lazy(loadLeaderboardsPage);
 const FrontlineDataEntryPage = lazy(loadFrontlineDataEntryPage);
 const AdminFrontlinePage = lazy(loadAdminFrontlinePage);
 const AdminEngineersPage = lazy(loadAdminEngineersPage);
@@ -113,6 +115,7 @@ function PrefetchCommonRoutes() {
         loadChromeExtensionPage(),
         loadApplecarePage(),
         loadFrontlinePage(),
+        loadLeaderboardsPage(),
         loadFrontlineDataEntryPage(),
         loadAdminFrontlinePage(),
         loadAdminEngineersPage(),
@@ -293,6 +296,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <FrontlineDataEntryPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/leaderboards"
+                element={
+                  <ProtectedRoute>
+                    <LeaderboardsPage />
                   </ProtectedRoute>
                 }
               />

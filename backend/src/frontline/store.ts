@@ -208,6 +208,34 @@ async function initializeFrontlineTables(): Promise<void> {
       await pool.query(`INSERT IGNORE INTO frontline_option_lists (list_key, label, sort_order) VALUES ${values.map(() => '(?, ?, ?)').join(',')}`, values.flatMap((label, index) => [key, label, index]));
     }
   }
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_leaderboard_months (
+    month char(7) NOT NULL,
+    total int NOT NULL DEFAULT 0,
+    cso_count int NOT NULL DEFAULT 0,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (month)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_leaderboard_snapshots (
+    month char(7) NOT NULL,
+    cso varchar(150) NOT NULL,
+    overall int NOT NULL DEFAULT 0,
+    closer int NOT NULL DEFAULT 0,
+    welcomer int NOT NULL DEFAULT 0,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (month, cso),
+    KEY frontline_leaderboard_snapshot_cso_idx (cso, month)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS frontline_leaderboard_settings (
+    id tinyint NOT NULL DEFAULT 1,
+    award_date varchar(50) NOT NULL DEFAULT '',
+    signer_name varchar(150) NOT NULL DEFAULT '',
+    signer_title varchar(150) NOT NULL DEFAULT '',
+    show_signature tinyint NOT NULL DEFAULT 1,
+    updated_by int NULL,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT frontline_leaderboard_settings_user_fk FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+  )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS engineer_endorsements (
     id bigint AUTO_INCREMENT NOT NULL,
     ar_number varchar(100) NOT NULL,

@@ -370,6 +370,10 @@ export interface FrontlineReport {
   records: Array<{ id: number; source_sheet: string; source_row: number; occurred_date: string | null; aht_minutes: number | null; transaction_type: string; product_division: string; ar_number: string; serial_number: string; device_model: string; cso: string; issue: string; endorsement_id?: number | null; endorsement_status?: string | null; endorsed_engineer_name?: string | null; endorsed_at?: string | null }>;
 }
 export interface FrontlineStatus { connected: boolean; sourceName: string | null; lastSyncedAt: string | null; syncStatus: string; syncError: string | null }
+export interface FrontlineRankEntry { name: string; count: number; share: number }
+export interface FrontlineRankings { month: string; start: string; total: number; csoCount: number; overall: FrontlineRankEntry[]; all: FrontlineRankEntry[]; closer: FrontlineRankEntry[]; welcomer: FrontlineRankEntry[] }
+export interface FrontlineCsoHistory { name: string; months: Array<{ month: string; overall: number; closer: number; welcomer: number }> }
+export interface FrontlineBoardSettings { awardDate: string; signerName: string; signerTitle: string; showSignature: boolean }
 export interface FrontlineSerialHistory { id: number; source_sheet: string; occurred_date: string | null; ar_number: string; serial_number: string; device_model: string; product_division: string; cso: string; transaction_type: string; issue: string }
 export type FrontlineOptionKey = 'product_division' | 'transaction_type' | 'cso';
 export interface FrontlineOption { id: number; label: string; sort_order: number }
@@ -542,6 +546,10 @@ export const api = {
     },
     writeSchema: (sheet: string) => request<{ sheet: string; headers: string[] }>(`/frontline/write-schema?sheet=${encodeURIComponent(sheet)}`),
     writeEntry: (payload: { sheet: string; headers: string[]; values: string[] }) => request<{ message: string }>('/frontline/write-entry', { method: 'POST', body: JSON.stringify(payload) }),
+    rankings: (month?: string) => requestFresh<FrontlineRankings>(`/frontline/rankings${month ? `?month=${encodeURIComponent(month)}` : ''}`),
+    csoHistory: (name: string, month?: string) => requestFresh<FrontlineCsoHistory>(`/frontline/rankings/cso/${encodeURIComponent(name)}${month ? `?month=${encodeURIComponent(month)}&months=6` : ''}`),
+    boardSettings: () => requestFresh<FrontlineBoardSettings>('/frontline/rankings/settings'),
+    saveBoardSettings: (payload: FrontlineBoardSettings) => request<FrontlineBoardSettings>('/frontline/rankings/settings', { method: 'PUT', body: JSON.stringify(payload) }),
   },
 
   endorsements: {

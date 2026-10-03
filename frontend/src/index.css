@@ -27,42 +27,46 @@ body {
   background-color: #F4F3F6;
 }
 
-/* Shared Apple-style type defaults; existing utility classes can still specialize each view. */
-body h1,
-body h2,
-body h3,
-body h4,
-body h5,
-body h6 {
-  font-family: inherit;
-  font-weight: 600;
-  letter-spacing: -0.022em;
-}
+/* Shared Apple-style type defaults. These MUST live in the base layer so that
+   Tailwind utilities (higher layer) can still override them per view. Left
+   unlayered, they would beat every utility regardless of specificity. */
+@layer base {
+  body h1,
+  body h2,
+  body h3,
+  body h4,
+  body h5,
+  body h6 {
+    font-family: inherit;
+    font-weight: 600;
+    letter-spacing: -0.022em;
+  }
 
-body h1 {
-  font-size: 1.875rem;
-  line-height: 1.12;
-}
+  body h1 {
+    font-size: 1.875rem;
+    line-height: 1.12;
+  }
 
-body h2 {
-  font-size: 1.375rem;
-  line-height: 1.18;
-}
+  body h2 {
+    font-size: 1.375rem;
+    line-height: 1.18;
+  }
 
-body h3 {
-  font-size: 1.0625rem;
-  line-height: 1.25;
-}
+  body h3 {
+    font-size: 1.0625rem;
+    line-height: 1.25;
+  }
 
-body button {
-  font-family: inherit;
-  font-weight: 500;
-}
+  body button {
+    font-family: inherit;
+    font-weight: 500;
+  }
 
-body input,
-body textarea,
-body select {
-  font-family: inherit;
+  body input,
+  body textarea,
+  body select {
+    font-family: inherit;
+  }
 }
 
 /* Keep the endorsement calendar crisp and quiet, like a native Apple surface. */
@@ -415,6 +419,11 @@ html::-webkit-scrollbar-thumb {
   body * { visibility: hidden !important; }
   .pcount-report-print-root,
   .pcount-report-print-root * { visibility: visible !important; }
+  .leaderboard-print-root,
+  .leaderboard-print-root * { visibility: visible !important; }
+  .leaderboard-print-root { position: absolute !important; inset: 0 !important; display: block !important; overflow: visible !important; margin: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: #fff !important; }
+  .leaderboard-a4 { width: 297mm !important; max-width: 297mm !important; min-height: 210mm; margin-inline: auto !important; }
+  .leaderboard-screen-only { display: none !important; }
   .consumables-print-root,
   .consumables-print-root * { visibility: visible !important; }
   .pcount-report-print-root { position: absolute !important; inset: 0 !important; display: block !important; width: 210mm !important; overflow: visible !important; padding: 0 !important; background: #fff !important; }
@@ -446,3 +455,26 @@ html::-webkit-scrollbar-thumb {
 @media screen and (min-width: 801px) {
   .pcount-report-print-root { display: flex; justify-content: center; align-items: flex-start; }
 }
+
+/* Leaderboards certificate renders at true A4 landscape width (297mm) on screen. */
+.leaderboard-a4 { width: 297mm; max-width: 100%; margin-inline: auto; }
+
+/* Suspense animation while the live month's winner is hidden. */
+.leaderboard-ping { animation: leaderboard-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
+.leaderboard-shimmer {
+  background: linear-gradient(100deg, #ececee 30%, #fafafa 46%, #e2e2e6 54%, #ececee 70%);
+  background-size: 220% 100%;
+  animation: leaderboard-shimmer 1.6s linear infinite;
+}
+@keyframes leaderboard-ping {
+  0% { transform: scale(0.85); opacity: 0.7; }
+  70% { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+@keyframes leaderboard-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+/* Freeze the suspense animation while the tab is hidden. */
+.leaderboard-paused .leaderboard-ping,
+.leaderboard-paused .leaderboard-shimmer { animation-play-state: paused; }

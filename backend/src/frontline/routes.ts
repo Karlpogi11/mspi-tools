@@ -589,4 +589,161 @@ router.get('/report', async (req, res) => {
   res.json({ total: records.length, averageAht: aht.length ? Math.round(aht.reduce((sum, value) => sum + value, 0) / aht.length * 100) / 100 : 0, csos: countBy('cso'), types: countBy('transaction_type'), divisions: countBy('product_division'), records });
 });
 
+function currentManilaMonth(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', timeZone: 'Asia/Manila' }).format(new Date());
+  return parts.slice(0, 7);
+}
+
+function parseRankMonth(value: string): string | null {
+  const month = text(value) || currentManilaMonth();
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : null;
+}
+
+function shiftMonth(month: string, delta: number): string {
+  const [year, mon] = month.split('-').map(Number);
+  const date = new Date(Date.UTC(year, mon - 1 + delta, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+const RANK_INTAKE_CONDITION = `(LOWER(TRIM(fr.transaction_type)) LIKE 'received (%' OR LOWER(TRIM(fr.transaction_type)) LIKE 'job order (%')`;
+const RANK_CLOSER_CONDITION = `LOWER(TRIM(fr.transaction_type)) LIKE 'released%'`;
+
+type RankBreakdown = { name: string; overall: number; closer: number; welcomer: number };
+
+async function liveBreakdown(start: string, end: string): Promise<{ total: number; rows: RankBreakdown[] }> {
+  const [rows] = await getDbPool().query(
+    `SELECT fr.cso AS name, COUNT(*) AS overall,
+      SUM(CASE WHEN ${RANK_CLOSER_CONDITION} THEN 1 ELSE 0 END) AS closer,
+      SUM(CASE WHEN ${RANK_INTAKE_CONDITION} THEN 1 ELSE 0 END) AS welcomer
+     FROM frontline_records fr
+     WHERE fr.occurred_date >= ? AND fr.occurred_date < ? AND TRIM(COALESCE(fr.cso, '')) != ''
+     GROUP BY fr.cso ORDER BY overall DESC, fr.cso ASC`,
+    [start, end],
+  );
+  const parsed = (rows as Array<{ name: string; overall: number | string; closer: number | string; welcomer: number | string }>).map((row) => ({
+    name: row.name, overall: Number(row.overall) || 0, closer: Number(row.closer) || 0, welcomer: Number(row.welcomer) || 0,
+  }));
+  return { total: parsed.reduce((sum, row) => sum + row.overall, 0), rows: parsed };
+}
+
+function toRankingResponse(month: string, start: string, total: number, rows: RankBreakdown[]) {
+  const withShare = rows.map((row) => ({ name: row.name, count: row.overall, share: total ? Math.round((row.overall / total) * 1000) / 10 : 0 }));
+  const byCloser = [...rows].sort((a, b) => b.closer - a.closer || (a.name < b.name ? -1 : 1)).slice(0, 3).map((row) => ({ name: row.name, count: row.closer, share: total ? Math.round((row.closer / total) * 1000) / 10 : 0 }));
+  const byWelcomer = [...rows].sort((a, b) => b.welcomer - a.welcomer || (a.name < b.name ? -1 : 1)).slice(0, 3).map((row) => ({ name: row.name, count: row.welcomer, share: total ? Math.round((row.welcomer / total) * 1000) / 10 : 0 }));
+  return { month, start, total, csoCount: rows.length, overall: withShare.slice(0, 3), all: withShare, closer: byCloser, welcomer: byWelcomer };
+}
+
+// Closed months are frozen on first view: later record edits never change them.
+async function frozenBreakdown(month: string): Promise<{ total: number; rows: RankBreakdown[] } | null> {
+  const pool = getDbPool();
+  const [monthRows] = await pool.query('SELECT total FROM frontline_leaderboard_months WHERE month = ? LIMIT 1', [month]);
+  const saved = (monthRows as Array<{ total: number | string }>)[0];
+  if (!saved) return null;
+  const [rows] = await pool.query('SELECT cso AS name, overall, closer, welcomer FROM frontline_leaderboard_snapshots WHERE month = ? ORDER BY overall DESC, cso ASC', [month]);
+  return {
+    total: Number(saved.total) || 0,
+    rows: (rows as Array<{ name: string; overall: number | string; closer: number | string; welcomer: number | string }>).map((row) => ({
+      name: row.name, overall: Number(row.overall) || 0, closer: Number(row.closer) || 0, welcomer: Number(row.welcomer) || 0,
+    })),
+  };
+}
+
+async function freezeBreakdown(month: string, total: number, rows: RankBreakdown[]): Promise<void> {
+  const pool = getDbPool();
+  await pool.execute('INSERT IGNORE INTO frontline_leaderboard_months (month, total, cso_count) VALUES (?, ?, ?)', [month, total, rows.length]);
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500);
+    await pool.query(
+      `INSERT IGNORE INTO frontline_leaderboard_snapshots (month, cso, overall, closer, welcomer) VALUES ${batch.map(() => '(?, ?, ?, ?, ?)').join(',')}`,
+      batch.flatMap((row) => [month, row.name, row.overall, row.closer, row.welcomer]),
+    );
+  }
+}
+
+router.get('/rankings', async (req, res) => {
+  await ensureFrontlineTables();
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  if (!access) { res.status(403).json({ error: 'Frontline Monitor access required' }); return; }
+  const month = parseRankMonth(text(req.query.month));
+  if (!month) { res.status(400).json({ error: 'Month must be YYYY-MM.' }); return; }
+  const start = `${month}-01`;
+  const end = `${shiftMonth(month, 1)}-01`;
+  // Intentionally unscoped by CSO: leaderboards are comparative and return counts only.
+  if (month >= currentManilaMonth()) {
+    const live = await liveBreakdown(start, end);
+    res.json(toRankingResponse(month, start, live.total, live.rows));
+    return;
+  }
+  const frozen = await frozenBreakdown(month);
+  if (frozen) { res.json(toRankingResponse(month, start, frozen.total, frozen.rows)); return; }
+  const live = await liveBreakdown(start, end);
+  await freezeBreakdown(month, live.total, live.rows);
+  res.json(toRankingResponse(month, start, live.total, live.rows));
+});
+
+router.get('/rankings/settings', async (req, res) => {
+  await ensureFrontlineTables();
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  if (!access) { res.status(403).json({ error: 'Frontline Monitor access required' }); return; }
+  const [rows] = await getDbPool().query('SELECT award_date, signer_name, signer_title, show_signature FROM frontline_leaderboard_settings WHERE id = 1 LIMIT 1');
+  const row = (rows as Array<{ award_date: string; signer_name: string; signer_title: string; show_signature: number }>)[0];
+  res.json({
+    awardDate: row?.award_date || '',
+    signerName: row?.signer_name || '',
+    signerTitle: row?.signer_title || '',
+    showSignature: row ? Number(row.show_signature) === 1 : true,
+  });
+});
+
+router.put('/rankings/settings', requireAdmin, async (req, res) => {
+  const awardDate = text(req.body?.awardDate).slice(0, 50);
+  const signerName = text(req.body?.signerName).slice(0, 150);
+  const signerTitle = text(req.body?.signerTitle).slice(0, 150);
+  const showSignature = req.body?.showSignature === false ? 0 : 1;
+  await ensureFrontlineTables();
+  await getDbPool().execute(
+    `INSERT INTO frontline_leaderboard_settings (id, award_date, signer_name, signer_title, show_signature, updated_by)
+     VALUES (1, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE award_date = VALUES(award_date), signer_name = VALUES(signer_name),
+     signer_title = VALUES(signer_title), show_signature = VALUES(show_signature), updated_by = VALUES(updated_by)`,
+    [awardDate, signerName, signerTitle, showSignature, req.user!.userId],
+  );
+  void writeAuditLog({ actorUserId: req.user!.userId, action: 'frontline.leaderboard_settings_updated', resourceType: 'frontline_leaderboard_settings', resourceId: '1' });
+  res.json({ message: 'Leaderboard settings saved.', awardDate, signerName, signerTitle, showSignature: showSignature === 1 });
+});
+
+router.get('/rankings/cso/:name', async (req, res) => {
+  await ensureFrontlineTables();
+  const access = await frontlineAccessFor(req.user!.userId, req.user!.roleId, req.user!.roleName);
+  if (!access) { res.status(403).json({ error: 'Frontline Monitor access required' }); return; }
+  const csoName = text(decodeURIComponent(req.params.name));
+  if (!csoName) { res.status(400).json({ error: 'CSO name is required.' }); return; }
+  const months = Math.min(Math.max(Number(text(req.query.months)) || 6, 1), 12);
+  const endMonth = parseRankMonth(text(req.query.month)) || currentManilaMonth();
+  const firstMonth = shiftMonth(endMonth, -(months - 1));
+  const current = currentManilaMonth();
+  const pool = getDbPool();
+  // Closed months come from the frozen snapshot; the live month is always computed fresh.
+  const [frozenRows] = await pool.query(
+    'SELECT month, overall, closer, welcomer FROM frontline_leaderboard_snapshots WHERE cso = ? AND month >= ? AND month < ?',
+    [csoName, firstMonth, current],
+  );
+  const [liveRows] = await pool.query(
+    `SELECT DATE_FORMAT(fr.occurred_date, '%Y-%m') AS month, COUNT(*) AS overall,
+      SUM(CASE WHEN ${RANK_CLOSER_CONDITION} THEN 1 ELSE 0 END) AS closer,
+      SUM(CASE WHEN ${RANK_INTAKE_CONDITION} THEN 1 ELSE 0 END) AS welcomer
+     FROM frontline_records fr
+     WHERE fr.cso = ? AND fr.occurred_date >= ? AND fr.occurred_date < ?
+     GROUP BY month ORDER BY month ASC`,
+    [csoName, `${firstMonth}-01`, `${shiftMonth(endMonth, 1)}-01`],
+  );
+  const frozenByMonth = new Map((frozenRows as Array<{ month: string; overall: number | string; closer: number | string; welcomer: number | string }>).map((row) => [row.month, row]));
+  const liveByMonth = new Map((liveRows as Array<{ month: string; overall: number | string; closer: number | string; welcomer: number | string }>).map((row) => [row.month, row]));
+  const history = Array.from({ length: months }, (_, index) => {
+    const month = shiftMonth(firstMonth, index);
+    const row = month < current ? (frozenByMonth.get(month) || liveByMonth.get(month)) : liveByMonth.get(month);
+    return { month, overall: Number(row?.overall || 0), closer: Number(row?.closer || 0), welcomer: Number(row?.welcomer || 0) };
+  });
+  res.json({ name: csoName, months: history });
+});
+
 export default router;
