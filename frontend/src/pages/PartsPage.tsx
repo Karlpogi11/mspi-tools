@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { api, recalledPartsSiteCode, setPartsSiteToken, type PartsMasterItem, type PartsMovement, type PartsSite, type PartsUnit } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { parseStockInWorkbook, parseStockOutWorkbook, todayIso } from '../lib/parts';
@@ -57,6 +57,7 @@ export default function PartsPage() {
   const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.roleName === 'Admin';
+  const publicMode = !user;
   const routedSite = (location.state as { site?: PartsSite; siteToken?: string } | null)?.site ?? null;
   const routedToken = (location.state as { site?: PartsSite; siteToken?: string } | null)?.siteToken ?? '';
   const [siteCode, setSiteCode] = useState(routedSite?.code ?? '');
@@ -172,7 +173,9 @@ export default function PartsPage() {
     if (!code.trim()) return;
     setBusy(true); setError('');
     try {
-      const result = await api.parts.verifySite(code.trim());
+      const result = publicMode
+        ? await api.partsPublic.verifySite(code.trim())
+        : await api.parts.verifySite(code.trim());
       setSite(result.site); setSiteCode(result.site.code); setSiteToken(result.siteToken);
       setPartsSiteToken(result.siteToken);
       setSelectedPart(null); setPartUnits([]); setSelectedSite(null); setHighlightSerial(null); setMismatchList([]);
@@ -193,7 +196,9 @@ export default function PartsPage() {
     setRestoring(true);
     void (async () => {
       try {
-        const result = await api.parts.verifySite(saved);
+        const result = publicMode
+          ? await api.partsPublic.verifySite(saved)
+          : await api.parts.verifySite(saved);
         setSite(result.site); setSiteCode(result.site.code); setSiteToken(result.siteToken);
         setPartsSiteToken(result.siteToken);
         setMessage(`Restored ${result.site.name || result.site.code}.`);
@@ -209,16 +214,19 @@ export default function PartsPage() {
 
   const loadStock = async (code: string) => {
     try {
-      // includeOut: parts that hit 0 stay listed (count 0) instead of
-      // disappearing from the stock table.
-      const result = await api.parts.stock(code, undefined, undefined, true);
+      const result = publicMode && siteToken
+        ? await api.partsPublic.stock(siteToken, undefined, true)
+        : await api.parts.stock(code, undefined, undefined, true);
       setStock(result.stock);
     } catch (err) { setError((err as Error).message); }
   };
 
   const loadMovementHistory = async (code: string) => {
     try {
-      setMovementHistory((await api.parts.recent(code)).history);
+      const result = publicMode && siteToken
+        ? await api.partsPublic.recent(siteToken)
+        : await api.parts.recent(code);
+      setMovementHistory(result.history);
     } catch (err) { setError((err as Error).message); }
   };
 
@@ -238,7 +246,9 @@ export default function PartsPage() {
     setResolving(true); setError(''); setMessage(''); setPart(null);
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
     try {
-      const result = await api.parts.resolve({ serial: value, partNumber: value, eee: value, siteCode: site.code });
+      const result = publicMode && siteToken
+        ? await api.partsPublic.resolve(siteToken, { serial: value, partNumber: value, eee: value })
+        : await api.parts.resolve({ serial: value, partNumber: value, eee: value, siteCode: site.code });
       if (seq !== resolveSeq.current) return { part: null, unit: null }; // stale — a newer lookup won
       setPart(result.part);
       if (result.unit?.serial) { setSerial(result.unit.serial); setUnitSerial(result.unit.serial); }
@@ -325,7 +335,7 @@ export default function PartsPage() {
         setSuggestions(prioritizeSuggestions(stockItems).slice(0, 8));
         return;
       }
-      void api.parts.master(q, 50)
+      void (publicMode ? api.partsPublic.master(q, 50) : api.parts.master(q, 50))
         .then((r) => { setSuggestionSource('master'); setSuggestions(prioritizeSuggestions(r.items).slice(0, 8)); })
         .catch(() => { setSuggestionSource('master'); setSuggestions([]); });
     }, 300);
@@ -358,7 +368,10 @@ export default function PartsPage() {
     if (!site) return;
     setPartUnitsBusy(true);
     try {
-      setPartUnits((await api.parts.partUnits(site.code, partNumber)).units);
+      const result = publicMode && siteToken
+        ? await api.partsPublic.partUnits(siteToken, partNumber)
+        : await api.parts.partUnits(site.code, partNumber);
+      setPartUnits(result.units);
     } catch (err) { setError((err as Error).message); }
     finally { setPartUnitsBusy(false); }
   };
@@ -385,8 +398,8 @@ export default function PartsPage() {
     <>
       <div className="mt-4 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-semibold text-[#1d1d1f]">{title}</h2>
-          {description && <p className="mt-0.5 text-[13px] text-[#3c3c43]">{description}</p>}
+          {description && <h2 className="text-[15px] font-semibold text-[#1d1d1f]">{description}</h2>}
+          <p className="mt-0.5 text-[13px] text-[#3c3c43]">{title}</p>
           <p className="mt-1 text-[12px] text-[#6e6e73]">{subtitle}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -866,13 +879,29 @@ export default function PartsPage() {
     document.getElementById(`serial-row-${highlightSerial}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [highlightSerial, selectedPart, selectedSite, partUnits]);
   const tableTerms = tableSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const tableQuery = tableSearch.trim().toLowerCase();
+  const matchGroup = (g: { siteCode: string; partNumber: string; description: string | null | undefined; serialKey: string; locations: Set<string> }) => {
+    if (!tableQuery) return true;
+    const allFields = `${g.siteCode} ${g.partNumber} ${g.description || ''} ${g.serialKey} ${[...g.locations].join(' ')}`.toLowerCase();
+    // Single term: match across all fields (part number, serial, description)
+    if (tableTerms.length <= 1) return allFields.includes(tableQuery);
+    // Multi-term: full phrase must match description
+    return (g.description || '').toLowerCase().includes(tableQuery);
+  };
   const filteredGroups = useMemo(
-    () => (tableTerms.length ? stockGroups.filter((g) => tableTerms.every((t) => `${g.siteCode} ${g.partNumber} ${g.description || ''}${g.serialKey} ${[...g.locations].join(' ')}`.toLowerCase().includes(t))) : stockGroups),
+    () => stockGroups.filter(matchGroup),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [stockGroups, tableSearch]
   );
   const filteredPartTotals = useMemo(
-    () => (tableTerms.length ? stockPartTotals.filter((t) => tableTerms.every((term) => `${t.partNumber} ${t.description || ''}${t.serialKey}`.toLowerCase().includes(term))) : stockPartTotals),
+    () => {
+      if (!tableQuery) return stockPartTotals;
+      return stockPartTotals.filter((t) => {
+        const allFields = `${t.partNumber} ${t.description || ''} ${t.serialKey}`.toLowerCase();
+        if (tableTerms.length <= 1) return allFields.includes(tableQuery);
+        return (t.description || '').toLowerCase().includes(tableQuery);
+      });
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [stockPartTotals, tableSearch]
   );
@@ -906,25 +935,35 @@ export default function PartsPage() {
             <button type="button" aria-label="Dismiss notification" onClick={clearAllNotices} className="rounded-full px-1 text-[18px] leading-5 text-[#86868b] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]">×</button>
           </div>
         )}
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className={`grid gap-5 ${publicMode && site ? '' : 'lg:grid-cols-2'}`}>
+          {!(publicMode && site) && (
           <section className="rounded-2xl bg-white p-4 shadow-[0_8px_28px_rgba(0,0,0,.03)]">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-[17px] font-semibold tracking-tight text-[#1d1d1f]">Parts Inventory</h2>
-                <p className="mt-1 text-[13px] leading-5 text-[#6e6e73]">Scan a serial or part number, then stock it in or out.</p>
+                <p className="mt-1 text-[13px] leading-5 text-[#6e6e73]">
+                  {publicMode ? 'View stock levels by site.' : 'Scan a serial or part number, then stock it in or out.'}
+                </p>
               </div>
-              {site ? (
+              <div className="flex items-center gap-2">
+                {publicMode && (
+                  <Link to="/login?returnTo=/parts" className="shrink-0 rounded-full bg-[#1d1d1f] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#333] transition-colors">
+                    Sign in
+                  </Link>
+                )}
+            {site ? (
                 <button type="button" onClick={openSwitchModal} className="shrink-0 rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[10px] font-semibold text-[#3c3c43]">
                   {site.name || site.code} · switch
                 </button>
               ) : (
-                <button type="button" onClick={() => setGateDismissed(false)} className="shrink-0 rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[10px] font-semibold text-[#3c3c43]">
+                <button type="button" onClick={() => { setGateDismissed(false); setSwitchingSite(false); }} className="shrink-0 rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[10px] font-semibold text-[#3c3c43]">
                   Select site
                 </button>
               )}
+              </div>
             </div>
 
-            {!site ? (
+            {(!site && (gateDismissed || restoring)) ? (
               restoring ? (
                 <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
                   <p className="text-[13px] font-semibold text-[#1d1d1f]">Restoring saved site…</p>
@@ -933,7 +972,11 @@ export default function PartsPage() {
               ) : (
               <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
                 <p className="text-[13px] font-semibold text-[#1d1d1f]">Select a site to begin</p>
-                <p className="mt-1 text-[12px] leading-5 text-[#6e6e73]">Enter your site code. You will only see and move stock for this site.</p>
+                <p className="mt-1 text-[12px] leading-5 text-[#6e6e73]">
+                  {publicMode
+                    ? 'Enter your site code to view stock levels.'
+                    : 'Enter your site code. You will only see and move stock for this site.'}
+                </p>
                 <label className="mt-3 block text-[11px] font-semibold text-[#3c3c43]">Site code
                   <input value={codeInput} onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setError(''); }}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void verifySite(codeInput); } }}
@@ -959,6 +1002,8 @@ export default function PartsPage() {
                   Enter site code
                 </button>
               </div>
+            ) : publicMode ? (
+            null
             ) : (
             <>
             <div className="mt-4 border-b border-[#e5e5e7]">
@@ -1122,12 +1167,25 @@ export default function PartsPage() {
             </>
             )}
           </section>
+          )}
 
-          <section className="h-full overflow-y-auto rounded-2xl bg-white p-4">
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#86868b]">{browsingAll ? 'All sites' : site?.name || 'Stock'}</p>
-              <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="Search part, description, or serial"
-                className="h-9 w-44 rounded-full border border-[#d2d2d7] bg-white px-3.5 text-[12px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+          <section className={`h-full overflow-y-auto rounded-2xl bg-white p-4 ${publicMode && site ? 'col-span-2' : ''}`}>
+            <div className="flex items-center gap-3 border-b border-[#e5e5e7] pb-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="truncate text-[15px] font-semibold text-[#1d1d1f]">{browsingAll ? 'All sites' : site?.name || 'Stock'}</h2>
+                  {site && (
+                    <button type="button" onClick={openSwitchModal} className="shrink-0 rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[10px] font-semibold text-[#3c3c43]">
+                      switch
+                    </button>
+                  )}
+                </div>
+                <p className="mt-0.5 text-[11px] text-[#6e6e73]">
+                  {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}
+                </p>
+              </div>
+              <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="Search"
+                className="h-8 w-40 shrink-0 rounded-full border border-[#d2d2d7] bg-white px-3 text-[12px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
             </div>
             {/* Drill-down slide track: parts → sites → serials (ALL), parts → serials (site). */}
             <div className="overflow-hidden">
@@ -1135,14 +1193,6 @@ export default function PartsPage() {
                 <div className="w-full shrink-0">
                   {browsingAll ? (
                     <>
-                      <div className="mt-4 flex items-center justify-between gap-3">
-                        <div>
-                          <h2 className="text-[15px] font-semibold text-[#1d1d1f]">ALL stock</h2>
-                          <p className="mt-1 text-[12px] text-[#6e6e73]">
-                            {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}
-                          </p>
-                        </div>
-                      </div>
                       {filteredPartTotals.length ? (
                         <div className="mt-3 max-h-[62vh] overflow-auto rounded-xl border border-[#e5e5e7]">
                           <table className="w-full min-w-[520px] border-collapse text-left text-[12px]">
@@ -1173,22 +1223,14 @@ export default function PartsPage() {
                     </>
                   ) : (
                     <>
-                      <div className="mt-4 flex items-center justify-between gap-3">
-                        <div>
-                          <h2 className="text-[15px] font-semibold text-[#1d1d1f]">{site ? `${site.name || site.code} stock` : 'Site stock'}</h2>
-                          <p className="mt-1 text-[12px] text-[#6e6e73]">
-                            {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}
-                          </p>
-                        </div>
-                      </div>
                       {filteredGroups.length ? (
                         <div className="mt-3 max-h-[62vh] overflow-auto rounded-xl border border-[#e5e5e7]">
                           <table className="w-full min-w-[520px] border-collapse text-left text-[12px]">
                             <thead className="sticky top-0 z-10">
                               <tr className="bg-[#f7f7f8] text-[10px] uppercase tracking-wider text-[#6e6e73]">
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Date</th>
-                                <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Part</th>
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Description</th>
+                                <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Part</th>
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 font-semibold">Location</th>
                                 <th scope="col" className="border-b border-[#e5e5e7] px-3 py-2 text-right font-semibold">Serials</th>
                               </tr>
@@ -1197,8 +1239,8 @@ export default function PartsPage() {
                               {filteredGroups.map((u) => (
                                 <tr key={u.partNumber} onClick={() => openPartWorkbench(u.partNumber)} className="cursor-pointer border-t border-[#f0f0f2] transition-colors first:border-t-0 hover:bg-[#f7f7f8]">
                                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-[#6e6e73]">{dateOnly(u.date)}</td>
-                                  <td className="whitespace-nowrap px-3 py-2 font-semibold text-[#1d1d1f]">{u.partNumber}</td>
-                                  <td className="max-w-[240px] truncate px-3 py-2 text-[#3c3c43]" title={u.description || undefined}>{u.description || '—'}</td>
+                                  <td className="max-w-[320px] truncate px-3 py-2 font-semibold text-[#1d1d1f]" title={u.description || undefined}>{u.description || '—'}</td>
+                                  <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{u.partNumber}</td>
                                   <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{u.locations.size ? [...u.locations].join(', ') : '—'}</td>
                                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-[#6e6e73]">{(u.serials || u.quantity).toLocaleString()}</td>
                                 </tr>

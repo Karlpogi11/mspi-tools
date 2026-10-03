@@ -57,7 +57,7 @@ const StorageLocatorPage = lazy(loadStorageLocatorPage);
 const PartsPage = lazy(loadPartsPage);
 const AdminPartsPage = lazy(loadAdminPartsPage);
 
-const TOOL_PATHS = ['/pcount', '/rfpu', '/label-merger', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator', '/parts'];
+const TOOL_PATHS = ['/pcount', '/rfpu', '/label-merger', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator'];
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -321,11 +321,7 @@ export default function App() {
               />
               <Route
                 path="/parts"
-                element={
-                  <ProtectedRoute>
-                    <PartsPage />
-                  </ProtectedRoute>
-                }
+                element={<PartsPage />}
               />
             </Route>
           </Routes>

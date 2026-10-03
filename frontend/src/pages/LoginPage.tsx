@@ -34,6 +34,7 @@ export default function LoginPage() {
   const { login, signup } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const returnTo = new URLSearchParams(location.search).get('returnTo') || '/';
   const statusMessage = (location.state as { message?: string } | null)?.message;
 
   useEffect(() => {
@@ -71,7 +72,7 @@ export default function LoginPage() {
     try {
       if (mode === 'login') {
         await login(email, password, true);
-        navigate('/');
+        navigate(returnTo);
       } else {
         await signup(email, password, fullName);
         setJustSignedUp(true);
