@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { getDbPool } from '../db/index.js';
 
-const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets openid email';
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.metadata.readonly openid email';
 
 export interface PartsSheetConnection {
   id: number;
@@ -146,7 +146,7 @@ async function accessTokenFor(connection: PartsSheetConnection): Promise<string>
 
 export async function sheetConfig() {
   const [rows] = await getDbPool().query(
-    'SELECT spreadsheet_id, spreadsheet_name, stock_in_sheet_name, stock_out_sheet_name, updated_by, updated_at FROM parts_sheet_config WHERE id = 1 LIMIT 1'
+    'SELECT spreadsheet_id, spreadsheet_name, stock_in_sheet_name, stock_out_sheet_name, updated_by, updated_at, last_sheet_sync_at FROM parts_sheet_config WHERE id = 1 LIMIT 1'
   );
   return (rows as Array<{
     spreadsheet_id: string;
@@ -155,11 +155,22 @@ export async function sheetConfig() {
     stock_out_sheet_name: string;
     updated_by: number | null;
     updated_at: string;
+    last_sheet_sync_at: string | null;
   }>)[0] ?? null;
 }
 
-export async function listSheets(spreadsheetId: string, userId: number): Promise<{ title: string; sheets: string[] }> {
-  const connection = await connectionFor(userId);
+/** One cheap Drive metadata read: when the spreadsheet last changed. Throws
+ *  with (403) when the stored grant predates the Drive metadata scope. */
+export async function driveSheetModifiedTime(userId: number, spreadsheetId: string, ownerUserId?: number | null): Promise<string | null> {
+  let connection = ownerUserId ? await connectionFor(ownerUserId).catch(() => null) : null;
+  if (!connection) connection = await connectionFor(userId).catch(() => null);
+  if (!connection) return null;
+  const token = await accessTokenFor(connection);
+  const data = await google<{ modifiedTime?: string }>(token, `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(spreadsheetId)}?fields=modifiedTime`);
+  return data.modifiedTime || null;
+}
+
+export async function listSheets(spreadsheetId: string, userId: number): Promise<{ title: string; sheets: string[] }> {  const connection = await connectionFor(userId);
   if (!connection) throw new Error('Google is not connected');
   const token = await accessTokenFor(connection);
   const data = await google<{ properties?: { title?: string }; sheets?: Array<{ properties?: { title?: string } }> }>(

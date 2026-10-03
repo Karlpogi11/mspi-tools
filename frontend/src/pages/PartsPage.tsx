@@ -77,6 +77,10 @@ export default function PartsPage() {
   const [date, setDate] = useState(todayIso());
   const [stock, setStock] = useState<PartsUnit[]>([]);
   const [movementHistory, setMovementHistory] = useState<PartsMovement[]>([]);
+  const refreshInFlight = useRef(false);
+  const [syncingSheet, setSyncingSheet] = useState(false);
+  const [sheetSyncAt, setSheetSyncAt] = useState<string | null>(null);
+  const [sheetDrifted, setSheetDrifted] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
@@ -235,6 +239,16 @@ export default function PartsPage() {
     void loadStock(site.code);
     void loadMovementHistory(site.code);
   }, [site]);
+  // Another device may stock in/out while this tab sits open — refresh on
+  // return instead of polling, so idle tabs cost the server nothing.
+  useEffect(() => {
+    if (!site) return;
+    const onReturn = () => { if (!document.hidden) void refresh(); };
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('focus', onReturn);
+    return () => { document.removeEventListener('visibilitychange', onReturn); window.removeEventListener('focus', onReturn); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [site, selectedPart]);
   useEffect(() => {
     if (site) scanRef.current?.focus();
   }, [site, tab]);
@@ -358,22 +372,75 @@ export default function PartsPage() {
   }, [scan, site, tab, masterMissing]);
 
   const refresh = async () => {
-    if (!site) return;
-    await loadStock(site.code);
-    await loadMovementHistory(site.code);
-    if (selectedPart) await loadPartUnits(selectedPart);
+    if (!site || refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    try {
+      await loadStock(site.code);
+      await loadMovementHistory(site.code);
+      if (selectedPart) await loadPartUnits(selectedPart, true);
+    } finally { refreshInFlight.current = false; }
   };
 
-  const loadPartUnits = async (partNumber: string) => {
+  const formatSheetTime = (value: string | null) =>
+    value ? new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Manila' }).format(new Date(value)) : null;
+
+  // Sheet → web replay, mirroring the Frontline Monitor strategy: prominent
+  // control, last-synced label, quiet auto-sync while visible.
+  const syncSheet = async (quiet: boolean) => {
+    if (!site || site.code === 'ALL' || syncingSheet) return null;
+    setSyncingSheet(true);
+    try {
+      const result = await api.parts.syncFromSheet(site.code, quiet);
+      if (!result.skipped) {
+        try { setSheetSyncAt((await api.parts.sheetStatus()).lastSheetSyncAt); } catch { /* Label is optional. */ }
+        await refresh();
+      }
+      return result;
+    } finally { setSyncingSheet(false); }
+  };
+
+  const manualSheetSync = async () => {
+    try {
+      await syncSheet(false);
+      setSheetDrifted(false);
+    } catch (err) { setError((err as Error).message); }
+  };
+
+  // Cheap drift check (one Drive metadata read): only replay when the sheet
+  // actually changed since the last sync, so most cycles cost nothing.
+  const checkDriftAndSync = async () => {
+    if (!site || site.code === 'ALL') return;
+    let drift;
+    try { drift = await api.parts.sheetDrift(); }
+    catch { return; }
+    if (!drift.changed) { setSheetDrifted(false); return; }
+    setSheetDrifted(true);
+    const result = await syncSheet(true);
+    if (result && !result.skipped) setSheetDrifted(false);
+  };
+
+  useEffect(() => {
+    if (!isAdmin || !site || site.code === 'ALL') { if (!isAdmin) setSheetSyncAt(null); return; }
+    void api.parts.sheetStatus().then((status) => setSheetSyncAt(status.lastSheetSyncAt)).catch(() => undefined);
+    void checkDriftAndSync().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void checkDriftAndSync().catch(() => undefined);
+    }, 300_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, site]);
+
+  const loadPartUnits = async (partNumber: string, silent = false) => {
     if (!site) return;
-    setPartUnitsBusy(true);
+    if (!silent) setPartUnitsBusy(true);
     try {
       const result = publicMode && siteToken
         ? await api.partsPublic.partUnits(siteToken, partNumber)
         : await api.parts.partUnits(site.code, partNumber);
       setPartUnits(result.units);
     } catch (err) { setError((err as Error).message); }
-    finally { setPartUnitsBusy(false); }
+    finally { if (!silent) setPartUnitsBusy(false); }
   };
 
   const openPartWorkbench = (partNumber: string, highlight: string | null = null) => {
@@ -488,7 +555,7 @@ export default function PartsPage() {
             {label}
             <input ref={scanRef} value={scan} autoFocus={Boolean(site)}
               onChange={(e) => {
-                const value = e.target.value.toUpperCase();
+                const value = e.target.value.toUpperCase().replace(/[\r\n]+/g, '');
                 setScan(value);
                 setShowSuggest(true);
                 setFieldErrors((current) => ({ ...current, scan: undefined }));
@@ -1120,7 +1187,7 @@ export default function PartsPage() {
             {tab === 'out' && (
             <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
               <h3 className="text-[13px] font-semibold text-[#1d1d1f]">Stock Out</h3>
-              <p className="mt-0.5 text-[11px] text-[#6e6e73]">This writes to inventory + sheet log.</p>
+              <p className="mt-0.5 text-[11px] leading-4 text-[#6e6e73]">Stock out here — the web updates instantly and the Sheet log follows automatically. Rows typed directly into the Sheet need an admin sync before they appear here.</p>
               <button type="button" onClick={() => { setHistorySearch(''); setHistoryOpen(true); }} className="mt-3 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] shadow-sm">
                 View Stock Out history ({tabMovements.length})
               </button>
@@ -1181,10 +1248,22 @@ export default function PartsPage() {
                   )}
                 </div>
                 <p className="mt-0.5 text-[11px] text-[#6e6e73]">
-                  {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}
+                  {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}{isAdmin && sheetSyncAt && formatSheetTime(sheetSyncAt) ? ` · sheet ${formatSheetTime(sheetSyncAt)}` : ''}
                 </p>
               </div>
-              <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="Search"
+              {isAdmin && site && site.code !== 'ALL' && (
+                <button type="button" onClick={() => void manualSheetSync()} disabled={syncingSheet} aria-label="Sync stock from Google Sheet" title="Sync stock from Google Sheet" className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[#1d1d1f] px-3 text-[11px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40">
+                  <svg className={`h-3.5 w-3.5 ${syncingSheet ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+                  {syncingSheet ? 'Syncing…' : 'Sheet sync'}
+                </button>
+              )}
+              {isAdmin && site && site.code !== 'ALL' && sheetDrifted && !syncingSheet && (
+                <button type="button" onClick={() => void manualSheetSync()} title="The Google Sheet changed since the last sync" className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[#fef3c7] px-3 text-[11px] font-semibold text-[#92400e] hover:bg-[#fde68a]">
+                  <span className="h-2 w-2 rounded-full bg-[#d97706]" aria-hidden="true" />
+                  Sheet changed
+                </button>
+              )}
+              <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value.replace(/[\r\n]+/g, ''))} placeholder="Search"
                 className="h-8 w-40 shrink-0 rounded-full border border-[#d2d2d7] bg-white px-3 text-[12px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
             </div>
             {/* Drill-down slide track: parts → sites → serials (ALL), parts → serials (site). */}

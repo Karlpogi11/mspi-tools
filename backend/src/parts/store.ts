@@ -95,6 +95,7 @@ async function createPartsTables() {
   try { await pool.query('ALTER TABLE parts_movements ADD COLUMN location VARCHAR(100) NULL'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
   try { await pool.query('ALTER TABLE parts_sheet_config ADD COLUMN stock_in_sheet_name VARCHAR(255) NOT NULL DEFAULT ""'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
   try { await pool.query('ALTER TABLE parts_sheet_config ADD COLUMN stock_out_sheet_name VARCHAR(255) NOT NULL DEFAULT ""'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
+  try { await pool.query('ALTER TABLE parts_sheet_config ADD COLUMN last_sheet_sync_at TIMESTAMP NULL'); } catch (e: any) { if (!e.message.includes('Duplicate column name')) console.error(e); }
   // Carry the legacy single sheet_name over to both tabs when the new columns
   // are still empty, so an already-connected log keeps writing after upgrade.
   try {

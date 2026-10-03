@@ -11,6 +11,7 @@ import {
   connectUrl,
   connectionFor,
   decodeState,
+  driveSheetModifiedTime,
   frontendUrl,
   listSheets,
   saveConnection,
@@ -33,6 +34,15 @@ function announceParts(text: string): void {
 function value(input: unknown) { return String(input ?? '').trim(); }
 function upper(input: unknown) { return value(input).toUpperCase(); }
 function bad(res: any, message: string, code = 400) { res.status(code).json({ error: message }); }
+function isoTimestamp(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+// Mirrors the Frontline Monitor sync guard: at most one sheet replay per
+// minute per process, so visible-tab auto-syncs can never hammer Google.
+let lastSheetReplayAt = 0;
 function todayYmD() {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -764,6 +774,7 @@ router.get('/sheets/status', async (req, res) => {
     stockInSheetName: cfg?.stock_in_sheet_name || '',
     stockOutSheetName: cfg?.stock_out_sheet_name || '',
     pendingSync: Number((pending as Array<{ count: number }>)[0]?.count || 0),
+    lastSheetSyncAt: isoTimestamp(cfg?.last_sheet_sync_at),
     lastError: lastSheetError(),
   });
 });
@@ -849,18 +860,41 @@ router.post('/sheets/retry', requireAdmin, async (req, res) => {
 
 // ---------- Two-way sync (Sheet → Web) ----------
 
+router.get('/sheets/drift', requireAdmin, async (req, res) => {
+  await ensurePartsTables();
+  const cfg = await sheetConfig().catch(() => null);
+  if (!cfg?.spreadsheet_id) { res.json({ changed: false, sheetModifiedAt: null, lastSyncAt: null, scopeMissing: false, connected: false }); return; }
+  const lastSyncAt = isoTimestamp(cfg.last_sheet_sync_at);
+  try {
+    const sheetModifiedAt = await driveSheetModifiedTime(req.user!.userId, cfg.spreadsheet_id, cfg.updated_by);
+    if (!sheetModifiedAt) { res.json({ changed: false, sheetModifiedAt: null, lastSyncAt, scopeMissing: false, connected: false }); return; }
+    res.json({ changed: !!(lastSyncAt && Date.parse(sheetModifiedAt) > Date.parse(lastSyncAt)), sheetModifiedAt, lastSyncAt, scopeMissing: false, connected: true });
+  } catch (error) {
+    if (/\(403\)/.test((error as Error).message)) {
+      // Stored grant predates the Drive metadata scope — reconnect fixes it.
+      res.json({ changed: false, sheetModifiedAt: null, lastSyncAt, scopeMissing: true, connected: true });
+      return;
+    }
+    res.status(502).json({ error: (error as Error).message });
+  }
+});
+
 router.post('/sheets/sync', requireAdmin, async (req, res) => {
   await ensurePartsTables();
   const siteCode = upper(req.body?.siteCode);
+  const quiet = req.body?.quiet === true;
   if (!siteCode || siteCode === 'ALL') { bad(res, 'Choose a site to sync from the sheet.'); return; }
   const site = await getSite(siteCode);
   if (!site) { bad(res, 'Site code not found.', 404); return; }
+  if (Date.now() - lastSheetReplayAt < 60_000) { res.json({ message: 'Sheet sync ran moments ago.', imported: 0, ins: 0, outs: 0, duplicates: 0, duplicateSerials: [], skipped: true }); return; }
+  lastSheetReplayAt = Date.now();
   try {
     const result = await syncFromSheet(req.user!.userId, site.id, site.code, site.name);
+    await getDbPool().execute('UPDATE parts_sheet_config SET last_sheet_sync_at = CURRENT_TIMESTAMP WHERE id = 1');
     const dupNote = result.duplicates
       ? ` · skipped ${result.duplicates} duplicate row${result.duplicates === 1 ? '' : 's'} (${result.duplicateSerials.length} serial${result.duplicateSerials.length === 1 ? '' : 's'})`
       : '';
-    announceParts(`Sheet sync: rebuilt ${site.code} stock — ${result.ins} IN, ${result.outs} OUT (${result.imported} movements)${dupNote}.`);
+    if (!quiet) announceParts(`Sheet sync: rebuilt ${site.code} stock — ${result.ins} IN, ${result.outs} OUT (${result.imported} movements)${dupNote}.`);
     res.json({ message: `Synced ${site.code} from the spreadsheet.`, ...result });
   } catch (error) {
     console.error('parts sheet sync error:', error);

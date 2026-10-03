@@ -179,7 +179,8 @@ export interface PartsMasterItem { id: number; part_number: string; description:
 export interface PartsUnit { id: number; part_number: string; description?: string | null; serial: string | null; quantity: number; status: string; reference: string | null; location: string | null; occurred_date: string | null; stocked_in_at?: string | null; stocked_out_at?: string | null; site_code: string; site_name?: string }
 export interface PartsStockSummary { total: number; units: number; out_total: number; parts: number }
 export interface PartsMovement { id: number; type: string; part_number: string; serial: string | null; occurred_date: string; reference: string | null; quantity: number; location: string | null; created_at: string; site_code: string }
-export interface PartsSheetStatus { connected: boolean; email: string | null; spreadsheetId: string; spreadsheetName: string; stockInSheetName: string; stockOutSheetName: string; pendingSync: number; lastError: string | null }
+  export interface PartsSheetStatus { connected: boolean; email: string | null; spreadsheetId: string; spreadsheetName: string; stockInSheetName: string; stockOutSheetName: string; pendingSync: number; lastSheetSyncAt: string | null; lastError: string | null }
+  export interface PartsSheetDrift { changed: boolean; sheetModifiedAt: string | null; lastSyncAt: string | null; scopeMissing: boolean; connected: boolean }
 
 export interface Session {
   id: number;
@@ -637,7 +638,8 @@ export const api = {
     saveSheetConfig: (spreadsheetId: string, spreadsheetName: string, stockInSheetName: string, stockOutSheetName: string) => request<{ message: string }>('/parts/sheets/config', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, stockInSheetName, stockOutSheetName }) }),
     sheetList: (spreadsheetId: string) => request<{ title: string; sheets: string[] }>(`/parts/sheets/list?spreadsheetId=${encodeURIComponent(spreadsheetId)}`),
     retrySheet: () => request<{ synced: number; remaining: number }>('/parts/sheets/retry', { method: 'POST' }),
-    syncFromSheet: (siteCode: string) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[] }>('/parts/sheets/sync', { method: 'POST', body: JSON.stringify({ siteCode }) }),
+    syncFromSheet: (siteCode: string, quiet = false) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[]; skipped?: boolean }>('/parts/sheets/sync', { method: 'POST', body: JSON.stringify({ siteCode, quiet }) }),
+    sheetDrift: () => request<PartsSheetDrift>('/parts/sheets/drift'),
   },
 
   partsPublic: {
