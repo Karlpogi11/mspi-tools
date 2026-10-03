@@ -1,7 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import type { Product, Session } from '../../lib/api';
+import { api, type Product, type ReportSignatories, type Session } from '../../lib/api';
 import PcountComparison from './PcountComparison';
 
 const DEFAULT_CATEGORIES = [
@@ -78,9 +78,9 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
     return name.toUpperCase().includes('PODIUM') ? 'PODIUM' : name.toUpperCase();
   });
   const [date, setDate] = useState(defaultDate);
-  const [conductedBy, setConductedBy] = useState('Meliza Monge / Admin / Rore Gubon / Karl David Garcia');
-  const [approvedBy, setApprovedBy] = useState('PAUL ANGELO AGUILAR');
-  const [notedBy, setNotedBy] = useState('Danilyn Manuel');
+  const [conductedBy, setConductedBy] = useState('Meliza Monge / Jasmil Rose Guaban / Karl David Garcia');
+  const [approvedBy, setApprovedBy] = useState('PAUL ANGELO REVILLA');
+  const [notedBy, setNotedBy] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportError, setExportError] = useState('');
   const reportPagesRef = useRef<HTMLDivElement>(null);
@@ -89,6 +89,23 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
   const [appleTotalOverride, setAppleTotalOverride] = useState<string | null>(null);
   const [tppTotalOverride, setTppTotalOverride] = useState<string | null>(null);
   const [comparisonOpen, setComparisonOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api.sessions.getSignatories(session.id)
+      .then((result) => {
+        if (!active || !result.signatories) return;
+        setConductedBy(result.signatories.conductedBy);
+        setApprovedBy(result.signatories.approvedBy);
+        setNotedBy(result.signatories.notedBy);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [session.id]);
+
+  const saveSignatories = (next: ReportSignatories) => {
+    api.sessions.saveSignatories(session.id, next).catch(() => undefined);
+  };
 
   const countedProducts = products.filter(product => !isExcludedProduct(product));
 
@@ -331,8 +348,8 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
   const signatures = (
     <div className="signature-section mt-8 border border-[#746c65] text-[10px]">
       <div className="grid grid-cols-2 border-b border-[#746c65]"><div className="signature-header bg-[#1d1d1f] text-white py-1.5 text-center font-bold uppercase tracking-wider">CONDUCTED BY</div><div className="signature-header bg-[#1d1d1f] text-white py-1.5 text-center font-bold uppercase tracking-wider border-l border-[#746c65]">APPROVED BY</div></div>
-      <div className="grid grid-cols-2"><div className="p-4 text-center border-r border-[#746c65] flex flex-col justify-end min-h-[100px]"><input value={conductedBy} onChange={e => setConductedBy(e.target.value)} className="w-full text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]" /><div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">CASHIER / PMA</div><div className="text-[9px] text-[#6e6e73] normal-case tracking-normal">Signature over Printed Name</div></div><div className="p-4 text-center flex flex-col justify-end min-h-[100px]"><input value={approvedBy} onChange={e => setApprovedBy(e.target.value)} className="w-full text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]" /><div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">SITE HEAD / ASST SPV</div><div className="text-[9px] text-[#6e6e73] normal-case tracking-normal">Signature over Printed Name</div></div></div>
-      <div className="signature-header bg-[#1d1d1f] text-white py-1.5 text-center font-bold uppercase tracking-wider border-t border-[#746c65]">NOTED BY:</div><div className="p-4 text-center flex flex-col items-center justify-end min-h-[100px]"><input value={notedBy} onChange={e => setNotedBy(e.target.value)} className="w-2/3 text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]" /><div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">SECURITY GUARD ON DUTY</div><div className="text-[9px] text-[#6e6e73] normal-case tracking-normal">Signature over Printed Name and Date</div></div>
+      <div className="grid grid-cols-2"><div className="p-4 text-center border-r border-[#746c65] flex flex-col justify-end min-h-[100px]"><input value={conductedBy} onChange={e => setConductedBy(e.target.value)} onBlur={e => saveSignatories({ conductedBy: e.target.value, approvedBy, notedBy })} className="w-full text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]" /><div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">CASHIER / PMA</div><div className="text-[9px] text-[#6e6e73] normal-case tracking-normal">Signature over Printed Name</div></div><div className="p-4 text-center flex flex-col justify-end min-h-[100px]"><input value={approvedBy} onChange={e => setApprovedBy(e.target.value)} onBlur={e => saveSignatories({ conductedBy, approvedBy: e.target.value, notedBy })} className="w-full text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]" /><div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">SITE HEAD / ASST SPV</div><div className="text-[9px] text-[#6e6e73] normal-case tracking-normal">Signature over Printed Name</div></div></div>
+      <div className="signature-header bg-[#1d1d1f] text-white py-1.5 text-center font-bold uppercase tracking-wider border-t border-[#746c65]">NOTED BY:</div><div className="p-4 text-center flex flex-col items-center justify-end min-h-[100px]"><input value={notedBy} onChange={e => setNotedBy(e.target.value)} onBlur={e => saveSignatories({ conductedBy, approvedBy, notedBy: e.target.value })} className="w-2/3 text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]" /><div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">SECURITY GUARD ON DUTY</div><div className="text-[9px] text-[#6e6e73] normal-case tracking-normal">Signature over Printed Name and Date</div></div>
     </div>
   );
 
@@ -564,6 +581,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
                 <input
                   value={conductedBy}
                   onChange={e => setConductedBy(e.target.value)}
+                  onBlur={e => saveSignatories({ conductedBy: e.target.value, approvedBy, notedBy })}
                   className="w-full text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]"
                 />
                 <div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">CASHIER / PMA</div>
@@ -573,6 +591,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
                 <input
                   value={approvedBy}
                   onChange={e => setApprovedBy(e.target.value)}
+                  onBlur={e => saveSignatories({ conductedBy, approvedBy: e.target.value, notedBy })}
                   className="w-full text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]"
                 />
                 <div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">SITE HEAD / ASST SPV</div>
@@ -588,6 +607,7 @@ export default function PcountReportPreview({ session, products, onClose }: Prop
               <input
                 value={notedBy}
                 onChange={e => setNotedBy(e.target.value)}
+                onBlur={e => saveSignatories({ conductedBy, approvedBy, notedBy: e.target.value })}
                 className="w-2/3 text-center font-medium border-0 border-b border-gray-400 outline-none pb-1 bg-transparent focus:ring-0 text-[11px]"
               />
               <div className="font-bold mt-1.5 uppercase tracking-wider text-[#4b4540]">SECURITY GUARD ON DUTY</div>

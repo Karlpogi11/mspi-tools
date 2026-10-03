@@ -189,6 +189,7 @@ async function dbGetProduct(sessionId: number, code: string): Promise<ProductWit
 
 const memSessions = new Map<number, SessionRow>();
 const memMembers = new Map<number, Set<number>>();
+const memSignatories = new Map<number, ReportSignatories>();
 const memDisplayColumns = new Map<number, string[]>();
 const memProducts = new Map<number, ProductRow>();
 const memProductExtras = new Map<number, Record<string, string>>();
@@ -377,6 +378,161 @@ export async function searchSessions(q: string, userId: number): Promise<Session
     const checked = prods.filter(p => p.status !== 'pending').length;
     return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: memMembers.get(s.id)?.has(userId) || s.created_by === userId };
   });
+}
+
+export interface ExclusionSuggestion {
+  productCode: string;
+  description: string;
+  excludedSessions: number;
+  missingSessions: number;
+  sessionsConsidered: number;
+  lastStatus: string;
+  lastSessionName: string;
+}
+
+// Codes worth excluding in a new session, learned from the caller's recent
+// sessions: previously excluded codes, plus codes repeatedly left missing.
+export async function exclusionSuggestions(userId: number, sessionLimit = 5, excludeSessionId?: number): Promise<{ suggestions: ExclusionSuggestion[]; sessionsConsidered: number }> {
+  const windowSize = Math.min(Math.max(Math.floor(Number(sessionLimit)) || 5, 1), 10);
+  const excludedId = Number(excludeSessionId) || 0;
+  const notCurrent = excludedId ? 'AND s.id != ?' : '';
+  const notCurrentArgs = excludedId ? [excludedId] : [];
+  if (dbAvailable) {
+    const [countRows] = await getDbPool().query(
+      `SELECT COUNT(*) AS count FROM (
+         SELECT s.id FROM pcount_sessions s
+         INNER JOIN pcount_session_members m ON m.session_id = s.id AND m.user_id = ?
+         ${notCurrent}
+         ORDER BY s.created_at DESC, s.id DESC LIMIT ${windowSize}
+       ) recent`,
+      [userId, ...notCurrentArgs],
+    );
+    const sessionsConsidered = Number((countRows as Array<{ count: number | string }>)[0]?.count || 0);
+    if (!sessionsConsidered) return { suggestions: [], sessionsConsidered: 0 };
+    const [rows] = await getDbPool().query(
+      `SELECT p.product_code AS productCode, MAX(p.description) AS description,
+        SUM(p.status = 'excluded') AS excludedSessions,
+        SUM(p.status = 'missing') AS missingSessions,
+        COUNT(DISTINCT p.session_id) AS sessionsSeen,
+        SUBSTRING_INDEX(GROUP_CONCAT(p.status ORDER BY s.created_at DESC, s.id DESC SEPARATOR '|'), '|', 1) AS lastStatus,
+        SUBSTRING_INDEX(GROUP_CONCAT(s.name ORDER BY s.created_at DESC, s.id DESC SEPARATOR '|'), '|', 1) AS lastSessionName
+       FROM pcount_products p
+       INNER JOIN (
+         SELECT s.id, s.name, s.created_at FROM pcount_sessions s
+         INNER JOIN pcount_session_members m ON m.session_id = s.id AND m.user_id = ?
+         ${notCurrent}
+         ORDER BY s.created_at DESC, s.id DESC LIMIT ${windowSize}
+       ) s ON s.id = p.session_id
+       GROUP BY p.product_code
+       HAVING excludedSessions > 0 OR missingSessions >= 2
+       ORDER BY excludedSessions DESC, missingSessions DESC, productCode ASC
+       LIMIT 50`,
+      [userId, ...notCurrentArgs],
+    );
+    const suggestions = (rows as Array<Record<string, unknown>>).map((row) => ({
+      productCode: String(row.productCode || ''),
+      description: String(row.description || ''),
+      excludedSessions: Number(row.excludedSessions || 0),
+      missingSessions: Number(row.missingSessions || 0),
+      sessionsConsidered,
+      lastStatus: String(row.lastStatus || ''),
+      lastSessionName: String(row.lastSessionName || ''),
+    }));
+    return { suggestions, sessionsConsidered };
+  }
+
+  const recent = Array.from(memSessions.values())
+    .filter(s => (s.created_by === userId || memMembers.get(s.id)?.has(userId)) && s.id !== excludedId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)
+    .slice(0, windowSize);
+  if (!recent.length) return { suggestions: [], sessionsConsidered: 0 };
+  const latestName = new Map<number, string>(recent.map(s => [s.id, s.name]));
+  const agg = new Map<string, { description: string; excluded: number; missing: number; sessions: Set<number>; lastStatus: string; lastSessionId: number }>();
+  for (const session of recent) {
+    for (const product of memProducts.values()) {
+      if (product.session_id !== session.id) continue;
+      let entry = agg.get(product.product_code);
+      if (!entry) {
+        entry = { description: product.description || '', excluded: 0, missing: 0, sessions: new Set(), lastStatus: product.status, lastSessionId: session.id };
+        agg.set(product.product_code, entry);
+      }
+      entry.sessions.add(session.id);
+      if (product.status === 'excluded') entry.excluded += 1;
+      if (product.status === 'missing') entry.missing += 1;
+    }
+  }
+  const suggestions = Array.from(agg.entries())
+    .filter(([, e]) => e.excluded > 0 || e.missing >= 2)
+    .sort((a, b) => b[1].excluded - a[1].excluded || b[1].missing - a[1].missing || (a[0] < b[0] ? -1 : 1))
+    .slice(0, 50)
+    .map(([productCode, e]) => ({
+      productCode,
+      description: e.description,
+      excludedSessions: e.excluded,
+      missingSessions: e.missing,
+      sessionsConsidered: recent.length,
+      lastStatus: e.lastStatus,
+      lastSessionName: latestName.get(e.lastSessionId) || '',
+    }));
+  return { suggestions, sessionsConsidered: recent.length };
+}
+
+export interface ReportSignatories {
+  conductedBy: string;
+  approvedBy: string;
+  notedBy: string;
+}
+
+async function ensureSignatoriesTable(): Promise<void> {
+  if (!dbAvailable) return;
+  await getDbPool().query(`CREATE TABLE IF NOT EXISTS pcount_report_signatories (
+    session_id int NOT NULL,
+    conducted_by varchar(500) NOT NULL DEFAULT '',
+    approved_by varchar(255) NOT NULL DEFAULT '',
+    noted_by varchar(255) NOT NULL DEFAULT '',
+    updated_by int NULL,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id),
+    CONSTRAINT pcount_signatories_session_fk FOREIGN KEY (session_id) REFERENCES pcount_sessions(id) ON DELETE CASCADE
+  )`);
+}
+
+export async function getSignatories(sessionId: number): Promise<ReportSignatories | null> {
+  await assertExists(sessionId);
+  if (dbAvailable) {
+    await ensureSignatoriesTable();
+    const [rows] = await getDbPool().query(
+      'SELECT conducted_by, approved_by, noted_by FROM pcount_report_signatories WHERE session_id = ? LIMIT 1',
+      [sessionId],
+    );
+    const row = (rows as Array<{ conducted_by: string; approved_by: string; noted_by: string }>)[0];
+    return row ? { conductedBy: row.conducted_by || '', approvedBy: row.approved_by || '', notedBy: row.noted_by || '' } : null;
+  }
+  return memSignatories.get(sessionId) || null;
+}
+
+// Report sign-off stays editable even after submit: signing happens at the
+// end, often after the count is locked.
+export async function saveSignatories(
+  sessionId: number,
+  userId: number,
+  input: { conductedBy?: unknown; approvedBy?: unknown; notedBy?: unknown },
+): Promise<ReportSignatories> {
+  await assertExists(sessionId);
+  await assertMember(sessionId, userId);
+  const clean = (value: unknown, max: number) => String(value ?? '').slice(0, max);
+  const next = { conductedBy: clean(input.conductedBy, 500), approvedBy: clean(input.approvedBy, 255), notedBy: clean(input.notedBy, 255) };
+  if (dbAvailable) {
+    await ensureSignatoriesTable();
+    await getDbPool().execute(
+      `INSERT INTO pcount_report_signatories (session_id, conducted_by, approved_by, noted_by, updated_by)
+       VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE conducted_by = VALUES(conducted_by), approved_by = VALUES(approved_by), noted_by = VALUES(noted_by), updated_by = VALUES(updated_by)`,
+      [sessionId, next.conductedBy, next.approvedBy, next.notedBy, userId],
+    );
+    return next;
+  }
+  memSignatories.set(sessionId, next);
+  return next;
 }
 
 export async function getSession(id: number, userId?: number): Promise<SessionWithProgress | null> {
@@ -572,12 +728,19 @@ export async function getProduct(sessionId: number, code: string): Promise<Produ
 }
 
 export async function updateProduct(sessionId: number, code: string, data: Partial<ProductRow>): Promise<ProductWithExtra | null> {
+  const normalized = code.trim().toUpperCase();
   if (dbAvailable) {
     const db = getDb();
-    await db.update(pcountProducts).set(data).where(and(eq(pcountProducts.session_id, sessionId), eq(pcountProducts.product_code, code)));
-    return dbGetProduct(sessionId, code);
+    const [row] = await db
+      .select({ id: pcountProducts.id, product_code: pcountProducts.product_code })
+      .from(pcountProducts)
+      .where(and(eq(pcountProducts.session_id, sessionId), sql`UPPER(TRIM(${pcountProducts.product_code})) = ${normalized}`))
+      .limit(1);
+    if (!row) return null;
+    await db.update(pcountProducts).set(data).where(eq(pcountProducts.id, row.id));
+    return dbGetProduct(sessionId, row.product_code);
   }
-  const p = Array.from(memProducts.values()).find(x => x.session_id === sessionId && x.product_code === code);
+  const p = Array.from(memProducts.values()).find(x => x.session_id === sessionId && x.product_code.trim().toUpperCase() === normalized);
   if (!p) return null;
   const updated = { ...p, ...data };
   memProducts.set(updated.id, updated);

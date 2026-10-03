@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api, type Session, type Product, type ScanResult, readJson } from '../../lib/api';
+import { api, type ExclusionSuggestion, type Session, type Product, type ScanResult, readJson } from '../../lib/api';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import ImportSystem from '../../components/pcount/ImportSystem';
 import ImportCount from '../../components/pcount/ImportCount';
@@ -55,6 +55,9 @@ export default function PcountSessionPage() {
   const [selectedProductCodes, setSelectedProductCodes] = useState<string[]>([]);
   const [excludingPending, setExcludingPending] = useState(false);
   const [pendingExclusionError, setPendingExclusionError] = useState('');
+  const [quickExcludingCode, setQuickExcludingCode] = useState<string | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(true);
+  const [suggestionByCode, setSuggestionByCode] = useState<Record<string, ExclusionSuggestion>>({});
   const [excludeCodes, setExcludeCodes] = useState('');
   const [bulkPending, setBulkPending] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
@@ -86,6 +89,21 @@ export default function PcountSessionPage() {
     setPendingExclusionError('');
     setBulkMessage('');
   }, [statusFilter]);
+
+  useEffect(() => {
+    let active = true;
+    setSuggestionsLoading(true);
+    api.sessions.exclusionSuggestions(sessionId)
+      .then((result) => {
+        if (!active) return;
+        const map: Record<string, ExclusionSuggestion> = {};
+        for (const s of result.suggestions) map[s.productCode.trim().toUpperCase()] = s;
+        setSuggestionByCode(map);
+      })
+      .catch(() => undefined)
+      .finally(() => { if (active) setSuggestionsLoading(false); });
+    return () => { active = false; };
+  }, [sessionId]);
 
   useEffect(() => {
     const panel = verifyPanelRef.current;
@@ -349,6 +367,32 @@ export default function PcountSessionPage() {
     setExcludingPending(false);
   }, [products, selectedStatusCodes, sessionId, statusFilter]);
 
+  const quickExclude = useCallback(async (code: string) => {
+    if (quickExcludingCode) return;
+    setQuickExcludingCode(code);
+    setPendingExclusionError('');
+    try {
+      const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: 'excluded' }),
+      });
+      if (!res.ok) throw new Error('Could not exclude this product.');
+      setProducts(previous => {
+        const updated = previous.map(product => product.product_code === code ? { ...product, status: 'excluded' } : product);
+        productsRef.current = updated;
+        const checked = updated.filter(product => product.status !== 'pending').length;
+        setSession(current => current ? { ...current, checked, progress: updated.length > 0 ? Math.round((checked / updated.length) * 100) : 0 } : current);
+        return updated;
+      });
+    } catch (error) {
+      setPendingExclusionError(error instanceof Error ? error.message : 'Could not exclude this product.');
+    } finally {
+      setQuickExcludingCode(null);
+    }
+  }, [quickExcludingCode, sessionId]);
+
   const handleCompleteCount = useCallback(async (code: string) => {
     const product = productsRef.current.find((item) => item.product_code === code);
     if (!product) return;
@@ -535,6 +579,80 @@ export default function PcountSessionPage() {
     apple: products.filter(p => p.category === 'apple').length,
     '3pp': products.filter(p => p.category === '3pp').length,
   };
+
+  const suggestibleCodes = products
+    .filter(p => (p.status === 'pending' || p.status === 'missing') && suggestionByCode[p.product_code.trim().toUpperCase()])
+    .map(p => p.product_code);
+
+  const excludeSuggested = useCallback(async () => {
+    const targets = products.filter(p => (p.status === 'pending' || p.status === 'missing') && suggestionByCode[p.product_code.trim().toUpperCase()]);
+    if (targets.length === 0 || excludingPending) return;
+    setExcludingPending(true);
+    setPendingExclusionError('');
+    setBulkMessage('');
+    const results = await Promise.allSettled(targets.map(product => fetch(
+      `/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(product.product_code)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: 'excluded' }),
+      },
+    )));
+    const succeeded = new Set(targets.filter((_, index) => {
+      const result = results[index];
+      return result.status === 'fulfilled' && result.value.ok;
+    }).map(product => product.product_code));
+    if (succeeded.size > 0) {
+      setProducts(previous => {
+        const updated = previous.map(product => succeeded.has(product.product_code) ? { ...product, status: 'excluded' } : product);
+        productsRef.current = updated;
+        const checked = updated.filter(product => product.status !== 'pending').length;
+        setSession(current => current ? { ...current, checked, progress: updated.length > 0 ? Math.round((checked / updated.length) * 100) : 0 } : current);
+        return updated;
+      });
+      setBulkMessage(`${succeeded.size} suggested product${succeeded.size === 1 ? '' : 's'} excluded based on previous sessions.`);
+    }
+    if (succeeded.size < targets.length) {
+      setPendingExclusionError(`${targets.length - succeeded.size} item${targets.length - succeeded.size === 1 ? '' : 's'} could not be excluded. Please try again.`);
+    }
+    setExcludingPending(false);
+  }, [excludingPending, products, sessionId, suggestionByCode]);
+
+  const excludeAllMissing = useCallback(async () => {
+    const targets = products.filter(p => p.status === 'missing');
+    if (targets.length === 0 || excludingPending) return;
+    setExcludingPending(true);
+    setPendingExclusionError('');
+    setBulkMessage('');
+    const results = await Promise.allSettled(targets.map(product => fetch(
+      `/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(product.product_code)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: 'excluded' }),
+      },
+    )));
+    const succeeded = new Set(targets.filter((_, index) => {
+      const result = results[index];
+      return result.status === 'fulfilled' && result.value.ok;
+    }).map(product => product.product_code));
+    if (succeeded.size > 0) {
+      setProducts(previous => {
+        const updated = previous.map(product => succeeded.has(product.product_code) ? { ...product, status: 'excluded' } : product);
+        productsRef.current = updated;
+        const checked = updated.filter(product => product.status !== 'pending').length;
+        setSession(current => current ? { ...current, checked, progress: updated.length > 0 ? Math.round((checked / updated.length) * 100) : 0 } : current);
+        return updated;
+      });
+      setBulkMessage(`${succeeded.size} missing product${succeeded.size === 1 ? '' : 's'} excluded.`);
+    }
+    if (succeeded.size < targets.length) {
+      setPendingExclusionError(`${targets.length - succeeded.size} item${targets.length - succeeded.size === 1 ? '' : 's'} could not be excluded. Please try again.`);
+    }
+    setExcludingPending(false);
+  }, [excludingPending, products, sessionId]);
 
   if (loading) {
     return <div className="text-center py-20 text-[14px] text-[#6e6e73]">Loading...</div>;
@@ -760,6 +878,26 @@ export default function PcountSessionPage() {
                 ))}
               </div>
               <div className="pcount-toolbar-spacer" />
+              <button
+                type="button"
+                onClick={() => void excludeSuggested()}
+                disabled={excludingPending || suggestionsLoading || suggestibleCodes.length === 0}
+                title={suggestionsLoading ? 'Checking previous sessions…' : suggestibleCodes.length === 0 ? 'No pending or missing rows match previous sessions’ excluded or missing codes' : 'Exclude rows flagged in previous sessions (excluded before or repeatedly missing)'}
+                className="pcount-secondary-button shrink-0 disabled:cursor-not-allowed"
+              >
+                {excludingPending ? 'Excluding…' : suggestionsLoading ? 'Checking history…' : `Exclude suggested${suggestibleCodes.length ? ` (${suggestibleCodes.length})` : ''}`}
+              </button>
+              {statusFilter === 'missing' && (
+                <button
+                  type="button"
+                  onClick={() => void excludeAllMissing()}
+                  disabled={excludingPending || statusCounts.missing === 0}
+                  title={statusCounts.missing === 0 ? 'No missing rows right now — under-counted codes appear here as you scan' : 'Exclude everything currently missing'}
+                  className="pcount-secondary-button shrink-0 disabled:cursor-not-allowed"
+                >
+                  {excludingPending ? 'Excluding…' : `Exclude all missing${statusCounts.missing ? ` (${statusCounts.missing})` : ''}`}
+                </button>
+              )}
               <ColumnPicker
                 columns={tableColumns}
                 onChange={async (columns) => {
@@ -847,6 +985,10 @@ export default function PcountSessionPage() {
                 onToggleProduct={toggleProductSelection}
                 onToggleAllProducts={toggleAllProductSelection}
                 productSelectionDisabled={bulkPending}
+                suggestionByCode={suggestionByCode}
+                onQuickExclude={(code) => void quickExclude(code)}
+                quickExcludingCode={quickExcludingCode}
+                groupSuggested={statusFilter === 'missing'}
               />
             </div>
             <div ref={verifyPanelRef} className="self-start min-h-0 min-w-0 lg:col-span-1">

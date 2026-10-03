@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { type Product, readJson } from '../../lib/api';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { type ExclusionSuggestion, type Product, readJson } from '../../lib/api';
 
 interface Props {
   products: Product[];
@@ -29,6 +29,10 @@ interface Props {
   onToggleProduct?: (code: string) => void;
   onToggleAllProducts?: () => void;
   productSelectionDisabled?: boolean;
+  suggestionByCode?: Record<string, ExclusionSuggestion>;
+  onQuickExclude?: (code: string) => void;
+  quickExcludingCode?: string | null;
+  groupSuggested?: boolean;
 }
 
 export const ALL_COLUMNS = [
@@ -108,7 +112,7 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   </div>;
 }
 
-export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false, showProductSelection = false, selectedProductCodes = [], onToggleProduct, onToggleAllProducts, productSelectionDisabled = false }: Props) {
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false, showProductSelection = false, selectedProductCodes = [], onToggleProduct, onToggleAllProducts, productSelectionDisabled = false, suggestionByCode, onQuickExclude, quickExcludingCode = null, groupSuggested = false }: Props) {
   const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
@@ -176,6 +180,14 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
   const sorted = [...products].sort((a, b) =>
     sortDesc ? b.product_code.localeCompare(a.product_code) : a.product_code.localeCompare(b.product_code)
   );
+
+  const hasHistory = (code: string) => Boolean(suggestionByCode?.[code.trim().toUpperCase()]);
+  // On the Missing tab: plain rows first ("find these"), history-flagged rows
+  // grouped after ("consider excluding").
+  const doGroup = groupSuggested && sorted.length > 0 && sorted.every((p) => p.status === 'missing');
+  const displayed = doGroup
+    ? [...sorted.filter((p) => !hasHistory(p.product_code)), ...sorted.filter((p) => hasHistory(p.product_code))]
+    : sorted;
 
   const shown = ALL_COLUMNS.filter(c => (visibleColumns ?? visible).includes(c.key) || (editMode && c.key === 'Is Match'));
   const selectableProducts = showProductSelection
@@ -269,13 +281,28 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
             </tr>
           </thead>
           <tbody>
-            {sorted.map((p) => {
+            {displayed.map((p, rowIndex) => {
               const st = statusStyles[p.status] || statusStyles.pending;
               const isSelected = selectedCode === p.product_code;
               const isMatch = p.system_qty === p.counted_qty && p.counted_qty > 0;
               const isOver = p.counted_qty > p.system_qty;
+              const flagged = doGroup && hasHistory(p.product_code);
+              const showGroupHeader = doGroup && (rowIndex === 0 || hasHistory(displayed[rowIndex - 1].product_code) !== flagged);
+              const suggestion = suggestionByCode?.[p.product_code.trim().toUpperCase()];
+              const showSuggestion = Boolean(suggestion) && (p.status === 'missing' || p.status === 'excluded');
+              const suggestionParts: string[] = [];
+              if ((suggestion?.excludedSessions || 0) > 0) suggestionParts.push(`excluded ×${suggestion!.excludedSessions}`);
+              if ((suggestion?.missingSessions || 0) > 0) suggestionParts.push(`missing ×${suggestion!.missingSessions}`);
 
               return (
+                <Fragment key={p.id}>
+                  {showGroupHeader && (
+                    <tr className="bg-[#f7f7f8]">
+                      <td colSpan={shown.length} className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#6e6e73]">
+                        {flagged ? 'Flagged from previous sessions — consider excluding' : 'Needs attention — find these'}
+                      </td>
+                    </tr>
+                  )}
                 <tr
                   key={p.id}
                   ref={(node) => {
@@ -306,6 +333,23 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                               {st.label}
                             </span>
                           </div>
+                          {showSuggestion && (
+                            <div className="mt-1 flex items-center gap-2 pl-4 text-[10px] text-[#6e6e73]">
+                              <span title={suggestion?.description ? `${suggestion.description} — last seen ${suggestion.lastStatus || 'unknown'} in ${suggestion.lastSessionName || 'a recent session'}` : undefined}>
+                                {suggestionParts.join(' · ')} before
+                              </span>
+                              {p.status === 'missing' && onQuickExclude && (
+                                <button
+                                  type="button"
+                                  disabled={quickExcludingCode === p.product_code}
+                                  onClick={(e) => { e.stopPropagation(); onQuickExclude(p.product_code); }}
+                                  className="cursor-pointer rounded-full border border-[#d2d2d7] bg-white px-2 py-0.5 font-semibold text-[#1d1d1f] hover:bg-[#f5f5f7] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {quickExcludingCode === p.product_code ? 'Excluding…' : 'Exclude'}
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </td>
                       );
                     }
@@ -409,6 +453,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                     );
                   })}
                 </tr>
+                </Fragment>
               );
             })}
           </tbody>

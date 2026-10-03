@@ -229,6 +229,22 @@ export interface Product {
   extra: Record<string, string>;
 }
 
+export interface ExclusionSuggestion {
+  productCode: string;
+  description: string;
+  excludedSessions: number;
+  missingSessions: number;
+  sessionsConsidered: number;
+  lastStatus: string;
+  lastSessionName: string;
+}
+
+export interface ReportSignatories {
+  conductedBy: string;
+  approvedBy: string;
+  notedBy: string;
+}
+
 export interface PcountComparisonRow {
   product_code: string;
   description: string;
@@ -701,6 +717,15 @@ export const api = {
       }),
     compare: (currentId: number, previousId: number) =>
       request<PcountComparison>(`/pcount/sessions/${currentId}/compare/${previousId}`),
+    exclusionSuggestions: (excludeSessionId?: number) =>
+      request<{ suggestions: ExclusionSuggestion[]; sessionsConsidered: number }>(`/pcount/sessions/exclusion-suggestions${excludeSessionId ? `?exclude=${excludeSessionId}` : ''}`),
+    getSignatories: (id: number) =>
+      request<{ signatories: ReportSignatories | null }>(`/pcount/sessions/${id}/signatories`),
+    saveSignatories: (id: number, signatories: ReportSignatories) =>
+      request<{ signatories: ReportSignatories }>(`/pcount/sessions/${id}/signatories`, {
+        method: 'PUT',
+        body: JSON.stringify(signatories),
+      }),
   },
 
   pcountAdmin: {

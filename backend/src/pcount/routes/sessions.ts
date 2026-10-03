@@ -48,6 +48,20 @@ router.get('/sessions/search', async (req, res) => {
   }
 });
 
+router.get('/sessions/exclusion-suggestions', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '5'), 10) || 5, 1), 10);
+    const exclude = parseInt(String(req.query.exclude || ''), 10);
+    res.json(await store.exclusionSuggestions(req.user!.userId, limit, Number.isInteger(exclude) ? exclude : undefined));
+  } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to load exclusion suggestions' });
+  }
+});
+
 router.get('/sessions/:id/compare/:otherId', requireMember, async (req, res) => {
   try {
     const currentId = parseInt(req.params.id);
@@ -112,8 +126,32 @@ async function requireMember(req: any, res: any, next: any) {
   }
 }
 
-router.get('/sessions/:id', requireMember, async (req, res) => {
+router.get('/sessions/:id/signatories', requireMember, async (req, res) => {
   try {
+    res.json({ signatories: await store.getSignatories(parseInt(req.params.id)) });
+  } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to load signatories' });
+  }
+});
+
+router.put('/sessions/:id/signatories', requireMember, async (req, res) => {
+  try {
+    const { conductedBy, approvedBy, notedBy } = req.body;
+    res.json({ signatories: await store.saveSignatories(parseInt(req.params.id), req.user!.userId, { conductedBy, approvedBy, notedBy }) });
+  } catch (error) {
+    if (error instanceof store.PcountError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to save signatories' });
+  }
+});
+
+router.get('/sessions/:id', requireMember, async (req, res) => {  try {
     const id = parseInt(req.params.id);
     const session = await store.getSession(id, req.user!.userId);
     if (!session) return res.status(404).json({ error: 'Session not found' });
