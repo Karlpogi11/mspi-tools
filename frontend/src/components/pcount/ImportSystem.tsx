@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WorkBook } from 'xlsx';
 import { api, type Product } from '../../lib/api';
+import { clearDefaultExcludes, loadDefaultExcludes, loadDefaultMissing, parseExcludeCodes, saveDefaultExcludes } from '../../lib/defaultExcludes';
 
 interface Props {
   sessionId: number;
@@ -37,7 +38,25 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [excludedPartNumbers, setExcludedPartNumbers] = useState('');
+  const [excludedPartNumbers, setExcludedPartNumbers] = useState(() => loadDefaultExcludes().join('\n'));
+  const [defaultExcludeCount, setDefaultExcludeCount] = useState(() => loadDefaultExcludes().length);
+
+  // Session-level excluded rows live in the DB (Verify → Excluded tab), not in the
+  // import box. Refresh the pre-fill whenever the upload form opens so a default
+  // saved from the Excluded tab shows up immediately.
+  useEffect(() => {
+    if (showUpload) {
+      const defaults = loadDefaultExcludes();
+      setDefaultExcludeCount(defaults.length);
+      setExcludedPartNumbers(prev => (prev.trim() ? prev : defaults.join('\n')));
+    }
+  }, [showUpload]);
+
+  const sessionExcludedCodes = previewProducts
+    .filter(p => String(p.status || '').trim().toLowerCase() === 'excluded')
+    .map(p => p.product_code.trim().toUpperCase())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
   const inputRef = useRef<HTMLInputElement>(null);
   const workbookRef = useRef<WorkBook | null>(null);
   const xlsxRef = useRef<typeof import('xlsx') | null>(null);
@@ -90,13 +109,24 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
       setHeaders(cols);
       setPreview(json.slice(0, 5));
       setError('');
+      // Prefer header-name matches (e.g. a literal "QTY" column) before falling
+      // back to content sniffing, so quantity mapping rarely needs a manual pick.
+      const lowerName = (c: string) => c.trim().toLowerCase();
+      const findByName = (patterns: RegExp[], skip: Set<string>) =>
+        cols.find(c => !skip.has(c) && patterns.some(re => re.test(lowerName(c)))) || '';
       const firstValCols = cols.filter(c => { const v = json.find(r => r[c]?.trim()); return v && isNaN(Number(v[c])); });
       const qtyCols = cols.filter(c => { const v = json.find(r => r[c]?.trim()); return v && !isNaN(Number(v[c])); });
+      const codeByName = findByName([/prod.*code|^code$|code|sku|barcode|item.?code|part.? (?:no|number)/], new Set());
+      const productCode = codeByName || firstValCols[0] || cols[0] || '';
+      const descByName = findByName([/descri|desc|product.?name|item.?name|^name$/], new Set([productCode]));
+      const description = descByName || firstValCols.find(c => c !== productCode) || cols[1] || cols[0] || '';
+      const qtyByName = findByName([/\bqty\b|quantity|actual.?qty|system.?qty|^qty$/, /\bsoh\b|on.?hand|stock|count/], new Set([productCode, description]));
+      const quantity = qtyByName || qtyCols.find(c => c !== productCode && c !== description) || qtyCols[0] || cols[2] || cols[1] || '';
       setMapping(m => ({
         ...m,
-        productCode: firstValCols[0] || cols[0] || '',
-        description: firstValCols[1] || cols[1] || cols[0] || '',
-        quantity: qtyCols[0] || cols[2] || cols[1] || '',
+        productCode,
+        description,
+        quantity,
         displayColumns: m.displayColumns.length > 0 ? m.displayColumns : cols.filter(c => c !== cols[0] && c !== cols[1]).slice(0, 8),
       }));
     } catch { setError('Failed to parse Excel file'); }
@@ -161,12 +191,9 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
         headers.forEach((h, i) => { obj[h] = String(row[i] || ''); });
         return obj;
       });
-      const excluded = new Set(
-        excludedPartNumbers
-          .split(/[\s,;]+/)
-          .map(code => code.trim().toUpperCase())
-          .filter(Boolean),
-      );
+      // Import-time excludes arrive as visible Excluded rows (never silently dropped),
+      // so All includes them and the Excluded tab shows the default list.
+      const excludedCodes = parseExcludeCodes(excludedPartNumbers);
       const products = json.map(row => {
         const extra: Record<string, string> = {};
         for (const [k, v] of Object.entries(row)) {
@@ -180,11 +207,11 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
           system_qty: parseInt(row[mapping.quantity]) || 0,
           extra,
         };
-      }).filter(product => product.product_code.trim() && !excluded.has(product.product_code.trim().toUpperCase()));
+      }).filter(product => product.product_code.trim());
       if (products.length === 0) {
-        throw new Error('All imported rows were excluded. Keep at least one product.');
+        throw new Error('No product rows found. Check the column mapping.');
       }
-      await api.products.importSystem(sessionId, products, mapping.displayColumns, replace);
+      await api.products.importSystem(sessionId, products, mapping.displayColumns, replace, excludedCodes, loadDefaultMissing());
       setShowUpload(false);
       setConfirmReplace(false);
       onComplete();
@@ -262,9 +289,10 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
             {onlineCount} online
           </span>
         </div>
-        <p className="text-[13px] text-[#6e6e73] mb-4">
-          {productCount} products imported. Configure which extra columns to display below.
-        </p>
+          <p className="text-[13px] text-[#6e6e73] mb-4">
+            {productCount} products imported. Configure which extra columns to display below.
+            {loadDefaultMissing().length > 0 && ' Default stolen missing counts were auto-applied at import (Missing tab).'}
+          </p>
 
         <div className="mb-4">
           <label className="text-[12px] font-medium text-[#6e6e73] block mb-2">Display these extra columns</label>
@@ -289,10 +317,38 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
           </div>
         </div>
 
+        <div className="mb-4 rounded-lg border border-[#d2d2d7] bg-[#fafafa] p-3">
+          <label className="text-[12px] font-medium text-[#6e6e73] block mb-1">
+            Excluded in this session ({sessionExcludedCodes.length})
+          </label>
+          <p className="text-[12px] text-[#6e6e73] mb-2">
+            These rows were excluded after import (Verify → Excluded tab), so they are stored in this session — not in the import box below.
+            {defaultExcludeCount > 0 ? ` ${defaultExcludeCount} codes in the default list (built-in + saved) for future imports.` : ''}
+          </p>
+          {sessionExcludedCodes.length > 0 ? (
+            <>
+              <p className="max-h-20 overflow-y-auto rounded-lg border border-[#d2d2d7] bg-white px-3 py-2 font-mono text-[11px] leading-5 text-[#1d1d1f]">
+                {sessionExcludedCodes.join(', ')}
+              </p>
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => setDefaultExcludeCount(saveDefaultExcludes(sessionExcludedCodes.join('\n')).length)}
+                  className="pcount-secondary-button"
+                >
+                  Save these as default to exclude ({sessionExcludedCodes.length})
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-[12px] text-[#6e6e73]">No excluded rows in this session yet.</p>
+          )}
+        </div>
+
         {previewColumns.length > 0 && previewProducts.length > 0 && (
           <div className="mt-5 overflow-hidden rounded-lg border border-[#d2d2d7]">
             <div className="border-b border-[#d2d2d7] bg-[#f5f5f7] px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-[#6e6e73]">
-              Imported data preview{selectedColumns.length === 0 ? ' &middot; select columns to show in the table' : ''}
+              Imported data preview{selectedColumns.length === 0 ? ' · select columns to show in the table' : ''}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-[12px]">
@@ -438,15 +494,48 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
                     Exclude whole-unit part numbers
                   </label>
                   <p className="text-[12px] text-[#6e6e73] mb-2">
-                    These codes will not be imported, so they cannot remain pending or appear in the final count.
+                    These codes are imported as <span className="font-semibold">Excluded</span> rows — visible in the Excluded tab, ignored in progress and the final count.
+                    {` ${defaultExcludeCount} in the default list (built-in + saved) and pre-filled below.`}
                   </p>
                   <textarea
                     value={excludedPartNumbers}
                     onChange={e => setExcludedPartNumbers(e.target.value)}
                     placeholder="One code per line, or separate codes with commas"
-                    rows={2}
+                    rows={4}
                     className="w-full resize-y rounded-lg border border-[#d2d2d7] bg-white px-3 py-2 text-[13px] font-mono outline-none focus:border-[#2563eb]"
                   />
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDefaultExcludeCount(saveDefaultExcludes(excludedPartNumbers).length)}
+                      disabled={parseExcludeCodes(excludedPartNumbers).length === 0}
+                      className="pcount-secondary-button disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save as default to exclude
+                    </button>
+                    {sessionExcludedCodes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setExcludedPartNumbers(sessionExcludedCodes.join('\n'))}
+                        title="Fill the box with the codes currently excluded in this session"
+                        className="pcount-inline-action"
+                      >
+                        Fill from this session's excluded ({sessionExcludedCodes.length})
+                      </button>
+                    )}
+                    {defaultExcludeCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => { clearDefaultExcludes(); setDefaultExcludeCount(0); }}
+                        className="pcount-inline-action"
+                      >
+                        Clear saved default ({defaultExcludeCount})
+                      </button>
+                    )}
+                    <span className="text-[11px] text-[#6e6e73]">
+                      {parseExcludeCodes(excludedPartNumbers).length} codes in box · {loadDefaultMissing().length} default missing counts auto-applied as stolen
+                    </span>
+                  </div>
                 </div>
 
                 <div className="mb-4">

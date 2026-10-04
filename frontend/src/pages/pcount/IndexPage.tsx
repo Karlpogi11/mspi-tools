@@ -15,6 +15,13 @@ export default function PcountIndexPage() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [ownedSessionId, setOwnedSessionId] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState(() => {
+    try {
+      return localStorage.getItem('pcount.sessionSort') || 'newest';
+    } catch {
+      return 'newest';
+    }
+  });
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
 
@@ -186,7 +193,31 @@ export default function PcountIndexPage() {
     return <div className="text-center py-20 text-[14px] text-[#6e6e73]">Loading...</div>;
   }
 
-  const allSessions = sessions;
+  const allSessions = [...sessions].sort((a, b) => {
+    switch (sortKey) {
+      case 'oldest':
+        return String(a.created_at).localeCompare(String(b.created_at)) || a.id - b.id;
+      case 'name-asc':
+        return a.name.localeCompare(b.name) || b.id - a.id;
+      case 'name-desc':
+        return b.name.localeCompare(a.name) || b.id - a.id;
+      case 'progress':
+        return b.progress - a.progress || b.id - a.id;
+      case 'finished':
+        return Number(b.progress >= 100) - Number(a.progress >= 100)
+          || String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id;
+      case 'newest':
+      default:
+        return String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id;
+    }
+  });
+
+  function changeSort(next: string) {
+    setSortKey(next);
+    try {
+      localStorage.setItem('pcount.sessionSort', next);
+    } catch {}
+  }
 
   return (
     <div>
@@ -221,14 +252,36 @@ export default function PcountIndexPage() {
         </div>
       </div>
 
-      <div className="mb-5">
+      <div className="mb-5 flex flex-wrap items-center gap-3">
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search by session name or 4-digit code..."
-          className="w-full max-w-md px-4 py-2.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb]"
+          className="w-full max-w-md flex-1 min-w-52 px-4 py-2.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#2563eb]"
         />
+        <label className="flex items-center gap-2 text-[12px] text-[#6e6e73]">
+          <svg className="w-4 h-4 text-[#6e6e73]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M11 5h10" />
+            <path d="M11 9h7" />
+            <path d="M11 13h4" />
+            <path d="m3 17 3 3 3-3" />
+            <path d="M6 18V4" />
+          </svg>
+          Sort
+          <select
+            value={sortKey}
+            onChange={(e) => changeSort(e.target.value)}
+            className="px-3 py-2.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white text-[#1d1d1f] focus:outline-none focus:border-[#2563eb] cursor-pointer"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="finished">Finished 100% first, latest on top</option>
+            <option value="name-asc">Name A–Z</option>
+            <option value="name-desc">Name Z–A</option>
+            <option value="progress">Highest progress</option>
+          </select>
+        </label>
       </div>
 
       {error && (

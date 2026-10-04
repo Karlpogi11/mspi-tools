@@ -693,6 +693,61 @@ router.post('/stock/out', async (req, res) => {
   } catch (error) { stockError(res, error); }
 });
 
+// ---------- Relocate (set location without stocking in/out) ----------
+
+// Moving stock between boxes changes no quantity, so it writes no movement
+// and appends no sheet row — it only updates the unit's location.
+router.post('/units/relocate', async (req, res) => {
+  await ensurePartsTables();
+  const scope = await resolveScope(req, res);
+  if (!scope) return;
+  if (scope.all) { bad(res, 'Choose a site for this operation.'); return; }
+  const site = scope.site!;
+  const unitId = Number(req.body?.unitId);
+  let location = String(req.body?.location ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!unitId || !Number.isInteger(unitId)) { bad(res, 'Unit is required.'); return; }
+  if (!location) { bad(res, 'New location is required.'); return; }
+  // Normalize legacy names (BB13 → B-13-B, B13 → B-13) so relocated rows
+  // follow the box standard; anything else is stored as typed.
+  if (!/^[A-Z]-\d+(-[B-Z])?$/.test(location)) {
+    const plain = location.match(/^([A-Z])(\d+)$/);
+    const second = location.match(/^([A-Z])B(\d+)$/);
+    const third = location.match(/^([A-Z])C(\d+)$/);
+    if (plain) location = `${plain[1]}-${plain[2]}`;
+    else if (second) location = `${second[1]}-${second[2]}-B`;
+    else if (third) location = `${third[1]}-${third[2]}-C`;
+  }
+  try {
+    const pool = getDbPool();
+    const [rows] = await pool.query(
+      'SELECT id, part_number, serial, quantity, status, location FROM parts_units WHERE id = ? AND site_id = ? LIMIT 1',
+      [unitId, site.id]
+    );
+    const unit = (rows as Array<{ id: number; part_number: string; serial: string | null; quantity: number; status: string; location: string | null }>)[0];
+    if (!unit) { bad(res, 'Unit not found at this site.', 404); return; }
+    if (unit.status !== 'in') { bad(res, 'Only available stock can be moved.'); return; }
+    if ((unit.location || '') === location) { res.json({ message: `Already in ${location}.`, location }); return; }
+    if (!unit.serial) {
+      // Non-serialized buckets live per (part, location): fold into the
+      // destination bucket when one already exists.
+      const [dest] = await pool.query(
+        'SELECT id FROM parts_units WHERE site_id = ? AND part_number = ? AND serial IS NULL AND COALESCE(location, "") = ? AND id != ? LIMIT 1',
+        [site.id, unit.part_number, location, unitId]
+      );
+      const existing = (dest as Array<{ id: number }>)[0];
+      if (existing) {
+        await pool.execute('UPDATE parts_units SET quantity = quantity + ? WHERE id = ?', [unit.quantity, existing.id]);
+        await pool.execute('DELETE FROM parts_units WHERE id = ?', [unitId]);
+      } else {
+        await pool.execute('UPDATE parts_units SET location = ? WHERE id = ?', [location, unitId]);
+      }
+    } else {
+      await pool.execute('UPDATE parts_units SET location = ? WHERE id = ?', [location, unitId]);
+    }
+    res.json({ message: `${unit.part_number}${unit.serial ? ` (${unit.serial})` : ''} moved to ${location}.`, location });
+  } catch (error) { stockError(res, error); }
+});
+
 // ---------- Bulk imports ----------
 
 router.post('/import/in', async (req, res) => {
@@ -886,7 +941,7 @@ router.post('/sheets/sync', requireAdmin, async (req, res) => {
   if (!siteCode || siteCode === 'ALL') { bad(res, 'Choose a site to sync from the sheet.'); return; }
   const site = await getSite(siteCode);
   if (!site) { bad(res, 'Site code not found.', 404); return; }
-  if (Date.now() - lastSheetReplayAt < 60_000) { res.json({ message: 'Sheet sync ran moments ago.', imported: 0, ins: 0, outs: 0, duplicates: 0, duplicateSerials: [], skipped: true }); return; }
+  if (Date.now() - lastSheetReplayAt < 60_000) { res.json({ message: 'Sheet sync ran moments ago.', imported: 0, ins: 0, outs: 0, duplicates: 0, duplicateSerials: [], parts: 0, skipped: true }); return; }
   lastSheetReplayAt = Date.now();
   try {
     const result = await syncFromSheet(req.user!.userId, site.id, site.code, site.name);

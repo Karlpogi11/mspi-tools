@@ -106,6 +106,7 @@ router.post('/sessions/:id/products/bulk', requireMember, requireSuperAdminAcces
       action,
       updated: result.products.filter(product => action === 'exclude' || product.status === 'matched').length,
       missingCodes: result.missingCodes,
+      skippedMissing: result.skippedMissing,
     });
   } catch (error) {
     if (error instanceof store.PcountError) {
@@ -144,7 +145,7 @@ router.post('/sessions/:id/scan', requireMember, async (req, res) => {
 router.post('/sessions/:id/import-system', requireMember, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
-    const { products, display_columns } = req.body;
+    const { products, display_columns, excluded_codes, default_counts } = req.body;
     const replace = req.query.replace === 'true';
 
     if (!products || !Array.isArray(products) || products.length === 0) {
@@ -168,7 +169,10 @@ router.post('/sessions/:id/import-system', requireMember, async (req, res) => {
       await store.setDisplayColumns(sessionId, display_columns);
     }
 
-    const count = await store.createProducts(sessionId, products);
+    const count = await store.createProducts(sessionId, products, {
+      excludedCodes: Array.isArray(excluded_codes) ? excluded_codes.filter((c): c is string => typeof c === 'string') : [],
+      defaultCounts: Array.isArray(default_counts) ? default_counts : [],
+    });
     await store.updateSession(sessionId, { status: 'active' } as Partial<store.SessionRow>);
 
     broadcast(sessionId, { type: 'products_imported', count });

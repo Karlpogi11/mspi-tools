@@ -44,6 +44,35 @@ function parseSerialLines(text: string): string[] {  const seen = new Set<string
   return out;
 }
 
+// Box location standard: {ZONE}-{NN} with overflow suffix per extra box.
+// B = batteries, A = displays. 2nd box of B-13 is B-13-B, 3rd is B-13-C.
+const LOCATION_PATTERN = /^[A-Z]-\d+(-[B-Z])?$/;
+
+// First letter of the box follows the part family: displays live in A,
+// batteries live in B. Keyword anywhere in the description decides.
+function locationPrefixForPart(part: { description?: string | null } | null): string | null {
+  const text = String(part?.description || '');
+  if (/\bbattery\b/i.test(text)) return 'B-';
+  if (/\bdisplay\b/i.test(text)) return 'A-';
+  return null;
+}
+
+function suggestLocation(raw: string): string | null {
+  const cleaned = raw.trim().toUpperCase().replace(/\s+/g, '');
+  if (!cleaned) return null;
+  if (LOCATION_PATTERN.test(cleaned)) return null;
+  // Legacy names: BB13 → B-13-B (2nd box), BC13 → B-13-C (3rd), B13 → B-13.
+  // Plain zone+number is tried first so a future zone C ("C13") is not
+  // mistaken for an overflow box.
+  let m = cleaned.match(/^([A-Z])(\d+)$/);
+  if (m) return `${m[1]}-${m[2]}`;
+  m = cleaned.match(/^([A-Z])B(\d+)$/);
+  if (m) return `${m[1]}-${m[2]}-B`;
+  m = cleaned.match(/^([A-Z])C(\d+)$/);
+  if (m) return `${m[1]}-${m[2]}-C`;
+  return null;
+}
+
 // EEE check: serials containing none of the part's EEE codes. Parts without
 // EEE codes can't be judged — never a mismatch.
 function serialsOutsideEee(part: { eee_code: string | null } | null, serials: string[]): string[] {
@@ -73,7 +102,12 @@ export default function PartsPage() {
   const [partNumber, setPartNumber] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [reference, setReference] = useState('');
+  // Single storage box, prefilled with the family letter (B = batteries,
+  // A = displays; 2nd box of B-13 is B-13-B). Type the number after it.
   const [boxLocation, setBoxLocation] = useState('');
+  const [movingUnitId, setMovingUnitId] = useState<number | null>(null);
+  const [movingValue, setMovingValue] = useState('');
+  const [movingBusy, setMovingBusy] = useState(false);
   const [date, setDate] = useState(todayIso());
   const [stock, setStock] = useState<PartsUnit[]>([]);
   const [movementHistory, setMovementHistory] = useState<PartsMovement[]>([]);
@@ -114,6 +148,18 @@ export default function PartsPage() {
     const timer = window.setTimeout(clearAllNotices, 5000);
     return () => window.clearTimeout(timer);
   }, [message, error]);
+  // Auto-prefix the box from the part family (A- for displays, B- for
+  // batteries) — only into an empty field, never over typed text, and never
+  // refilled after you delete it for the current part.
+  const activePartNumber = part?.part_number || null;
+  const prefixDismissedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activePartNumber || prefixDismissedFor.current === activePartNumber) return;
+    prefixDismissedFor.current = null;
+    if (boxLocation.trim()) return;
+    const prefix = locationPrefixForPart(part);
+    if (prefix) setBoxLocation(prefix);
+  }, [activePartNumber]);
   const fieldBorder = (hasError: boolean) => (hasError ? 'border-[#e11d48]' : 'border-[#d2d2d7]');
   const setFieldError = (field: 'scan' | 'serial' | 'unitSerial' | 'reference' | 'lines', message: string) => {
     setError('');
@@ -183,6 +229,8 @@ export default function PartsPage() {
       setSite(result.site); setSiteCode(result.site.code); setSiteToken(result.siteToken);
       setPartsSiteToken(result.siteToken);
       setSelectedPart(null); setPartUnits([]); setSelectedSite(null); setHighlightSerial(null); setMismatchList([]);
+      setBoxLocation('');
+      setSwitchingSite(false);
       setSwitchingSite(false);
       setMessage(`Connected to ${result.site.name}.`);
     } catch (err) { setError((err as Error).message); }
@@ -265,6 +313,23 @@ export default function PartsPage() {
         : await api.parts.resolve({ serial: value, partNumber: value, eee: value, siteCode: site.code });
       if (seq !== resolveSeq.current) return { part: null, unit: null }; // stale — a newer lookup won
       setPart(result.part);
+      // Family prefix straight into an empty box on every resolution.
+      // A bare "B-"/"A-" prefix left over from the previous part follows the
+      // new family; a full location is never overwritten — and if you deleted
+      // the prefix for this part, it stays deleted.
+      if (result.part) {
+        const prefix = locationPrefixForPart(result.part);
+        const code = result.part.part_number || null;
+        if (prefix && prefixDismissedFor.current !== code) {
+          prefixDismissedFor.current = null;
+          setBoxLocation((prev) => {
+            const trimmed = prev.trim().toUpperCase();
+            if (!trimmed) return prefix;
+            if (/^[AB]-$/.test(trimmed) && trimmed !== prefix.toUpperCase()) return prefix;
+            return prev;
+          });
+        }
+      }
       if (result.unit?.serial) { setSerial(result.unit.serial); setUnitSerial(result.unit.serial); }
       else if (!result.part || String(result.part.serialized).toUpperCase() !== 'N') setSerial(value);
       if (result.part) {
@@ -401,8 +466,16 @@ export default function PartsPage() {
 
   const manualSheetSync = async () => {
     try {
-      await syncSheet(false);
+      const result = await syncSheet(false);
       setSheetDrifted(false);
+      if (result && !result.skipped) {
+        const dupNote = result.duplicates
+          ? ` · skipped ${result.duplicates} duplicate row${result.duplicates === 1 ? '' : 's'}`
+          : '';
+        setMessage(`Sheet sync finished — ${result.parts.toLocaleString()} part${result.parts === 1 ? '' : 's'} updated${dupNote}.`);
+      } else if (result?.skipped) {
+        setMessage('Sheet sync ran moments ago — no changes to apply.');
+      }
     } catch (err) { setError((err as Error).message); }
   };
 
@@ -451,6 +524,28 @@ export default function PartsPage() {
     void loadPartUnits(partNumber);
   };
 
+  // Move stock between boxes without stocking in/out: quantity untouched,
+  // no movement written. Non-serialized buckets merge when the destination
+  // box already holds the same part.
+  const saveMove = async (unitId: number) => {
+    if (movingBusy) return;
+    const target = movingValue.trim();
+    if (!target) return;
+    setMovingBusy(true);
+    try {
+      const result = await api.parts.relocateUnit(unitId, target);
+      setMessage(result.message);
+      setMovingUnitId(null);
+      setMovingValue('');
+      if (selectedPart) await loadPartUnits(selectedPart, true);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setMovingBusy(false);
+    }
+  };
+
   const backToParts = () => { setSelectedPart(null); setSelectedSite(null); setPartUnits([]); };
   const backToSites = () => { setSelectedSite(null); };
 
@@ -461,6 +556,8 @@ export default function PartsPage() {
       : units;
     const shownUnits = onlyAvailable ? searchFiltered.filter((u) => u.status === 'in') : searchFiltered;
     const description = selectedPartDescription || units.find((u) => u.description)?.description || '';
+    // Same family prefix inside the Set-box editor when opening it empty.
+    const familyPrefix = locationPrefixForPart({ description }) || '';
     return (
     <>
       <div className="mt-4 flex items-start justify-between gap-3">
@@ -512,7 +609,46 @@ export default function PartsPage() {
                         {available ? 'Available' : 'Out'}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{available ? (u.location || '—') : '—'}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">
+                      {!available ? '—' : movingUnitId === u.id ? (
+                        <span className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            value={movingValue}
+                            onChange={(e) => setMovingValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); void saveMove(u.id); }
+                              if (e.key === 'Escape') { setMovingUnitId(null); setMovingValue(''); }
+                            }}
+                            placeholder="e.g. B-13-B"
+                            autoFocus
+                            aria-label={`New location for ${u.serial || u.part_number}`}
+                            className="h-8 w-28 rounded-lg border border-[#2563eb] bg-white px-2 text-[12px] text-[#1d1d1f] outline-none"
+                          />
+                          <button type="button" disabled={movingBusy || !movingValue.trim()} onClick={() => void saveMove(u.id)} className="rounded-lg bg-[#1d1d1f] px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-40">Save</button>
+                          <button type="button" onClick={() => { setMovingUnitId(null); setMovingValue(''); }} className="rounded-lg px-2 py-1 text-[11px] text-[#6e6e73] hover:bg-[#f5f5f7]">Cancel</button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5">
+                          {u.location || '—'}
+                          {!publicMode && (
+                            <button
+                              type="button"
+                              title={u.location ? `Change box for ${u.serial || u.part_number} (no stock change)` : `Set box for ${u.serial || u.part_number}`}
+                              onClick={() => { setMovingUnitId(u.id); setMovingValue(u.location || familyPrefix); }}
+                              className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[#2563eb] hover:bg-[#eff6ff]"
+                            >
+                              Set
+                            </button>
+                          )}
+                        </span>
+                      )}
+                      {movingUnitId === u.id && suggestLocation(movingValue) && (
+                        <span className="mt-1 block text-[10px] text-[#92400e]">
+                          Did you mean <span className="font-mono font-semibold">{suggestLocation(movingValue)}</span>?{' '}
+                          <button type="button" onClick={() => setMovingValue(suggestLocation(movingValue)!)} className="cursor-pointer font-semibold underline underline-offset-2">Use it</button>
+                        </span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-3 py-2 text-[#6e6e73]">{dateOnly(!available && u.stocked_out_at ? u.stocked_out_at : u.occurred_date)}</td>
                     <td className="px-3 py-2 text-[#6e6e73]">{!available && u.reference ? u.reference : '—'}</td>
                   </tr>
@@ -714,7 +850,7 @@ export default function PartsPage() {
           setError(`${result.imported} stocked in, ${failed.size} need attention — fix the lines and retry.`);
         } else {
           setMessage(result.message);
-          setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setBoxLocation(''); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setMismatchList([]); manualPartRef.current = false;
+          setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setMismatchList([]); manualPartRef.current = false;
         }
         await refresh();
         serialsRef.current?.focus();
@@ -730,7 +866,7 @@ export default function PartsPage() {
         location: boxLocation,
       });
       setMessage(result.message);
-      setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setBoxLocation(''); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setBulkErrors([]); setMismatchList([]); manualPartRef.current = false;
+      setScan(''); setSerial(''); setUnitSerial(''); setPartNumber(''); setPart(null); setQuantity('1'); setDate(todayIso()); setMasterMissing(null); setQuickDescription(''); setSerialLines(''); setBulkErrors([]); setMismatchList([]); manualPartRef.current = false;
       await refresh();
       scanRef.current?.focus();
     } catch (err) { setFieldError('serial', (err as Error).message); }
@@ -742,11 +878,11 @@ export default function PartsPage() {
     if (!reference.trim()) { setFieldError('reference', 'Reference number is required for stock out.'); return; }
     setBusy(true); setError(''); setMessage(''); setFieldErrors({}); setOutMissingSerial(null);
     try {
-      // No location on stock out: the unit loses its box when it leaves, and
-      // the OUT form has no location field (never reuse a stale Stock IN value).
+      // The OUT form has no location field; the Stock IN box keeps its value
+      // so the next stock-in reuses the same box without retyping.
       const result = await api.parts.stockOut({ siteCode: site.code, serial: serial.trim(), reference: reference.trim(), occurredDate: date });
       setMessage(result.message);
-      setScan(''); setSerial(''); setReference(''); setBoxLocation(''); setPart(null); setPartNumber(''); setDate(todayIso());
+      setScan(''); setSerial(''); setReference(''); setPart(null); setPartNumber(''); setDate(todayIso());
       await refresh();
       scanRef.current?.focus();
     } catch (err) {
@@ -833,6 +969,9 @@ export default function PartsPage() {
   const quickAddReady = Boolean(!part && partNumber.trim() && inSerials.length > 0);
   const stockInReady = tab === 'in' && (Boolean(part) && (Boolean(nonSerialized) || inSerials.length > 0) || quickAddReady);
   const stockOutReady = tab === 'out' && Boolean(serial.trim());
+  // Warn-only location check: anything may still be saved, but legacy names
+  // get a one-click correction toward the ZONE-NN(-X) standard.
+  const locationSuggestion = boxLocation.trim() ? suggestLocation(boxLocation) : null;
   const tabMovements = movementHistory.filter((movement) => movement.type === (tab === 'in' ? 'IN' : 'OUT'));
   const filteredHistory = tabMovements.filter((movement) => {
     const query = historySearch.trim().toLowerCase();
@@ -926,8 +1065,13 @@ export default function PartsPage() {
     [stockPartTotals, selectedPart]
   );
   const panelDepth = !selectedPart ? 0 : browsingAll ? (selectedSite ? 2 : 1) : 1;
-  // Search resets on every drill or site move — it always applies to one level.
-  useEffect(() => { setTableSearch(''); }, [selectedPart, selectedSite, site]);
+  // Search resets on every drill or site move — it always applies to one level —
+  // except an exact-serial jump, which keeps its text to isolate the jumped row.
+  const suppressSearchReset = useRef(false);
+  useEffect(() => {
+    if (suppressSearchReset.current) { suppressSearchReset.current = false; return; }
+    setTableSearch('');
+  }, [selectedPart, selectedSite, site]);
   // Exact serial typed in the panel search jumps straight to its table.
   useEffect(() => {
     const q = tableSearch.trim().toUpperCase();
@@ -935,6 +1079,9 @@ export default function PartsPage() {
     const hit = stock.find((u) => (u.serial || '').toUpperCase() === q);
     if (!hit) return;
     if (selectedPart === hit.part_number && (!browsingAll || selectedSite === hit.site_code)) return;
+    suppressSearchReset.current = true;
+    // An OUT serial would stay hidden behind the Available filter — force All.
+    setOnlyAvailable(false);
     openPartWorkbench(hit.part_number, hit.serial);
     if (browsingAll) setSelectedSite(hit.site_code);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -977,7 +1124,7 @@ export default function PartsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedPartSites, tableSearch]
   );
-  const changeSite = () => { manualPartRef.current = false; setSite(null); setSiteCode(''); setSiteToken(''); setPartsSiteToken(''); setCodeInput(''); setStock([]); setSelectedPart(null); setSelectedSite(null); setHighlightSerial(null); setMismatchList([]); setPartUnits([]); setGateDismissed(false); };
+  const changeSite = () => { manualPartRef.current = false; setSite(null); setSiteCode(''); setSiteToken(''); setPartsSiteToken(''); setCodeInput(''); setStock([]); setSelectedPart(null); setSelectedSite(null); setHighlightSerial(null); setMismatchList([]); setPartUnits([]); setGateDismissed(false); setBoxLocation(''); };
   const browseAll = () => {
     setSwitchingSite(false);
     // Drop the previous site's workbench/stock so nothing stale lingers.
@@ -1168,10 +1315,16 @@ export default function PartsPage() {
                       className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                   </label>
                 )}
-                <label className="block text-[11px] font-semibold text-[#3c3c43]">Location (box, e.g. Box 1)
-                  <input value={boxLocation} onChange={(e) => setBoxLocation(e.target.value)} placeholder="e.g. Box 1"
+                <label className="block text-[11px] font-semibold text-[#3c3c43]">Location (box — B = batteries, A = displays, 2nd box adds a letter: B-13-B)
+                  <input value={boxLocation} onChange={(e) => { const v = e.target.value; setBoxLocation(v); if (!v.trim()) prefixDismissedFor.current = part?.part_number || null; }} placeholder="e.g. B-13, B-13-B"
                     className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
+                {locationSuggestion && (
+                  <p className="rounded-xl border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] leading-4 text-[#92400e]">
+                    Did you mean <span className="font-mono font-semibold">{locationSuggestion}</span>?{' '}
+                    <button type="button" onClick={() => setBoxLocation(locationSuggestion)} className="cursor-pointer font-semibold underline underline-offset-2 hover:opacity-70">Use {locationSuggestion}</button>
+                  </p>
+                )}
                 <label className="block text-[11px] font-semibold text-[#3c3c43]">Date
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                     className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />

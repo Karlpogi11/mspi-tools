@@ -81,9 +81,10 @@ function BrandLogo() {
 export default function LeaderboardsPage() {
   const { user } = useAuth();
   const isAdmin = user?.roleName === 'Admin';
+  const isSuperAdmin = Boolean(user?.isSuperAdmin);
   const maxMonth = leaderboardMaxMonth();
   const [month, setMonth] = useState(maxMonth);
-  const [tab, setTab] = useState<Tab>('award');
+  const [tab, setTab] = useState<Tab>('board');
   const [data, setData] = useState<FrontlineRankings | null>(null);
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -267,13 +268,14 @@ export default function LeaderboardsPage() {
 
       <div className="leaderboard-screen-only mb-4 flex justify-center print:hidden" role="tablist" aria-label="Leaderboard views">
         <div className="inline-flex rounded-full bg-[#e8e8ed] p-1">
-          {(['award', 'board'] as const).map((value) => (
+          {((isSuperAdmin ? ['award', 'board'] : ['board']) as Tab[]).map((value) => (
             <button
               key={value}
               type="button"
               role="tab"
               aria-selected={tab === value}
               onClick={() => setTab(value)}
+              title={value === 'award' ? 'Show certificates (super admin only)' : undefined}
               className={`h-8 cursor-pointer rounded-full px-5 text-[13px] font-medium transition-colors ${tab === value ? 'bg-white text-[#1d1d1f] shadow-sm' : 'text-[#6e6e73] hover:text-[#1d1d1f]'}`}
             >
               {value === 'award' ? 'Award' : 'Leaderboard'}
@@ -284,7 +286,7 @@ export default function LeaderboardsPage() {
 
       {error && <p className="mb-4 text-[13px] text-[#b91c1c]">{error}</p>}
 
-      {tab === 'board' ? (
+      {tab === 'board' || !isSuperAdmin ? (
         <div ref={sheetRef} className="leaderboard-print-root space-y-5">
           {loading && !data ? (
             <A4Stage>
@@ -365,23 +367,18 @@ export default function LeaderboardsPage() {
               ) : champion && data ? (
                 <div className="flex flex-1 flex-col items-center justify-center">
                   <div className="mt-5 flex justify-center" aria-hidden="true">
-                    <span className="relative flex h-20 w-20 items-center justify-center">
-                      {isLiveMonth && <span className="leaderboard-ping absolute inline-flex h-full w-full rounded-full bg-[#c9a927]/25" />}
-                      <Medallion className="relative h-16 w-16" />
-                    </span>
+                    <Medallion className="h-16 w-16" />
                   </div>
                   <p className="mt-5 flex items-center justify-center gap-4 text-[19px] font-bold uppercase tracking-[0.24em] text-[#c9a927]">
                     <span className="h-px w-16 bg-[#c9a927]/60" aria-hidden="true" />
-                    CSO of the Month{isLiveMonth ? ' · race live' : ''}
+                    CSO of the Month{isLiveMonth ? ' · live' : ''}
                     <span className="h-px w-16 bg-[#c9a927]/60" aria-hidden="true" />
                   </p>
                   {isLiveMonth ? (
                     <>
-                      <div className="mt-5 h-14 w-[420px] max-w-full overflow-hidden rounded-2xl bg-[#f0f0f2]" role="status" aria-label="Winner hidden until month-end">
-                        <div className="leaderboard-shimmer h-full w-full" />
-                      </div>
+                      <div className="mt-5 h-14 w-[420px] max-w-full rounded-2xl bg-[#f0f0f2]" role="status" aria-label="Winner hidden until month-end" />
                       <p className="mx-auto mt-6 max-w-3xl text-balance text-[18px] leading-relaxed text-[#3c3c43]">
-                        The {monthLabel(month)} race is live — <strong className="font-semibold text-[#1d1d1f]">{data.total.toLocaleString()} assists</strong> across{' '}
+                        The {monthLabel(month)} tally is live — <strong className="font-semibold text-[#1d1d1f]">{data.total.toLocaleString()} assists</strong> across{' '}
                         <strong className="font-semibold text-[#1d1d1f]">{data.csoCount} {data.csoCount === 1 ? 'CSO' : 'CSOs'}</strong> so far. Winner revealed at month-end.
                       </p>
                     </>

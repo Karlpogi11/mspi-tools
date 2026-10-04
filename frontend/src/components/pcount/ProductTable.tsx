@@ -30,8 +30,8 @@ interface Props {
   onToggleAllProducts?: () => void;
   productSelectionDisabled?: boolean;
   suggestionByCode?: Record<string, ExclusionSuggestion>;
-  onQuickExclude?: (code: string) => void;
-  quickExcludingCode?: string | null;
+  onQuickStolen?: (code: string) => void;
+  quickStolenCode?: string | null;
   groupSuggested?: boolean;
 }
 
@@ -112,7 +112,7 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   </div>;
 }
 
-export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false, showProductSelection = false, selectedProductCodes = [], onToggleProduct, onToggleAllProducts, productSelectionDisabled = false, suggestionByCode, onQuickExclude, quickExcludingCode = null, groupSuggested = false }: Props) {
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false, showProductSelection = false, selectedProductCodes = [], onToggleProduct, onToggleAllProducts, productSelectionDisabled = false, suggestionByCode, onQuickStolen, quickStolenCode = null, groupSuggested = false }: Props) {
   const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
@@ -192,7 +192,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
   const shown = ALL_COLUMNS.filter(c => (visibleColumns ?? visible).includes(c.key) || (editMode && c.key === 'Is Match'));
   const selectableProducts = showProductSelection
     ? products.filter(product => product.status !== 'excluded')
-    : products.filter(product => product.status === selectableStatus);
+    : products.filter(product => product.status === selectableStatus && !(selectableStatus === 'missing' && String(product.notes || '').trim().toLowerCase() === 'stolen'));
   const selectedStatusSet = new Set(selectedStatusCodes);
   const allStatusSelected = selectableProducts.length > 0 && selectableProducts.every(product => selectedStatusSet.has(product.product_code));
   const selectableLabel = selectableStatus === 'missing' ? 'missing' : selectableStatus === 'excluded' ? 'excluded' : 'pending';
@@ -288,11 +288,10 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
               const isOver = p.counted_qty > p.system_qty;
               const flagged = doGroup && hasHistory(p.product_code);
               const showGroupHeader = doGroup && (rowIndex === 0 || hasHistory(displayed[rowIndex - 1].product_code) !== flagged);
-              const suggestion = suggestionByCode?.[p.product_code.trim().toUpperCase()];
-              const showSuggestion = Boolean(suggestion) && (p.status === 'missing' || p.status === 'excluded');
-              const suggestionParts: string[] = [];
-              if ((suggestion?.excludedSessions || 0) > 0) suggestionParts.push(`excluded ×${suggestion!.excludedSessions}`);
-              if ((suggestion?.missingSessions || 0) > 0) suggestionParts.push(`missing ×${suggestion!.missingSessions}`);
+              // Clean rows: no history words anywhere ("excluded ×N"/"missing ×N" removed).
+              // Only the Missing pill + Stolen badge + shortfall show under the code.
+              // Exclude uses the checkbox + bulk bar. Missing rows keep the Stolen action.
+              const showStolenAction = Boolean(onQuickStolen) && p.status === 'missing';
 
               return (
                 <Fragment key={p.id}>
@@ -322,7 +321,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                         <td key={col.key} className="px-4 py-3">
                           <div className="flex items-center gap-2 min-w-0">
                             {showProductSelection && p.status !== 'excluded' && <input type="checkbox" checked={selectedProductSet.has(p.product_code)} onChange={() => onToggleProduct?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={productSelectionDisabled} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} to complete`} />}
-                            {showStatusSelection && p.status === selectableStatus && <input type="checkbox" checked={selectedStatusSet.has(p.product_code)} onChange={() => onToggleStatus?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={excludingPending} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} for exclusion`} />}
+                            {showStatusSelection && p.status === selectableStatus && String(p.notes || '').trim().toLowerCase() !== 'stolen' && <input type="checkbox" checked={selectedStatusSet.has(p.product_code)} onChange={() => onToggleStatus?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={excludingPending} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} for exclusion`} />}
                             <span className={`w-2 h-2 rounded-full ${st.dot} flex-shrink-0`} />
                             <span className="font-mono text-[12px] text-[#1d1d1f] font-medium">{p.product_code}</span>
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${st.bg} ${
@@ -333,19 +332,21 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                               {st.label}
                             </span>
                           </div>
-                          {showSuggestion && (
+                          {showStolenAction && (
                             <div className="mt-1 flex items-center gap-2 pl-4 text-[10px] text-[#6e6e73]">
-                              <span title={suggestion?.description ? `${suggestion.description} — last seen ${suggestion.lastStatus || 'unknown'} in ${suggestion.lastSessionName || 'a recent session'}` : undefined}>
-                                {suggestionParts.join(' · ')} before
-                              </span>
-                              {p.status === 'missing' && onQuickExclude && (
+                              {String(p.notes || '').trim().toLowerCase() === 'stolen' ? (
+                                <span title="Marked stolen — stays in Missing with shortfall qty for the report" className="rounded-full bg-[#fef2f2] px-2 py-0.5 font-semibold text-[#b91c1c]">
+                                  Stolen ✓
+                                </span>
+                              ) : (
                                 <button
                                   type="button"
-                                  disabled={quickExcludingCode === p.product_code}
-                                  onClick={(e) => { e.stopPropagation(); onQuickExclude(p.product_code); }}
-                                  className="cursor-pointer rounded-full border border-[#d2d2d7] bg-white px-2 py-0.5 font-semibold text-[#1d1d1f] hover:bg-[#f5f5f7] disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={quickStolenCode === p.product_code}
+                                  onClick={(e) => { e.stopPropagation(); onQuickStolen!(p.product_code); }}
+                                  title="Mark this missing row as stolen (stays in Missing, remark flows to report)"
+                                  className="cursor-pointer rounded-full border border-[#fecaca] bg-[#fef2f2] px-2 py-0.5 font-semibold text-[#b91c1c] hover:bg-[#fee2e2] disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                  {quickExcludingCode === p.product_code ? 'Excluding…' : 'Exclude'}
+                                  {quickStolenCode === p.product_code ? 'Marking…' : 'Stolen'}
                                 </button>
                               )}
                             </div>
@@ -367,6 +368,7 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                     }
                     if (col.key === 'Qty') {
                       const isEditing = editingCode === p.product_code;
+                      const shortfall = p.status === 'missing' ? Math.max(0, (Number(p.system_qty) || 0) - (Number(p.counted_qty) || 0)) : 0;
                       return (
                         <td
                           key={col.key}
@@ -418,6 +420,11 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                               >
                                 {p.counted_qty}
                               </button>
+                            )}
+                            {shortfall > 0 && !isEditing && (
+                              <span title={`${shortfall} pcs short (system ${p.system_qty} − actual ${p.counted_qty})`} className="rounded-full bg-[#fef3c7] px-1.5 py-px text-[10px] font-semibold text-[#b45309]">
+                                −{shortfall}
+                              </span>
                             )}
                             {!readOnly && !isEditing && (
                               <button

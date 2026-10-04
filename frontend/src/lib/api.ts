@@ -637,6 +637,7 @@ export const api = {
     stockIn: (payload: { siteCode: string; partNumber: string; serial?: string; serials?: string[]; eee?: string; quantity?: number; occurredDate?: string; location?: string }) => request<{ message: string; imported?: number; failed?: number; errors?: { serial: string; error: string }[] }>('/parts/stock/in', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
     ensureMaster: (payload: { part_number: string; description: string; serialized?: string }) => request<{ item: PartsMasterItem; created: boolean }>('/parts/master/ensure', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
     stockOut: (payload: { siteCode: string; serial?: string; partNumber?: string; quantity?: number; reference: string; occurredDate?: string; location?: string }) => request<{ message: string }>('/parts/stock/out', { method: 'POST', headers: siteHeaders(), body: JSON.stringify(payload) }),
+    relocateUnit: (unitId: number, location: string) => request<{ message: string; location: string }>('/parts/units/relocate', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ unitId, location }) }),
     importIn: (siteCode: string, rows: { date: string; partNumber: string; serial: string }[]) => request<{ imported: number; failed: number; errors: { row: number; error: string }[] }>('/parts/import/in', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ siteCode, rows }) }),
     importOut: (siteCode: string, rows: { date: string; serial: string; reference: string; partNumber: string }[]) => request<{ imported: number; failed: number; errors: { row: number; error: string }[] }>('/parts/import/out', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ siteCode, rows }) }),
     downloadTemplate: async (kind: 'in' | 'out') => {
@@ -654,7 +655,7 @@ export const api = {
     saveSheetConfig: (spreadsheetId: string, spreadsheetName: string, stockInSheetName: string, stockOutSheetName: string) => request<{ message: string }>('/parts/sheets/config', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, stockInSheetName, stockOutSheetName }) }),
     sheetList: (spreadsheetId: string) => request<{ title: string; sheets: string[] }>(`/parts/sheets/list?spreadsheetId=${encodeURIComponent(spreadsheetId)}`),
     retrySheet: () => request<{ synced: number; remaining: number }>('/parts/sheets/retry', { method: 'POST' }),
-    syncFromSheet: (siteCode: string, quiet = false) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[]; skipped?: boolean }>('/parts/sheets/sync', { method: 'POST', body: JSON.stringify({ siteCode, quiet }) }),
+    syncFromSheet: (siteCode: string, quiet = false) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[]; parts: number; skipped?: boolean }>('/parts/sheets/sync', { method: 'POST', body: JSON.stringify({ siteCode, quiet }) }),
     sheetDrift: () => request<PartsSheetDrift>('/parts/sheets/drift'),
   },
 
@@ -711,7 +712,7 @@ export const api = {
     delete: (id: number) =>
       request<{ message: string }>(`/pcount/sessions/${id}`, { method: 'DELETE' }),
     bulkUpdate: (id: number, codes: string[], action: 'complete' | 'exclude') =>
-      request<{ action: string; updated: number; missingCodes: string[] }>(`/pcount/sessions/${id}/products/bulk`, {
+      request<{ action: string; updated: number; missingCodes: string[]; skippedMissing?: string[] }>(`/pcount/sessions/${id}/products/bulk`, {
         method: 'POST',
         body: JSON.stringify({ codes, action }),
       }),
@@ -757,10 +758,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ product_code }),
       }),
-    importSystem: (sessionId: number, products: unknown[], display_columns: string[], replace = false) =>
+    importSystem: (sessionId: number, products: unknown[], display_columns: string[], replace = false, excluded_codes: string[] = [], default_counts: { code: string; counted: number }[] = []) =>
       request<{ message: string; count: number }>(`/pcount/sessions/${sessionId}/import-system${replace ? '?replace=true' : ''}`, {
         method: 'POST',
-        body: JSON.stringify({ products, display_columns }),
+        body: JSON.stringify({ products, display_columns, excluded_codes, default_counts }),
       }),
     importCount: (sessionId: number, products: unknown[]) =>
       request<{ message: string }>(`/pcount/sessions/${sessionId}/import-count`, {

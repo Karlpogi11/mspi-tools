@@ -303,9 +303,10 @@ export async function findSessionByCode(joinCode: string): Promise<SessionRow | 
 async function dbSessionWithProgress(s: typeof pcountSessions.$inferSelect): Promise<SessionWithProgress> {
   const db = getDb();
   const pool = getDbPool();
+  // Excluded rows are intentionally removed: ignored in total and never counted as checked/missing.
   const [rows] = await pool.execute(
-    'SELECT COUNT(*) as total, SUM(CASE WHEN status != ? THEN 1 ELSE 0 END) as checked FROM pcount_products WHERE session_id = ?',
-    ['pending', s.id]
+    `SELECT SUM(CASE WHEN status != 'excluded' THEN 1 ELSE 0 END) as total, SUM(CASE WHEN status IN ('matched', 'missing') THEN 1 ELSE 0 END) as checked FROM pcount_products WHERE session_id = ?`,
+    [s.id]
   );
   const row = (rows as any[])[0];
   const total = Number(row?.total || 0);
@@ -332,8 +333,8 @@ export async function listSessions(userId: number): Promise<SessionWithProgress[
   const sessions = Array.from(memSessions.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
   return sessions.map(s => {
     const prods = Array.from(memProducts.values()).filter(p => p.session_id === s.id);
-    const total = prods.length;
-    const checked = prods.filter(p => p.status !== 'pending').length;
+    const total = prods.filter(p => p.status !== 'excluded').length;
+    const checked = prods.filter(p => p.status === 'matched' || p.status === 'missing').length;
     return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: s.created_by === userId || memMembers.get(s.id)?.has(userId) || false };
   });
 }
@@ -374,8 +375,8 @@ export async function searchSessions(q: string, userId: number): Promise<Session
   if (byCode && !sessions.some(s => s.id === byCode.id)) sessions.push(byCode);
   return sessions.map(s => {
     const prods = Array.from(memProducts.values()).filter(p => p.session_id === s.id);
-    const total = prods.length;
-    const checked = prods.filter(p => p.status !== 'pending').length;
+    const total = prods.filter(p => p.status !== 'excluded').length;
+    const checked = prods.filter(p => p.status === 'matched' || p.status === 'missing').length;
     return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: memMembers.get(s.id)?.has(userId) || s.created_by === userId };
   });
 }
@@ -550,8 +551,8 @@ export async function getSession(id: number, userId?: number): Promise<SessionWi
   const row = memSessions.get(id);
   if (!row) return null;
   const prods = Array.from(memProducts.values()).filter(p => p.session_id === id);
-  const total = prods.length;
-  const checked = prods.filter(p => p.status !== 'pending').length;
+  const total = prods.filter(p => p.status !== 'excluded').length;
+  const checked = prods.filter(p => p.status === 'matched' || p.status === 'missing').length;
   return { ...row, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(id) || [], is_owner: userId !== undefined && row.created_by === userId, joined: userId !== undefined && (row.created_by === userId || memMembers.get(id)?.has(userId)) };
 }
 
@@ -751,21 +752,26 @@ export async function bulkUpdateProducts(
   sessionId: number,
   codes: string[],
   action: 'complete' | 'exclude',
-): Promise<{ products: ProductWithExtra[]; missingCodes: string[] }> {
+): Promise<{ products: ProductWithExtra[]; missingCodes: string[]; skippedMissing: string[] }> {
   const requested = Array.from(new Set(codes.map(code => code.trim()).filter(Boolean)));
-  if (requested.length === 0) return { products: [], missingCodes: [] };
+  if (requested.length === 0) return { products: [], missingCodes: [], skippedMissing: [] };
 
   if (dbAvailable) {
     const db = getDb();
     const rows = await db
-      .select({ product_code: pcountProducts.product_code })
+      .select({ product_code: pcountProducts.product_code, status: pcountProducts.status })
       .from(pcountProducts)
       .where(eq(pcountProducts.session_id, sessionId));
-    const actualByNormalizedCode = new Map(rows.map(row => [row.product_code.trim().toUpperCase(), row.product_code]));
+    const actualByNormalizedCode = new Map(rows.map(row => [row.product_code.trim().toUpperCase(), row]));
     const matchedCodes = requested
-      .map(code => actualByNormalizedCode.get(code.toUpperCase()))
+      .map(code => actualByNormalizedCode.get(code.toUpperCase())?.product_code)
       .filter((code): code is string => Boolean(code));
     const matchedSet = new Set(matchedCodes);
+    // Completing must never force-match a short row — Missing stays Missing.
+    const skippedMissing = action === 'complete'
+      ? matchedCodes.filter(code => actualByNormalizedCode.get(code.toUpperCase())?.status === 'missing')
+      : [];
+    const skippedSet = new Set(skippedMissing);
 
     if (matchedCodes.length > 0) {
       if (action === 'complete') {
@@ -775,7 +781,7 @@ export async function bulkUpdateProducts(
         }).where(and(
           eq(pcountProducts.session_id, sessionId),
           inArray(pcountProducts.product_code, matchedCodes),
-          sql`${pcountProducts.status} <> 'excluded'`,
+          sql`${pcountProducts.status} NOT IN ('excluded', 'missing')`,
         ));
       } else {
         await db.update(pcountProducts).set({ status: 'excluded' }).where(and(
@@ -788,9 +794,10 @@ export async function bulkUpdateProducts(
     const updatedCodeSet = new Set(matchedCodes);
     return {
       products: matchedCodes.length > 0
-        ? (await dbListProducts(sessionId)).filter(product => updatedCodeSet.has(product.product_code))
+        ? (await dbListProducts(sessionId)).filter(product => updatedCodeSet.has(product.product_code) && !skippedSet.has(product.product_code))
         : [],
-      missingCodes: requested.filter(code => !matchedSet.has(actualByNormalizedCode.get(code.toUpperCase()) || '')),
+      missingCodes: requested.filter(code => !matchedSet.has(actualByNormalizedCode.get(code.toUpperCase())?.product_code || '')),
+      skippedMissing,
     };
   }
 
@@ -801,11 +808,17 @@ export async function bulkUpdateProducts(
   );
   const updatedProducts: ProductWithExtra[] = [];
   const matchedCodes = new Set<string>();
+  const skippedMissing: string[] = [];
   for (const code of requested) {
     const product = actualByNormalizedCode.get(code.toUpperCase());
     if (!product) continue;
     matchedCodes.add(product.product_code);
     if (action === 'complete' && product.status !== 'excluded') {
+      // Completing must never force-match a short row — Missing stays Missing.
+      if (product.status === 'missing') {
+        skippedMissing.push(product.product_code);
+        continue;
+      }
       product.counted_qty = product.system_qty;
       product.status = 'matched';
     } else if (action === 'exclude') {
@@ -818,11 +831,25 @@ export async function bulkUpdateProducts(
   return {
     products: updatedProducts,
     missingCodes: requested.filter(code => !matchedCodes.has(actualByNormalizedCode.get(code.toUpperCase())?.product_code || '')),
+    skippedMissing,
   };
 }
 
-export async function createProducts(sessionId: number, products: { product_code: string; description: string; system_qty: number; extra?: Record<string, string> }[]): Promise<number> {
+export async function createProducts(sessionId: number, products: { product_code: string; description: string; system_qty: number; extra?: Record<string, string> }[], opts?: { excludedCodes?: string[]; defaultCounts?: { code: string; counted: number }[] }): Promise<number> {
   if (products.length === 0) return 0;
+  // Import-time excludes arrive as visible Excluded rows (never silently dropped),
+  // so the Excluded tab + counts reflect the default list.
+  const excludedSet = new Set(
+    (opts?.excludedCodes || []).map(code => code.trim().toUpperCase()).filter(Boolean),
+  );
+  // Default missing counts (known stolen rows): arrive already counted + marked
+  // stolen, so their status lands in Missing automatically on System Import.
+  const defaultCountByCode = new Map<string, number>();
+  for (const row of opts?.defaultCounts || []) {
+    const code = String((row as { code?: unknown }).code || '').trim().toUpperCase();
+    const counted = Math.max(0, Math.floor(Number((row as { counted?: unknown }).counted) || 0));
+    if (code && !defaultCountByCode.has(code)) defaultCountByCode.set(code, counted);
+  }
 
   if (dbAvailable) {
     const pool = getDbPool();
@@ -839,14 +866,27 @@ export async function createProducts(sessionId: number, products: { product_code
       for (let i = 0; i < products.length; i += batchSize) {
         const batch = products.slice(i, i + batchSize);
 
-        const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
+        const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?)').join(',');
         const params: any[] = [];
         for (const p of batch) {
-          params.push(sessionId, p.product_code, p.description || '', parseCategory(p.product_code, p.extra), p.system_qty || 0, 0, 'pending');
+          const normalized = p.product_code.trim().toUpperCase();
+          const isExcluded = excludedSet.has(normalized);
+          const seeded = defaultCountByCode.get(normalized);
+          // Only genuinely short rows arrive as Missing + stolen. A seeded count that
+          // already covers system arrives as a plain Matched row (no stolen note).
+          const isMissingSeed = !isExcluded && seeded !== undefined && seeded < (p.system_qty || 0);
+          const status = isExcluded
+            ? 'excluded'
+            : seeded !== undefined
+              ? (seeded >= (p.system_qty || 0) ? 'matched' : 'missing')
+              : 'pending';
+          const counted = isExcluded ? 0 : (seeded ?? 0);
+          const notes = isMissingSeed ? 'stolen' : null;
+          params.push(sessionId, p.product_code, p.description || '', parseCategory(p.product_code, p.extra), p.system_qty || 0, counted, status, notes);
         }
 
         const [rows] = await conn.execute(
-          `INSERT INTO pcount_products (session_id,product_code,description,category,system_qty,counted_qty,status) VALUES ${placeholders} RETURNING id,product_code`,
+          `INSERT INTO pcount_products (session_id,product_code,description,category,system_qty,counted_qty,status,notes) VALUES ${placeholders} RETURNING id,product_code`,
           params
         );
 
@@ -887,16 +927,20 @@ export async function createProducts(sessionId: number, products: { product_code
   } else {
     for (const p of products) {
       const id = nextProductId++;
+      const normalized = p.product_code.trim().toUpperCase();
+      const isExcluded = excludedSet.has(normalized);
+      const seededCount = defaultCountByCode.get(normalized);
+      const isMissingSeed = !isExcluded && seededCount !== undefined && seededCount < (p.system_qty || 0);
       memProducts.set(id, {
         id, session_id: sessionId,
         product_code: p.product_code,
         description: p.description || '',
         category: parseCategory(p.product_code, p.extra),
         system_qty: p.system_qty || 0,
-        counted_qty: 0,
+        counted_qty: isExcluded ? 0 : (seededCount ?? 0),
         adjusted_qty: null,
-        status: 'pending',
-        notes: null,
+        status: isExcluded ? 'excluded' : seededCount !== undefined ? (seededCount >= (p.system_qty || 0) ? 'matched' : 'missing') : 'pending',
+        notes: isMissingSeed ? 'stolen' : null,
       });
       if (p.extra) {
         const extras: Record<string, string> = {};

@@ -347,7 +347,7 @@ export async function syncFromSheet(
   siteId: number,
   siteCode: string,
   siteName: string
-): Promise<{ imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[] }> {
+): Promise<{ imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[]; parts: number }> {
   const cfg = await sheetConfig();
   if (!cfg?.spreadsheet_id) throw new Error('No spreadsheet configured.');
   if (!cfg.stock_in_sheet_name || !cfg.stock_out_sheet_name) throw new Error('Stock-In and Stock-out tabs are not configured.');
@@ -363,13 +363,29 @@ export async function syncFromSheet(
   interface ReplayRow { date: string; type: 'IN' | 'OUT'; partNumber: string; serial: string; reference: string; location: string; quantity: number; order: number }
   const replay: ReplayRow[] = [];
 
+  // Box location standard: {ZONE}-{NN} with letter suffix per overflow box
+  // (B = batteries, A = displays; 2nd box of B-13 is B-13-B). Legacy sheet
+  // names (BB13, B13) normalize to the standard so history stays consistent.
+  const normalizeLocation = (raw: string): string => {
+    const cleaned = raw.trim().toUpperCase().replace(/\s+/g, '');
+    if (!cleaned) return '';
+    if (/^[A-Z]-\d+(-[B-Z])?$/.test(cleaned)) return cleaned;
+    let m = cleaned.match(/^([A-Z])(\d+)$/);
+    if (m) return `${m[1]}-${m[2]}`;
+    m = cleaned.match(/^([A-Z])B(\d+)$/);
+    if (m) return `${m[1]}-${m[2]}-B`;
+    m = cleaned.match(/^([A-Z])C(\d+)$/);
+    if (m) return `${m[1]}-${m[2]}-C`;
+    return raw.trim();
+  };
+
   inRows.forEach((r, i) => {
     const date = parseSheetDate(r[0]);
     const partNumber = String(r[1] ?? '').trim();
     const serial = String(r[2] ?? '').trim().toUpperCase();
     if (!date || !partNumber) return;
     const qtyRaw = Number(String(r[4] ?? '').replace(/[^\d.-]/g, ''));
-    replay.push({ date, type: 'IN', partNumber, serial, reference: '', location: String(r[7] ?? '').trim(), quantity: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1, order: i });
+    replay.push({ date, type: 'IN', partNumber, serial, reference: '', location: normalizeLocation(String(r[7] ?? '')), quantity: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1, order: i });
   });
 
   outRows.forEach((r, i) => {
@@ -495,6 +511,63 @@ export async function syncFromSheet(
 
   // ---- Bulk write: delete + batched multi-row inserts ----
   const pool = getDbPool();
+  // Snapshot current stock first so the toast reports only parts whose counts
+  // actually changed — not every part replayed from the sheet.
+  const [existingRows] = await pool.query(
+    'SELECT part_number, serial, quantity, status, location FROM parts_units WHERE site_id = ?',
+    [siteId]
+  );
+  const sigOf = (rows: { partNumber: string; serial: string | null; quantity: number; status: string; location: string | null }[]) => {
+    const byPart = new Map<string, string[]>();
+    for (const r of rows) {
+      const list = byPart.get(r.partNumber) || [];
+      list.push(`${r.serial || ''}|${Number(r.quantity) || 0}|${r.status}|${r.location || ''}`);
+      byPart.set(r.partNumber, list);
+    }
+    const sig = new Map<string, string>();
+    for (const [part, keys] of byPart) sig.set(part, keys.sort().join(';'));
+    return sig;
+  };
+  const beforeSig = sigOf((existingRows as Array<{ part_number: string; serial: string | null; quantity: number; status: string; location: string | null }>).map(r => ({
+    partNumber: String(r.part_number || ''),
+    serial: r.serial,
+    quantity: Number(r.quantity) || 0,
+    status: String(r.status || ''),
+    location: r.location,
+  })));
+  // Preserve web-set box locations across the rebuild: a rebuilt unit keeps
+  // its previous location when the sheet row carries none. Sheet locations
+  // always win when present. Buckets reuse their part's location only when
+  // it is unambiguous (exactly one boxed location for that part).
+  const serialLoc = new Map<string, string>();
+  const partLocs = new Map<string, Set<string>>();
+  for (const r of (existingRows as Array<{ part_number: string; serial: string | null; location: string | null }>)) {
+    const loc = String(r.location || '').trim();
+    if (!loc) continue;
+    if (r.serial) {
+      if (!serialLoc.has(r.serial.toUpperCase())) serialLoc.set(r.serial.toUpperCase(), loc);
+    } else {
+      const set = partLocs.get(String(r.part_number || '')) || new Set<string>();
+      set.add(loc);
+      partLocs.set(String(r.part_number || ''), set);
+    }
+  }
+  for (const u of units.values()) {
+    if (u.location) continue;
+    if (u.serial) {
+      const prev = serialLoc.get(u.serial.toUpperCase());
+      if (prev) u.location = prev;
+    } else {
+      const locs = partLocs.get(u.partNumber);
+      if (locs && locs.size === 1) u.location = [...locs][0];
+    }
+  }
+  const afterSig = sigOf([...units.values()]);
+  const changedParts = new Set([...beforeSig.keys(), ...afterSig.keys()]);
+  let partsUpdated = 0;
+  for (const part of changedParts) {
+    if (beforeSig.get(part) !== afterSig.get(part)) partsUpdated++;
+  }
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -526,5 +599,12 @@ export async function syncFromSheet(
   } finally {
     conn.release();
   }
-  return { imported: movements.length, ins, outs, duplicates, duplicateSerials: [...duplicateSerials] };
+  return {
+    imported: movements.length,
+    ins,
+    outs,
+    duplicates,
+    duplicateSerials: [...duplicateSerials],
+    parts: partsUpdated,
+  };
 }

@@ -9,7 +9,7 @@ interface Props {
   onCountChange: (code: string, count: number) => void;
   onStatusChange: (code: string, status: string) => void;
   onNotesChange: (code: string, notes: string) => void;
-  stats: { total: number; checked: number; matched: number; missing: number; pending: number };
+  stats: { total: number; checked: number; matched: number; missing: number; pending: number; excluded?: number; shortfall?: number };
   progress: number;
 }
 
@@ -50,9 +50,12 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[13px]">
             <div><span className="font-semibold text-[#1d1d1f]">{stats.checked}</span> <span className="text-[#6e6e73]">/ {stats.total} checked</span></div>
             <div><span className="font-semibold text-[#16a34a]">{stats.matched}</span> <span className="text-[#6e6e73]">matched</span></div>
-            <div><span className="font-semibold text-[#d97706]">{stats.missing}</span> <span className="text-[#6e6e73]">missing</span></div>
+            <div><span className="font-semibold text-[#d97706]">{stats.missing}</span> <span className="text-[#6e6e73]">missing{(stats.shortfall || 0) > 0 ? ` · ${stats.shortfall} pcs short` : ''}</span></div>
             <div><span className="font-semibold text-[#6e6e73]">{stats.pending}</span> <span className="text-[#6e6e73]">pending</span></div>
           </div>
+          {(stats.excluded || 0) > 0 && (
+            <p className="mt-1 text-[11px] text-[#6e6e73]">{stats.excluded} excluded — kept separate, ignored in progress.</p>
+          )}
         </div>
       </div>
 
@@ -128,6 +131,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
                 <option value="pending">Pending</option>
                 <option value="matched">Matched</option>
                 <option value="missing">Missing</option>
+                <option value="excluded">Excluded</option>
               </select>
               <button
                 onClick={() => onRecount(lastScan.product_code)}
