@@ -9,15 +9,20 @@ interface CameraScanSheetProps {
 }
 
 // How many consecutive frames must agree before a serial auto-fills.
-const STABLE_HITS = 3;
-const NATIVE_POLL_MS = 350;
+const STABLE_HITS = 2;
+const NATIVE_POLL_MS = 250;
+
+// 1D formats actually printed on part-box labels. The native detector is
+// only used when it can see at least one of these — e.g. iOS Safari may
+// expose QR only, which must fall through to ZXing instead of going blind.
+const ONE_D_FORMATS = [
+  'code_128', 'code_39', 'code_93',
+  'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar',
+];
 
 // Broad 1D coverage for part-box labels, plus QR/DataMatrix in case a
 // vendor prints the serial as 2D. Unknown names are probe-filtered.
-const WANTED_FORMATS = [
-  'code_128', 'code_39', 'code_93', 'ean_13', 'ean_8',
-  'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code', 'data_matrix',
-];
+const WANTED_FORMATS = [...ONE_D_FORMATS, 'qr_code', 'data_matrix'];
 
 type CameraError = 'denied' | 'missing' | 'insecure' | 'failed';
 
@@ -122,21 +127,31 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
         video.srcObject = stream;
         try { await video.play(); } catch { /* Autoplay with gesture is enough. */ }
       }
-      // Torch when the hardware offers it (dim podium lighting).
+      // Torch when the hardware offers it (dim podium lighting), and lock
+      // continuous focus/exposure for close-up labels (best-effort).
       try {
         const track = stream.getVideoTracks()[0];
         const caps = (track?.getCapabilities?.() || {}) as { torch?: boolean };
         if (track && caps.torch) setTorchReady(true);
-      } catch { /* Torch probe is optional. */ }
+        if (track) {
+          await track.applyConstraints({
+            advanced: [{ focusMode: 'continuous', exposureMode: 'continuous' }],
+          } as unknown as MediaTrackConstraints);
+        }
+      } catch { /* Focus/torch probes are optional. */ }
       if (cancelled) return;
 
       const NativeDetector = (window as unknown as { BarcodeDetector?: new (opts?: { formats?: string[] }) => { detect(v: HTMLVideoElement): Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
       if (NativeDetector) {
-        let detector;
+        let detector = null;
         try {
           const supported = await (NativeDetector as unknown as { getSupportedFormats?: () => Promise<string[]> }).getSupportedFormats?.();
           const formats = supported?.length ? WANTED_FORMATS.filter((f) => supported.includes(f)) : WANTED_FORMATS;
-          detector = new NativeDetector({ formats });
+          // A native detector that only sees 2D codes is blind to box
+          // labels — skip it so ZXing gets the frames instead.
+          if (formats.some((f) => ONE_D_FORMATS.includes(f))) {
+            detector = new NativeDetector({ formats });
+          }
         } catch {
           try { detector = new NativeDetector(); } catch { detector = null; }
         }
@@ -155,11 +170,19 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
           return;
         }
       }
-      // Fallback: bundled ZXing decoder (heavier, full 1D coverage).
+      // Fallback: bundled ZXing decoder. Limited to label-plausible formats
+      // and a short inter-scan delay so close-up 1D sweeps stay fast.
       try {
-        const { BrowserMultiFormatReader } = await import('@zxing/browser');
+        const { BrowserMultiFormatReader, BarcodeFormat } = await import('@zxing/browser');
         if (cancelled || acceptedRef.current) return;
-        const reader = new BrowserMultiFormatReader();
+        const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 120 });
+        reader.possibleFormats = [
+          BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
+          BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
+          BarcodeFormat.ITF, BarcodeFormat.CODABAR,
+          BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX,
+        ];
         controlsRef.current = await reader.decodeFromVideoDevice(
           undefined,
           video || undefined,
@@ -182,6 +205,19 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
       await track.applyConstraints({ advanced: [{ torch: next }] } as unknown as MediaTrackConstraints);
       setTorchOn(next);
     } catch { /* Leave the toggle as-is when hardware refuses. */ }
+  };
+
+  // Tap the viewfinder to kick autofocus — close-up labels often sit
+  // inside the blur zone until focus hunts again.
+  const refocus = async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ focusMode: 'manual' }] } as unknown as MediaTrackConstraints);
+      window.setTimeout(() => {
+        track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as unknown as MediaTrackConstraints).catch(() => undefined);
+      }, 250);
+    } catch { /* Best effort. */ }
   };
 
   if (!open) return null;
@@ -219,11 +255,15 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
         <>
           <div className="px-4">
             <div className="overflow-hidden rounded-2xl bg-black">
-              <video ref={videoRef} playsInline muted autoPlay
+              <video ref={videoRef} playsInline muted autoPlay onClick={() => void refocus()}
                 className="aspect-[4/3] w-full object-cover" />
             </div>
             <p className="mt-2 text-center text-[11px] text-white/70">
-              Point at the serial barcode — part and aux codes are ignored.
+              {serials.length
+                ? 'Serial found — hold steady…'
+                : parts.length
+                  ? 'Part barcode seen — move to the serial barcode.'
+                  : 'Point at the serial barcode — tap the video to refocus.'}
             </p>
           </div>
           <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
@@ -233,12 +273,16 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
                 {s}
               </button>
             ))}
-            {tab === 'in' && parts.map((p) => (
+            {parts.map((p) => (tab === 'in' ? (
               <button key={p} type="button" onClick={() => accept(p)}
                 className="rounded-xl border border-white/20 bg-transparent px-3 py-2 text-left text-[12px] text-white/80">
                 Part {p} — use for part search
               </button>
-            ))}
+            ) : (
+              <p key={p} className="rounded-xl border border-white/20 px-3 py-2 text-[12px] text-white/50">
+                Part {p} — not a serial
+              </p>
+            )))}
           </div>
           <div className="flex gap-2 px-4 pb-5">
             {torchReady && (
