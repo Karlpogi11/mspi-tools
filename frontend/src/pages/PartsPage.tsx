@@ -318,11 +318,12 @@ export default function PartsPage() {
   const doResolve = async (rawValue: string, field: 'scan' | 'serial' = 'scan'): Promise<{ part: PartsMasterItem | null; unit: PartsUnit | null }> => {
     const value = rawValue.trim().toUpperCase();
     if (!value || !site) return { part: null, unit: null };
-    // Smart-scan gate: aux barcodes (lot codes like 2602+H0X, text like
-    // CHINA MAINLAND) never resolve, and part numbers never resolve as
-    // serials in Stock Out — drop the burst quietly instead of mis-filing.
+    // Smart-scan gate: the scan box is serial-only. Aux barcodes (lot
+    // codes like 2602+H0X, text like CHINA MAINLAND) and part numbers
+    // (661-44796) never resolve from a scan — the burst is dropped quietly
+    // instead of mis-filing. Parts are locked by tapping a suggestion.
     const kind = classifyScanValue(value);
-    if (kind === 'aux' || (kind === 'part-number' && tab === 'out')) {
+    if (kind === 'aux' || kind === 'part-number') {
       // Drop the burst and reset the box for the next pull: Stock Out
       // keeps no lock, so its card goes too. Focus is returned so the
       // next scan lands in this box even on scanners with a Tab suffix.
@@ -404,18 +405,49 @@ export default function PartsPage() {
     finally { if (seq === resolveSeq.current) setResolving(false); }
   };
 
+  // Explicit part lock from a tapped suggestion — the scan box is
+  // serial-only, so this bypasses doResolve's scan gate and fills the
+  // locked part directly (same end state as the old part-number search).
+  const lockPart = (item: PartsMasterItem) => {
+    setPart(item);
+    setPartNumber(item.part_number);
+    setMasterMissing(null);
+    manualPartRef.current = false;
+    setScan(''); setSerial(''); setUnitSerial('');
+    setDate(todayIso());
+    const prefix = locationPrefixForPart(item);
+    if (prefix) {
+      prefixDismissedFor.current = null;
+      setBoxLocation((prev) => {
+        const trimmed = prev.trim().toUpperCase();
+        if (!trimmed) return prefix;
+        if (/^[AB]-$/.test(trimmed) && trimmed !== prefix.toUpperCase()) return prefix;
+        return prev;
+      });
+    }
+    setTimeout(() => serialsRef.current?.focus(), 0);
+  };
+
   const pickSuggestion = (item: PartsMasterItem) => {
-    setScan(item.part_number);
     rememberSearch(item.part_number);
     setShowSuggest(false);
-    void doResolve(item.part_number, 'scan');
+    setScanHint('');
+    lockPart(item);
   };
 
   const pickSavedSearch = (value: string) => {
-    setScan(value);
     rememberSearch(value);
     setShowSuggest(false);
-    void doResolve(value, 'scan');
+    setScanHint('');
+    // Saved searches may be part numbers (lock directly) or serials
+    // (resolve normally) — an exact master match decides.
+    void (publicMode ? api.partsPublic.master(value, 50) : api.parts.master(value, 50))
+      .then((r) => {
+        const exact = r.items.find((item) => item.part_number.toUpperCase() === value.trim().toUpperCase());
+        if (exact) lockPart(exact);
+        else { setScan(value); void doResolve(value, 'scan'); }
+      })
+      .catch(() => { setScan(value); void doResolve(value, 'scan'); });
   };
 
   // Smart suggestions while typing — matches part number, description, and EEE.
@@ -713,9 +745,9 @@ export default function PartsPage() {
   // number or a serial, Stock Out takes the unit serial. Shared state and
   // resolve flow.
   const renderSerialBox = (variant: 'in' | 'out') => {
-    // One smart bar: on Stock IN it takes a part number (locks the part and
-    // calls for the unit serial) or a serial (EEE auto-fills the part).
-    const label = variant === 'in' ? 'Search part or serial' : 'Serial number';
+    // Serial-only bar: part numbers and aux codes are dropped by the
+    // doResolve gate — parts lock via suggestion taps, serials resolve.
+    const label = 'Serial number';
     return (
       <>
         <div className="relative mt-4" key={variant}>
@@ -768,7 +800,7 @@ export default function PartsPage() {
               }}
               onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (manualPartRef.current && tab === 'in') void submitIn(); else void doResolve(scan, 'scan'); } }}
-              placeholder={variant === 'in' ? 'Search part or serial…' : 'Scan or enter serial…'}
+              placeholder="Scan or enter serial…"
               className={`mt-1 h-12 w-full rounded-xl border bg-white px-3 text-[15px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.scan))}`} />
           </label>
           {tab !== 'out' && showSuggest && suggestions.length > 0 && (
@@ -1285,7 +1317,7 @@ export default function PartsPage() {
 
             {tab === 'in' && renderSerialBox('in')}
             {tab === 'out' && renderSerialBox('out')}
-            <CameraScanSheet open={cameraOpen} tab={tab} onClose={() => setCameraOpen(false)} onAccept={(value) => {
+            <CameraScanSheet open={cameraOpen} onClose={() => setCameraOpen(false)} onAccept={(value) => {
               setCameraOpen(false);
               setScan(value); setSerial(value); setUnitSerial(value);
               setScanHint(''); setMasterMissing(null);

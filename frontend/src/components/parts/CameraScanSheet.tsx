@@ -3,13 +3,16 @@ import { classifyScanValue } from '../../lib/parts';
 
 interface CameraScanSheetProps {
   open: boolean;
-  tab: 'in' | 'out';
   onAccept: (value: string) => void;
   onClose: () => void;
 }
 
-// How many consecutive frames must agree before a serial auto-fills.
-const STABLE_HITS = 2;
+// Auto-fill once the same serial has been seen this many times inside the
+// recent window — detections alternate when several barcodes share the
+// frame, so consecutive agreement can never happen with a serial sitting
+// between other codes.
+const HITS_TO_ACCEPT = 3;
+const WINDOW_SIZE = 6;
 const NATIVE_POLL_MS = 250;
 
 // 1D formats actually printed on part-box labels. The native detector is
@@ -26,21 +29,25 @@ const WANTED_FORMATS = [...ONE_D_FORMATS, 'qr_code', 'data_matrix'];
 
 type CameraError = 'denied' | 'missing' | 'insecure' | 'failed';
 
-export default function CameraScanSheet({ open, tab, onAccept, onClose }: CameraScanSheetProps) {
+export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanSheetProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const acceptedRef = useRef(false);
-  const stableRef = useRef<{ value: string; hits: number }>({ value: '', hits: 0 });
+  const recentRef = useRef<string[]>([]);
   const onAcceptRef = useRef(onAccept);
   onAcceptRef.current = onAccept;
-  const tabRef = useRef(tab);
-  tabRef.current = tab;
   const [serials, setSerials] = useState<string[]>([]);
-  const [parts, setParts] = useState<string[]>([]);
   const [cameraError, setCameraError] = useState<CameraError | null>(null);
   const [errorDetail, setErrorDetail] = useState('');
+  // On-device diagnostics (temporary): which engine runs, frames polled,
+  // every raw detection with its classification.
+  const [engine, setEngine] = useState('');
+  const [formatsInfo, setFormatsInfo] = useState('');
+  const [frames, setFrames] = useState(0);
+  const [seen, setSeen] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(true);
   const [torchOn, setTorchOn] = useState(false);
   const [torchReady, setTorchReady] = useState(false);
 
@@ -64,16 +71,18 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
     const value = String(raw ?? '').trim().toUpperCase();
     if (!value || acceptedRef.current) return;
     const kind = classifyScanValue(value);
+    setSeen((current) => {
+      const entry = `${value} → ${kind}`;
+      if (current[0] === entry) return current;
+      return [entry, ...current].slice(0, 5);
+    });
     if (kind === 'serial') {
       setSerials((current) => pushUnique(current, value, 4));
-      const stable = stableRef.current;
-      const hits = stable.value === value ? stable.hits + 1 : 1;
-      stableRef.current = { value, hits };
-      if (hits >= STABLE_HITS) accept(value);
-    } else if (kind === 'part-number') {
-      stableRef.current = { value: '', hits: 0 };
-      if (tabRef.current === 'in') setParts((current) => pushUnique(current, value, 2));
+      const recent = [...recentRef.current, value].slice(-WINDOW_SIZE);
+      recentRef.current = recent;
+      if (recent.filter((v) => v === value).length >= HITS_TO_ACCEPT) accept(value);
     }
+    // Part numbers and aux codes never surface — the sheet is serial-only.
     // aux: ignored entirely — keeps the rhythm while sweeping a label.
   }, [accept, pushUnique]);
 
@@ -90,8 +99,9 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
   useEffect(() => {
     if (!open) return;
     acceptedRef.current = false;
-    stableRef.current = { value: '', hits: 0 };
-    setSerials([]); setParts([]); setCameraError(null); setErrorDetail('');
+    recentRef.current = [];
+    setSerials([]); setCameraError(null); setErrorDetail('');
+    setEngine(''); setFormatsInfo(''); setFrames(0); setSeen([]); setShowDebug(true);
     setTorchOn(false); setTorchReady(false);
     let cancelled = false;
     const handleRef = { current: handleValue };
@@ -147,6 +157,7 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
         try {
           const supported = await (NativeDetector as unknown as { getSupportedFormats?: () => Promise<string[]> }).getSupportedFormats?.();
           const formats = supported?.length ? WANTED_FORMATS.filter((f) => supported.includes(f)) : WANTED_FORMATS;
+          setFormatsInfo(supported?.length ? supported.join(',') : 'all (unprobed)');
           // A native detector that only sees 2D codes is blind to box
           // labels — skip it so ZXing gets the frames instead.
           if (formats.some((f) => ONE_D_FORMATS.includes(f))) {
@@ -156,9 +167,11 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
           try { detector = new NativeDetector(); } catch { detector = null; }
         }
         if (detector && video) {
+          setEngine('native');
           timerRef.current = window.setInterval(async () => {
             if (acceptedRef.current || !videoRef.current) return;
             if (videoRef.current.readyState < 2) return;
+            setFrames((n) => n + 1);
             try {
               const codes = await detector.detect(videoRef.current);
               for (const code of codes) {
@@ -170,11 +183,14 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
           return;
         }
       }
-      // Fallback: bundled ZXing decoder. Limited to label-plausible formats
-      // and a short inter-scan delay so close-up 1D sweeps stay fast.
+      // Fallback: bundled ZXing decoder, reusing the already-open stream
+      // (a second getUserMedia often fails silently on phones). Limited to
+      // label-plausible formats and a short inter-scan delay so close-up
+      // 1D sweeps stay fast.
       try {
         const { BrowserMultiFormatReader, BarcodeFormat } = await import('@zxing/browser');
         if (cancelled || acceptedRef.current) return;
+        setEngine('zxing');
         const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 120 });
         reader.possibleFormats = [
           BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
@@ -183,8 +199,8 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
           BarcodeFormat.ITF, BarcodeFormat.CODABAR,
           BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX,
         ];
-        controlsRef.current = await reader.decodeFromVideoDevice(
-          undefined,
+        controlsRef.current = await reader.decodeFromStream(
+          stream,
           video || undefined,
           (result) => { if (result) handleRef.current(result.getText()); },
         );
@@ -226,8 +242,14 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
     <div className="fixed inset-0 z-50 flex flex-col bg-[#1d1d1f]/95" role="dialog" aria-modal="true" aria-label="Scan serial with camera">
       <div className="flex items-center justify-between px-4 py-3">
         <p className="text-[13px] font-semibold text-white">Scan serial</p>
-        <button type="button" aria-label="Close camera scan" onClick={onClose}
-          className="rounded-full bg-white/10 px-2.5 py-1 text-[16px] leading-5 text-white">×</button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setShowDebug((v) => !v)} aria-label="Toggle scan diagnostics"
+            className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-white/80">
+            Debug
+          </button>
+          <button type="button" aria-label="Close camera scan" onClick={onClose}
+            className="rounded-full bg-white/10 px-2.5 py-1 text-[16px] leading-5 text-white">×</button>
+        </div>
       </div>
       {cameraError ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
@@ -261,9 +283,7 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
             <p className="mt-2 text-center text-[11px] text-white/70">
               {serials.length
                 ? 'Serial found — hold steady…'
-                : parts.length
-                  ? 'Part barcode seen — move to the serial barcode.'
-                  : 'Point at the serial barcode — tap the video to refocus.'}
+                : 'Point at the serial barcode — tap the video to refocus.'}
             </p>
           </div>
           <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
@@ -273,17 +293,13 @@ export default function CameraScanSheet({ open, tab, onAccept, onClose }: Camera
                 {s}
               </button>
             ))}
-            {parts.map((p) => (tab === 'in' ? (
-              <button key={p} type="button" onClick={() => accept(p)}
-                className="rounded-xl border border-white/20 bg-transparent px-3 py-2 text-left text-[12px] text-white/80">
-                Part {p} — use for part search
-              </button>
-            ) : (
-              <p key={p} className="rounded-xl border border-white/20 px-3 py-2 text-[12px] text-white/50">
-                Part {p} — not a serial
-              </p>
-            )))}
           </div>
+          {showDebug && (
+            <div className="mx-4 mb-2 rounded-xl bg-black/60 p-2 font-mono text-[10px] leading-4 text-white/70">
+              <p>engine: {engine || 'starting…'} · frames: {frames}{formatsInfo ? ` · fmts: ${formatsInfo}` : ''}</p>
+              {seen.length ? seen.map((entry) => <p key={entry}>{entry}</p>) : <p>no detections yet</p>}
+            </div>
+          )}
           <div className="flex gap-2 px-4 pb-5">
             {torchReady && (
               <button type="button" onClick={() => void toggleTorch()}
