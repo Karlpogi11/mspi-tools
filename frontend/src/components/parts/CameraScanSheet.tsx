@@ -271,6 +271,7 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#1d1d1f]/95" role="dialog" aria-modal="true" aria-label="Scan serial with camera">
+      <style>{`@keyframes parts-scanline { 0% { top: 8%; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { top: 92%; opacity: 0; } }`}</style>
       <div className="flex items-center justify-between px-4 py-3">
         <p className="text-[13px] font-semibold text-white">Scan serial</p>
         <div className="flex items-center gap-2">
@@ -307,9 +308,31 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
       ) : (
         <>
           <div className="px-4">
-            <div className="overflow-hidden rounded-2xl bg-black">
+            <div className="relative overflow-hidden rounded-2xl bg-black">
               <video ref={videoRef} playsInline muted autoPlay onClick={() => void refocus()}
                 className="aspect-[4/3] w-full object-cover" />
+              {/* Viewfinder: corner brackets + center dot + sweeping laser
+                  while searching. Brackets turn green on serial lock. */}
+              <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+                {[
+                  'left-3 top-3 border-l-2 border-t-2 rounded-tl-lg',
+                  'right-3 top-3 border-r-2 border-t-2 rounded-tr-lg',
+                  'bottom-3 left-3 border-b-2 border-l-2 rounded-bl-lg',
+                  'bottom-3 right-3 border-b-2 border-r-2 rounded-br-lg',
+                ].map((pos) => (
+                  <span key={pos} className={`absolute h-7 w-7 ${pos} ${serials.length ? 'border-emerald-400' : 'border-white/80'}`} />
+                ))}
+                <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90" />
+                {serials.length === 0 && (
+                  <>
+                    <span className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border border-white/40" />
+                    <span
+                      className="absolute left-[6%] right-[6%] h-0.5 rounded bg-red-400/90 shadow-[0_0_12px_rgba(248,113,113,.9)]"
+                      style={{ animation: 'parts-scanline 2.2s ease-in-out infinite' }}
+                    />
+                  </>
+                )}
+              </div>
             </div>
             <p className="mt-2 text-center text-[11px] text-white/70">
               {serials.length
