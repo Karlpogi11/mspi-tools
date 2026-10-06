@@ -474,23 +474,27 @@ router.get('/resolve', async (req, res) => {
   const serial = upper(req.query.serial); const partNumber = value(req.query.partNumber); const eee = upper(req.query.eee);
   const scope = await resolveScope(req, res);
   if (!scope) return;
+  let unit: Record<string, any> | null = null;
+  if (serial) {
+    const [rows] = scope.all
+      ? await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? LIMIT 1`, [serial])
+      : await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? AND s.code = ? LIMIT 1`, [serial, scope.site!.code]);
+    unit = ((rows as Array<Record<string, any>>)[0] ?? null);
+  }
   let part: ResolvedPart | null = null;
-  if (partNumber) part = await resolveByPartNumber(partNumber);
+  // A stocked serial is authoritative: the unit's part wins over any EEE
+  // guess so Stock Out shows the same part as the stock list. EEE is only
+  // a fallback for serials not yet stocked (or whose master row is gone).
+  if (unit?.part_number) part = await resolveByPartNumber(String(unit.part_number));
+  if (!part && partNumber) part = await resolveByPartNumber(partNumber);
   if (!part && eee) part = await resolveByEee(eee);
   if (!part && serial) {
-    if (scope.all) {
+    if (scope.all && !unit) {
       const [rows] = await getDbPool().query('SELECT part_number FROM parts_units WHERE serial = ? LIMIT 1', [serial]);
       const found = (rows as Array<{ part_number: string }>)[0];
       if (found) part = await resolveByPartNumber(found.part_number);
     }
     if (!part) part = (await resolveBySerial(serial))?.part ?? null;
-  }
-  let unit: unknown = null;
-  if (serial) {
-    const [rows] = scope.all
-      ? await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? LIMIT 1`, [serial])
-      : await getDbPool().query(`SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? AND s.code = ? LIMIT 1`, [serial, scope.site!.code]);
-    unit = (rows as Array<Record<string, unknown>>)[0] ?? null;
   }
   res.json({ part, unit });
 });

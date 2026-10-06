@@ -129,6 +129,7 @@ export default function PartsPage() {
   const highlightSeenRef = useRef<string | null>(null);
   const [partUnits, setPartUnits] = useState<PartsUnit[]>([]);
   const [partUnitsBusy, setPartUnitsBusy] = useState(false);
+  const [stockBusy, setStockBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [message, setMessage] = useState('');
@@ -229,6 +230,7 @@ export default function PartsPage() {
       setSite(result.site); setSiteCode(result.site.code); setSiteToken(result.siteToken);
       setPartsSiteToken(result.siteToken);
       setSelectedPart(null); setPartUnits([]); setSelectedSite(null); setHighlightSerial(null); setMismatchList([]);
+      setStock([]); setStockBusy(true);
       setBoxLocation('');
       setSwitchingSite(false);
       setSwitchingSite(false);
@@ -246,16 +248,20 @@ export default function PartsPage() {
     const saved = recalledPartsSiteCode();
     if (!saved) return;
     setRestoring(true);
+    setStockBusy(true);
     void (async () => {
+      let restored = false;
       try {
         const result = publicMode
           ? await api.partsPublic.verifySite(saved)
           : await api.parts.verifySite(saved);
         setSite(result.site); setSiteCode(result.site.code); setSiteToken(result.siteToken);
         setPartsSiteToken(result.siteToken);
+        setStock([]);
+        restored = true;
         setMessage(`Restored ${result.site.name || result.site.code}.`);
       } catch { /* Unknown/offline — keep the saved code, show the normal gate. */ }
-      finally { setRestoring(false); }
+      finally { setRestoring(false); if (!restored) setStockBusy(false); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -265,12 +271,14 @@ export default function PartsPage() {
   };
 
   const loadStock = async (code: string) => {
+    setStockBusy(true);
     try {
       const result = publicMode && siteToken
         ? await api.partsPublic.stock(siteToken, undefined, true)
         : await api.parts.stock(code, undefined, undefined, true);
       setStock(result.stock);
     } catch (err) { setError((err as Error).message); }
+    finally { setStockBusy(false); }
   };
 
   const loadMovementHistory = async (code: string) => {
@@ -341,7 +349,10 @@ export default function PartsPage() {
         // takes over, the search bar clears, date defaults to today.
         const searchedPartNumber = value === result.part.part_number.toUpperCase();
         setUnitSerial(searchedPartNumber ? '' : value);
-        if (searchedPartNumber && resolvedSerialized) {
+        // Stock IN only: a searched part number locks the part and hands
+        // over to the multiline serial box. Stock OUT takes unit serials,
+        // so the input must stay visible — never wipe it into an orphan card.
+        if (searchedPartNumber && resolvedSerialized && tab === 'in') {
           setScan(''); setSerial('');
           setDate(todayIso());
           setTimeout(() => serialsRef.current?.focus(), 0);
@@ -697,9 +708,11 @@ export default function PartsPage() {
                 setFieldErrors((current) => ({ ...current, scan: undefined }));
                 setOutMissingSerial(null); setMismatchList([]);
                 if (!value.trim()) {
-                  // Clearing keeps the locked part and its serial lines.
+                  // Stock IN keeps the locked part and its serial lines;
+                  // Stock OUT has no lock — empty box means no part card.
                   setSerial(''); setUnitSerial('');
                   setMasterMissing(null);
+                  if (variant === 'out') { setPart(null); setPartNumber(''); }
                   return;
                 }
                 if (manualPartRef.current && (part || partNumber.trim())) {
@@ -1128,7 +1141,7 @@ export default function PartsPage() {
   const browseAll = () => {
     setSwitchingSite(false);
     // Drop the previous site's workbench/stock so nothing stale lingers.
-    setSelectedPart(null); setSelectedSite(null); setHighlightSerial(null); setMismatchList([]); setPartUnits([]); setStock([]);
+    setSelectedPart(null); setSelectedSite(null); setHighlightSerial(null); setMismatchList([]); setPartUnits([]); setStock([]); setStockBusy(true);
     setPart(null); setPartNumber(''); setScan(''); setSerial(''); setUnitSerial('');
     setSite({ id: 0, code: 'ALL', name: 'All sites', active: 1 });
     setSiteCode('ALL');
@@ -1226,6 +1239,9 @@ export default function PartsPage() {
                   <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => {
                     setTab(key); setError(''); setMessage(''); setFieldErrors({}); setOutMissingSerial(null); setMismatchList([]); manualPartRef.current = false;
                     if (key !== 'in') { setMasterMissing(null); setQuickDescription(''); }
+                    // A part locked by Stock IN (empty search bar) must not
+                    // leak into Stock OUT as an orphan card.
+                    if (key === 'out' && !scan.trim()) { setPart(null); setPartNumber(''); setSerial(''); setUnitSerial(''); return; }
                     if (scan.trim() && masterMissing !== scan.trim().toUpperCase()) void doResolve(scan, 'scan');
                   }}
                     className={`border-b-2 px-1 pb-3 text-[13px] font-medium transition-colors ${tab === key ? 'border-[#1d1d1f] text-[#1d1d1f]' : 'border-transparent text-[#6e6e73] hover:text-[#1d1d1f]'}`}>
@@ -1241,8 +1257,7 @@ export default function PartsPage() {
             {tab === 'in' && (
             <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
               <h3 className="text-[13px] font-semibold text-[#1d1d1f]">Stock In</h3>
-              <p className="mt-0.5 text-[11px] text-[#6e6e73]">This writes to inventory + sheet log.</p>
-              <button type="button" onClick={() => { setHistorySearch(''); setHistoryOpen(true); }} className="mt-3 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] shadow-sm">
+              <button type="button" onClick={() => { setHistorySearch(''); setHistoryOpen(true); }} className="mt-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] shadow-sm">
                 View Stock In history ({tabMovements.length})
               </button>
               <div className="mt-4 space-y-3">
@@ -1261,9 +1276,7 @@ export default function PartsPage() {
                         className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                     </label>
                   </div>
-                ) : (
-                  <p className="rounded-xl border border-dashed border-[#d2d2d7] px-3 py-3 text-center text-[12px] text-[#6e6e73]">Search a part number or serial above — it fills automatically.</p>
-                )}
+                ) : null}
                 {!(masterMissing && !part) && fieldErrors.serial && <p role="alert" className="text-[11px] leading-4 text-[#b91c1c]">{fieldErrors.serial}</p>}
                 {!nonSerialized && (part || masterMissing) && (
                   <>
@@ -1340,17 +1353,14 @@ export default function PartsPage() {
             {tab === 'out' && (
             <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
               <h3 className="text-[13px] font-semibold text-[#1d1d1f]">Stock Out</h3>
-              <p className="mt-0.5 text-[11px] leading-4 text-[#6e6e73]">Stock out here — the web updates instantly and the Sheet log follows automatically. Rows typed directly into the Sheet need an admin sync before they appear here.</p>
-              <button type="button" onClick={() => { setHistorySearch(''); setHistoryOpen(true); }} className="mt-3 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] shadow-sm">
+              <button type="button" onClick={() => { setHistorySearch(''); setHistoryOpen(true); }} className="mt-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] shadow-sm">
                 View Stock Out history ({tabMovements.length})
               </button>
               <div className="mt-4 space-y-3">
-                {part ? <PartResultCard part={part} nonSerialized={Boolean(nonSerialized)} /> : (
-                  <p className="rounded-xl border border-dashed border-[#d2d2d7] px-3 py-3 text-center text-[12px] text-[#6e6e73]">Search above to fill the part automatically.</p>
-                )}
+                {part && (scan.trim() || serial.trim()) && <PartResultCard part={part} nonSerialized={Boolean(nonSerialized)} />}
                 {!outMissingSerial && fieldErrors.serial && <p role="alert" className="text-[11px] leading-4 text-[#b91c1c]">{fieldErrors.serial}</p>}
-                <label className="block text-[11px] font-semibold text-[#3c3c43]">Reference number (repair / AR — required)
-                  <input value={reference} onChange={(e) => { setReference(e.target.value); setFieldErrors((current) => ({ ...current, reference: undefined })); }} placeholder="e.g. AR-10234"
+                <label className="block text-[11px] font-semibold text-[#3c3c43]">Reference
+                  <input value={reference} onChange={(e) => { setReference(e.target.value); setFieldErrors((current) => ({ ...current, reference: undefined })); }} placeholder="AR / repair #"
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (stockOutReady && reference.trim()) void submitOut(); } }}
                     className={`mt-1 h-11 w-full rounded-xl border bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.reference))}`} />
                 </label>
@@ -1370,10 +1380,10 @@ export default function PartsPage() {
             <div className="mt-6 border-t pt-5">
               <p className="text-[11px] font-medium text-[#6e6e73]">Bulk import</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" onClick={() => void api.parts.downloadTemplate('in')} className="rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43]">IN template</button>
-                <button type="button" onClick={() => void api.parts.downloadTemplate('out')} className="rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43]">OUT template</button>
-                <button type="button" onClick={() => fileInRef.current?.click()} disabled={busy} className="rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] disabled:opacity-40">Import IN</button>
-                <button type="button" onClick={() => fileOutRef.current?.click()} disabled={busy} className="rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] disabled:opacity-40">Import OUT</button>
+                <button type="button" onClick={() => void api.parts.downloadTemplate('in')} className="rounded-xl border border-[#d2d2d7] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43]">IN template</button>
+                <button type="button" onClick={() => void api.parts.downloadTemplate('out')} className="rounded-xl border border-[#d2d2d7] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43]">OUT template</button>
+                <button type="button" onClick={() => fileInRef.current?.click()} disabled={busy} className="rounded-xl border border-[#d2d2d7] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] disabled:opacity-40">Import IN</button>
+                <button type="button" onClick={() => fileOutRef.current?.click()} disabled={busy} className="rounded-xl border border-[#d2d2d7] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3c3c43] disabled:opacity-40">Import OUT</button>
                 <input ref={fileInRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void runImport('in', f); }} />
                 <input ref={fileOutRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void runImport('out', f); }} />
               </div>
@@ -1449,7 +1459,7 @@ export default function PartsPage() {
                           </table>
                         </div>
                       ) : (
-                        <p className="py-6 text-center text-[12px] text-[#6e6e73]">{tableTerms.length ? 'No matches.' : 'No stock found.'}</p>
+                        <p className="py-6 text-center text-[12px] text-[#6e6e73]">{tableTerms.length ? 'No matches.' : stockBusy && !stock.length ? 'Loading stock…' : 'No stock found.'}</p>
                       )}
                       {filteredPartTotals.length > 0 && <p className="mt-2 text-[11px] text-[#6e6e73]">Tap a row to see its sites.</p>}
                     </>
@@ -1481,7 +1491,7 @@ export default function PartsPage() {
                           </table>
                         </div>
                       ) : (
-                        <p className="py-6 text-center text-[12px] text-[#6e6e73]">{tableTerms.length ? 'No matches.' : 'No stock found.'}</p>
+                        <p className="py-6 text-center text-[12px] text-[#6e6e73]">{tableTerms.length ? 'No matches.' : stockBusy && !stock.length ? 'Loading stock…' : 'No stock found.'}</p>
                       )}
                       {filteredGroups.length > 0 && <p className="mt-2 text-[11px] text-[#6e6e73]">Tap a row to see its serials.</p>}
                     </>

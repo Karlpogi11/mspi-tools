@@ -120,18 +120,20 @@ router.get('/resolve', requireSiteToken, async (req: any, res) => {
   await ensurePartsTables();
   const serial = upper(req.query.serial); const partNumber = value(req.query.partNumber); const eee = upper(req.query.eee);
   const siteCode = req.pinnedSite.code;
-  let part: ResolvedPart | null = null;
-  if (partNumber) part = await resolveByPartNumber(partNumber);
-  if (!part && eee) part = await resolveByEee(eee);
-  if (!part && serial) part = (await resolveBySerial(serial))?.part ?? null;
-  let unit: unknown = null;
+  let unit: Record<string, any> | null = null;
   if (serial) {
     const [rows] = await getDbPool().query(
       `SELECT u.id, u.part_number, u.serial, u.quantity, u.status, u.reference, u.location, s.code AS site_code FROM parts_units u INNER JOIN parts_sites s ON s.id = u.site_id WHERE u.serial = ? AND s.code = ? LIMIT 1`,
       [serial, siteCode]
     );
-    unit = (rows as Array<Record<string, unknown>>)[0] ?? null;
+    unit = ((rows as Array<Record<string, any>>)[0] ?? null);
   }
+  let part: ResolvedPart | null = null;
+  // Stocked serials are authoritative — the unit's part wins over EEE guess.
+  if (unit?.part_number) part = await resolveByPartNumber(String(unit.part_number));
+  if (!part && partNumber) part = await resolveByPartNumber(partNumber);
+  if (!part && eee) part = await resolveByEee(eee);
+  if (!part && serial) part = (await resolveBySerial(serial))?.part ?? null;
   res.json({ part, unit });
 });
 
