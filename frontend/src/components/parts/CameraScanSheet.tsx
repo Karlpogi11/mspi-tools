@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyScanValue } from '../../lib/parts';
 
+// Stamp shown in diagnostics — confirms the phone runs the current build.
+const SHEET_VERSION = 'v8';
+
 interface CameraScanSheetProps {
   open: boolean;
   onAccept: (value: string) => void;
@@ -36,6 +39,9 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const acceptedRef = useRef(false);
   const recentRef = useRef<string[]>([]);
+  // Counts any decoder output — the watchdog falls back to ZXing when the
+  // native engine stays silent.
+  const detectCountRef = useRef(0);
   const onAcceptRef = useRef(onAccept);
   onAcceptRef.current = onAccept;
   const [serials, setSerials] = useState<string[]>([]);
@@ -54,6 +60,8 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
   const [showDebug, setShowDebug] = useState(true);
   const [torchOn, setTorchOn] = useState(false);
   const [torchReady, setTorchReady] = useState(false);
+  // Brief "Focusing…" badge so every tap is visibly acknowledged.
+  const [focusing, setFocusing] = useState(false);
 
   const pushUnique = useCallback((list: string[], value: string, cap: number) => {
     if (list.includes(value)) return list;
@@ -75,6 +83,7 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
     const value = String(raw ?? '').trim().toUpperCase();
     if (!value || acceptedRef.current) return;
     const kind = classifyScanValue(value);
+    detectCountRef.current += 1;
     setSeen((current) => {
       const entry = `${value} → ${kind}`;
       if (current[0] === entry) return current;
@@ -105,11 +114,12 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
     if (!open) return;
     acceptedRef.current = false;
     recentRef.current = [];
+    detectCountRef.current = 0;
     setSerials([]); setCameraError(null); setErrorDetail('');
     setEngine(''); setFormatsInfo(''); setFrames(0); setSeen([]); setShowDebug(true);
     setTicks(0);
     beatRef.current = window.setInterval(() => setTicks((n) => n + 1), 1000);
-    setTorchOn(false); setTorchReady(false);
+    setTorchOn(false); setTorchReady(false); setFocusing(false);
     let cancelled = false;
     const handleRef = { current: handleValue };
     handleRef.current = handleValue;
@@ -142,7 +152,9 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
       const video = videoRef.current;
       if (video) {
         video.srcObject = stream;
-        try { await video.play(); } catch { /* Gesture-gated — tap retries. */ }
+        // Never awaited: on some phones play() never settles, which used
+        // to stall the whole pipeline while the preview kept showing.
+        video.play().catch(() => undefined);
         // Phones often block programmatic play until a user gesture: one
         // delayed retry, then tapping the video always plays + refocuses.
         window.setTimeout(() => {
@@ -150,20 +162,54 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
           if (v && v.paused && !cancelled) v.play().catch(() => undefined);
         }, 1200);
       }
-      // Torch when the hardware offers it (dim podium lighting), and lock
-      // continuous focus/exposure for close-up labels (best-effort).
+      // Torch probe + focus lock, fire-and-forget: applyConstraints can
+      // hang on some hardware and must never stall detection startup.
       try {
         const track = stream.getVideoTracks()[0];
         const caps = (track?.getCapabilities?.() || {}) as { torch?: boolean };
         if (track && caps.torch) setTorchReady(true);
         if (track) {
-          await track.applyConstraints({
+          void track.applyConstraints({
             advanced: [{ focusMode: 'continuous', exposureMode: 'continuous' }],
-          } as unknown as MediaTrackConstraints);
+          } as unknown as MediaTrackConstraints).catch(() => undefined);
         }
       } catch { /* Focus/torch probes are optional. */ }
       if (cancelled) return;
 
+      // Fallback decoder. Limited to label-plausible formats and a short
+      // inter-scan delay so close-up 1D sweeps stay fast. Reuses the
+      // already-open stream (a second getUserMedia often fails silently).
+      const startZxing = async () => {
+        try {
+          const { BrowserMultiFormatReader, BarcodeFormat } = await import('@zxing/browser');
+          if (cancelled || acceptedRef.current) return;
+          const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 120 });
+          reader.possibleFormats = [
+            BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
+            BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
+            BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
+            BarcodeFormat.ITF, BarcodeFormat.CODABAR,
+            BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX,
+          ];
+          controlsRef.current = await reader.decodeFromStream(
+            stream,
+            video || undefined,
+            (result, error) => {
+              if (result) { handleRef.current(result.getText()); return; }
+              // NotFound per frame is normal silence — anything else means
+              // the decoder itself is broken, so surface it in diagnostics.
+              if (error && !/notfound/i.test(String((error as Error)?.name || error))) {
+                const name = String((error as Error)?.name || error).slice(0, 40);
+                setSeen((current) => (current[0] === `zxing: ${name}` ? current : [`zxing: ${name}`, ...current].slice(0, 5)));
+              }
+            },
+          );
+        } catch {
+          if (!cancelled && !acceptedRef.current) setCameraError('failed');
+        }
+      };
+
+      let nativeStarted = false;
       const NativeDetector = (window as unknown as { BarcodeDetector?: new (opts?: { formats?: string[] }) => { detect(v: HTMLVideoElement): Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
       if (NativeDetector) {
         let detector = null;
@@ -180,6 +226,7 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
           try { detector = new NativeDetector(); } catch { detector = null; }
         }
         if (detector && video) {
+          nativeStarted = true;
           setEngine('native');
           timerRef.current = window.setInterval(async () => {
             if (acceptedRef.current || !videoRef.current) return;
@@ -193,41 +240,21 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
               }
             } catch { /* A bad frame is skipped — the next poll continues. */ }
           }, NATIVE_POLL_MS);
-          return;
         }
       }
-      // Fallback: bundled ZXing decoder, reusing the already-open stream
-      // (a second getUserMedia often fails silently on phones). Limited to
-      // label-plausible formats and a short inter-scan delay so close-up
-      // 1D sweeps stay fast.
-      try {
-        const { BrowserMultiFormatReader, BarcodeFormat } = await import('@zxing/browser');
-        if (cancelled || acceptedRef.current) return;
+      if (!nativeStarted) {
         setEngine('zxing');
-        const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 120 });
-        reader.possibleFormats = [
-          BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
-          BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
-          BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
-          BarcodeFormat.ITF, BarcodeFormat.CODABAR,
-          BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX,
-        ];
-        controlsRef.current = await reader.decodeFromStream(
-          stream,
-          video || undefined,
-          (result, error) => {
-            if (result) { handleRef.current(result.getText()); return; }
-            // NotFound per frame is normal silence — anything else means
-            // the decoder itself is broken, so surface it in diagnostics.
-            if (error && !/notfound/i.test(String((error as Error)?.name || error))) {
-              const name = String((error as Error)?.name || error).slice(0, 40);
-              setSeen((current) => (current[0] === `zxing: ${name}` ? current : [`zxing: ${name}`, ...current].slice(0, 5)));
-            }
-          },
-        );
-      } catch {
-        if (!cancelled && !acceptedRef.current) setCameraError('failed');
+        await startZxing();
+        return;
       }
+      // Watchdog: a silent native engine (supported but blind on this
+      // hardware) falls over to ZXing instead of sitting at zero forever.
+      window.setTimeout(() => {
+        if (cancelled || acceptedRef.current || detectCountRef.current > 0) return;
+        if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+        setEngine('zxing (fallback)');
+        void startZxing();
+      }, 8000);
     };
 
     void start();
@@ -244,16 +271,24 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
     } catch { /* Leave the toggle as-is when hardware refuses. */ }
   };
 
-  // Tap the viewfinder to kick autofocus — close-up labels often sit
-  // inside the blur zone until focus hunts again. Also (re)starts
-  // playback: phones block programmatic play until a user gesture.
+  // Tap the viewfinder to refocus — close-up labels often sit inside the
+  // blur zone until focus hunts again. Fires a single-shot AF sweep first
+  // (the trigger most phone hardware honors), falling back to the
+  // manual→continuous toggle. Also (re)starts playback: phones block
+  // programmatic play until a user gesture.
   const refocus = async () => {
+    setFocusing(true);
+    window.setTimeout(() => setFocusing(false), 900);
     const v = videoRef.current;
     if (v && v.paused) {
       try { await v.play(); } catch { /* Still blocked — user can retry. */ }
     }
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] } as unknown as MediaTrackConstraints);
+      return;
+    } catch { /* Single-shot unsupported — try the toggle below. */ }
     try {
       await track.applyConstraints({ advanced: [{ focusMode: 'manual' }] } as unknown as MediaTrackConstraints);
       window.setTimeout(() => {
@@ -323,6 +358,11 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
                   <span key={pos} className={`absolute h-7 w-7 ${pos} ${serials.length ? 'border-emerald-400' : 'border-white/80'}`} />
                 ))}
                 <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90" />
+                {focusing && (
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold text-white">
+                    Focusing…
+                  </span>
+                )}
                 {serials.length === 0 && (
                   <>
                     <span className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border border-white/40" />
@@ -350,7 +390,7 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
           </div>
           {showDebug && (
             <div className="mx-4 mb-2 rounded-xl bg-black/60 p-2 font-mono text-[10px] leading-4 text-white/70">
-              <p>engine: {engine || 'starting…'} · alive: {ticks}s · polls: {frames}{formatsInfo ? ` · fmts: ${formatsInfo}` : ''}</p>
+              <p>scan {SHEET_VERSION} · engine: {engine || 'starting…'} · alive: {ticks}s · polls: {frames}{formatsInfo ? ` · fmts: ${formatsInfo}` : ''}</p>
               <p>video: {vidInfo}</p>
               {seen.length ? seen.map((entry) => <p key={entry}>{entry}</p>) : <p>no detections yet</p>}
             </div>
