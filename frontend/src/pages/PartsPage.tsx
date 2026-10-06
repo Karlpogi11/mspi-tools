@@ -395,7 +395,13 @@ export default function PartsPage() {
         if (!alreadyKnownMissing && !manualPartRef.current) { setPartNumber(''); setQuickDescription(''); }
         setFieldError(field, `"${value}" is not yet on ${site?.name || 'this site'} stock.`);
       }
-      else if (result.unit?.status === 'in') setMessage(`${value} is currently IN at ${result.unit.site_code}.`);
+      else if (result.unit?.status === 'in') {
+        // Stock In of an already-stocked serial: red box + brief inline
+        // note (no green toast) — it's still in stock, nothing to do.
+        // Stock Out keeps the toast as useful context for the pull.
+        if (tab === 'in') setFieldError('scan', `Already IN at ${result.unit.site_code} — not stocked out yet.`);
+        else setMessage(`${value} is currently IN at ${result.unit.site_code}.`);
+      }
       return { part: result.part, unit: result.unit };
     } catch (err) {
       if (seq !== resolveSeq.current) return { part: null, unit: null };
@@ -801,7 +807,7 @@ export default function PartsPage() {
               onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (manualPartRef.current && tab === 'in') void submitIn(); else void doResolve(scan, 'scan'); } }}
               placeholder="Scan or enter serial…"
-              className={`mt-1 h-12 w-full rounded-xl border bg-white px-3 text-[15px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.scan))}`} />
+              className={`mt-1 h-12 w-full rounded-xl border bg-white px-3 text-[16px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.scan))}`} />
           </label>
           {tab !== 'out' && showSuggest && suggestions.length > 0 && (
             <div className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-[#e5e5e7] bg-white shadow-[0_12px_32px_rgba(0,0,0,.10)]">
@@ -1272,7 +1278,7 @@ export default function PartsPage() {
                   <input value={codeInput} onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setError(''); }}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void verifySite(codeInput); } }}
                     placeholder="e.g. PODIUM"
-                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] uppercase outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[16px] uppercase outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
                 <button type="button" onClick={() => void verifySite(codeInput)} disabled={busy || !codeInput.trim()}
                   className="mt-3 w-full rounded-2xl bg-[#1d1d1f] py-2.5 text-[12px] font-semibold text-white disabled:opacity-40">
@@ -1338,12 +1344,12 @@ export default function PartsPage() {
                     <label className="mt-2 block text-[11px] font-semibold text-[#3c3c43]">Part number
                       <input value={partNumber} onChange={(e) => onPartNumberInput(e.target.value)}
                         placeholder="e.g. 661-12345"
-                        className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] uppercase outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                        className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[16px] uppercase outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                     </label>
                     <label className="mt-2 block text-[11px] font-semibold text-[#3c3c43]">Description (required for new parts)
                       <input value={quickDescription} onChange={(e) => setQuickDescription(e.target.value)}
                         placeholder="Short description for this part"
-                        className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                        className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[16px] outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                     </label>
                   </div>
                 ) : null}
@@ -1368,7 +1374,7 @@ export default function PartsPage() {
                           }
                         }}
                         placeholder={'SN001\nSN002'}
-                        className="mt-1 max-h-40 min-h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 py-2.5 text-[14px] uppercase outline-none placeholder:normal-case placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                        className="mt-1 max-h-40 min-h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 py-2.5 text-[16px] uppercase outline-none sm:text-[14px] placeholder:normal-case placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                     </label>
                     {lineSerials.length > 0 && <p className="text-[11px] text-[#6e6e73]">{lineSerials.length} serial{lineSerials.length === 1 ? '' : 's'} ready.</p>}
                     {mismatchList.length > 0 && part && (
@@ -1395,12 +1401,12 @@ export default function PartsPage() {
                 {nonSerialized && (
                   <label className="block text-[11px] font-semibold text-[#3c3c43]">Quantity
                     <input value={quantity} onChange={(e) => setQuantity(e.target.value)} inputMode="numeric"
-                      className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                      className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[16px] outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                   </label>
                 )}
                 <label className="block text-[11px] font-semibold text-[#3c3c43]">Location (box — B = batteries, A = displays, 2nd box adds a letter: B-13-B)
                   <input value={boxLocation} onChange={(e) => { const v = e.target.value; setBoxLocation(v); if (!v.trim()) prefixDismissedFor.current = part?.part_number || null; }} placeholder="e.g. B-13, B-13-B"
-                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[16px] outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
                 {locationSuggestion && (
                   <p className="rounded-xl border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] leading-4 text-[#92400e]">
@@ -1410,7 +1416,7 @@ export default function PartsPage() {
                 )}
                 <label className="block text-[11px] font-semibold text-[#3c3c43]">Date
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[16px] outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
                 <button type="button" onClick={() => void submitIn()} disabled={busy || resolving || !stockInReady || mismatchList.length > 0}
                   className="w-full rounded-2xl bg-[#1d1d1f] py-2.5 text-[12px] font-semibold text-white disabled:opacity-40">
@@ -1432,12 +1438,12 @@ export default function PartsPage() {
                 <label className="block text-[11px] font-semibold text-[#3c3c43]">Reference
                   <input value={reference} onChange={(e) => { setReference(e.target.value); setFieldErrors((current) => ({ ...current, reference: undefined })); }} placeholder="AR / repair #"
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (stockOutReady && reference.trim()) void submitOut(); } }}
-                    className={`mt-1 h-11 w-full rounded-xl border bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.reference))}`} />
+                    className={`mt-1 h-11 w-full rounded-xl border bg-white px-3 text-[16px] outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 ${fieldBorder(Boolean(fieldErrors.reference))}`} />
                 </label>
                 {fieldErrors.reference && <p role="alert" className="text-[11px] leading-4 text-[#b91c1c]">{fieldErrors.reference}</p>}
                 <label className="block text-[11px] font-semibold text-[#3c3c43]">Date
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[14px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                    className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-white px-3 text-[16px] outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
                 </label>
                 <button type="button" onClick={() => void submitOut()} disabled={busy || resolving || !stockOutReady || Boolean(masterMissing && !part && masterMissingPartial)}
                   className="w-full rounded-2xl bg-[#1d1d1f] py-2.5 text-[12px] font-semibold text-white disabled:opacity-40">
@@ -1470,7 +1476,7 @@ export default function PartsPage() {
           )}
 
           <section className={`h-full overflow-y-auto rounded-2xl bg-white p-4 ${publicMode && site ? 'col-span-2' : ''}`}>
-            <div className="flex items-center gap-3 border-b border-[#e5e5e7] pb-3">
+            <div className="flex flex-wrap items-center gap-3 border-b border-[#e5e5e7] pb-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <h2 className="truncate text-[15px] font-semibold text-[#1d1d1f]">{browsingAll ? 'All sites' : site?.name || 'Stock'}</h2>
@@ -1485,19 +1491,19 @@ export default function PartsPage() {
                 </p>
               </div>
               {isAdmin && site && site.code !== 'ALL' && (
-                <button type="button" onClick={() => void manualSheetSync()} disabled={syncingSheet} aria-label="Sync stock from Google Sheet" title="Sync stock from Google Sheet" className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[#1d1d1f] px-3 text-[11px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40">
+                <button type="button" onClick={() => void manualSheetSync()} disabled={syncingSheet} aria-label="Sync stock from Google Sheet" title="Sync stock from Google Sheet" className="flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-full sm:h-8 bg-[#1d1d1f] px-3 text-[11px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40">
                   <svg className={`h-3.5 w-3.5 ${syncingSheet ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
                   {syncingSheet ? 'Syncing…' : 'Sheet sync'}
                 </button>
               )}
               {isAdmin && site && site.code !== 'ALL' && sheetDrifted && !syncingSheet && (
-                <button type="button" onClick={() => void manualSheetSync()} title="The Google Sheet changed since the last sync" className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[#fef3c7] px-3 text-[11px] font-semibold text-[#92400e] hover:bg-[#fde68a]">
+                <button type="button" onClick={() => void manualSheetSync()} title="The Google Sheet changed since the last sync" className="flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-full sm:h-8 bg-[#fef3c7] px-3 text-[11px] font-semibold text-[#92400e] hover:bg-[#fde68a]">
                   <span className="h-2 w-2 rounded-full bg-[#d97706]" aria-hidden="true" />
                   Sheet changed
                 </button>
               )}
               <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value.replace(/[\r\n]+/g, ''))} placeholder="Search"
-                className="h-8 w-40 shrink-0 rounded-full border border-[#d2d2d7] bg-white px-3 text-[12px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                className="h-10 w-full rounded-full border border-[#d2d2d7] bg-white px-3 text-[16px] outline-none placeholder:text-[#9a9aa1] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 sm:h-8 sm:w-40 sm:shrink-0 sm:text-[12px]" />
             </div>
             {/* Drill-down slide track: parts → sites → serials (ALL), parts → serials (site). */}
             <div className="overflow-hidden">
@@ -1648,7 +1654,7 @@ export default function PartsPage() {
             </div>
             <div className="border-b border-[#e5e5e7] p-4">
               <input autoFocus value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search part, serial, reference, or date"
-                className="h-10 w-full rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[13px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                className="h-11 w-full rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[16px] outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10 sm:h-10 sm:text-[13px]" />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {filteredHistory.length ? (
@@ -1688,7 +1694,7 @@ export default function PartsPage() {
             <p className="mt-1.5 text-[13px] leading-5 text-[#6e6e73]">{switchingSite && site ? `Currently at ${site.name || site.code}. Enter the new site code — nothing changes until you continue.` : 'Enter your site code. You will only see and move stock for this site.'}</p>
             <label className="mt-5 block text-[11px] font-medium text-[#3c3c43]">Site code
               <input autoFocus value={codeInput} onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setError(''); }} placeholder="e.g. PODIUM"
-                className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[14px] uppercase outline-none focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
+                className="mt-1 h-11 w-full rounded-xl border border-[#d2d2d7] bg-[#f7f7f8] px-3 text-[16px] uppercase outline-none sm:text-[14px] focus:border-[#1d1d1f] focus:ring-2 focus:ring-[#1d1d1f]/10" />
             </label>
             {error && <p role="alert" className="mt-3 text-[12px] text-[#a33a3a]">{error}</p>}
             <button type="submit" disabled={busy || !codeInput.trim()} className="mt-5 w-full rounded-xl bg-[#1d1d1f] py-3 text-[12px] font-semibold text-white disabled:opacity-40">
