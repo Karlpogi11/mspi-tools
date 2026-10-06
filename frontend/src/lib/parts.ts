@@ -156,3 +156,25 @@ export async function parsePartsMasterWorkbook(buf: ArrayBuffer): Promise<Parsed
   }
   return out;
 }
+
+// Smart-scan classifier: part boxes carry several barcodes side by side
+// (serial, part number like 661-44796, aux/lot codes like 2602+H0X, plain
+// text like CHINA MAINLAND). Only the unit serial may fill the serial box.
+// Serials are pure alphanumeric, 10+ chars (Apple 12-char serials and
+// 19-char battery serials like FG9HM5003AT0000R3T both match).
+export type ScanValueKind = 'serial' | 'part-number' | 'aux';
+
+const PART_NUMBER_RE = /^\d{3}-\d{5,}$/;
+const SERIAL_RE = /^[A-Z0-9]{10,}$/;
+
+export function classifyScanValue(raw: unknown): ScanValueKind {
+  const v = String(raw ?? '').trim().toUpperCase();
+  if (!v) return 'aux';
+  // Anything outside serial/part-number charset (spaces, +, /, …) is aux
+  // text or a lot code — checked before any normalization so multi-word
+  // text like CHINA MAINLAND can never collapse into a fake serial.
+  if (/[^A-Z0-9-]/.test(v)) return 'aux';
+  if (PART_NUMBER_RE.test(v)) return 'part-number';
+  if (SERIAL_RE.test(v)) return 'serial';
+  return 'aux';
+}

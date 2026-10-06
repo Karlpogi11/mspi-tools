@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { api, recalledPartsSiteCode, setPartsSiteToken, type PartsMasterItem, type PartsMovement, type PartsSite, type PartsUnit } from '../lib/api';
+import CameraScanSheet from '../components/parts/CameraScanSheet';
 import { useAuth } from '../lib/auth';
-import { parseStockInWorkbook, parseStockOutWorkbook, todayIso } from '../lib/parts';
+import { classifyScanValue, parseStockInWorkbook, parseStockOutWorkbook, todayIso } from '../lib/parts';
 
 const dateOnly = (v: string | null | undefined) => (v ? v.slice(0, 10) : '—');
 
@@ -142,8 +143,13 @@ export default function PartsPage() {
   // EEE mismatches are shown only after the Stock IN button is clicked.
   const [mismatchList, setMismatchList] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<{ scan?: string; serial?: string; unitSerial?: string; reference?: string; lines?: string }>({});
+  // Quiet one-line hint under the scan box (ignored aux barcode, part
+  // barcode in Stock Out). Never red — the tech just rescans.
+  const [scanHint, setScanHint] = useState('');
+  // Phone camera smart-scan sheet.
+  const [cameraOpen, setCameraOpen] = useState(false);
 
-  const clearAllNotices = () => { setError(''); setMessage(''); setFieldErrors({}); setOutMissingSerial(null); setMasterMissing(null); };
+  const clearAllNotices = () => { setError(''); setMessage(''); setFieldErrors({}); setOutMissingSerial(null); setMasterMissing(null); setScanHint(''); };
   useEffect(() => {
     if (!message && !error) return;
     const timer = window.setTimeout(clearAllNotices, 5000);
@@ -312,6 +318,21 @@ export default function PartsPage() {
   const doResolve = async (rawValue: string, field: 'scan' | 'serial' = 'scan'): Promise<{ part: PartsMasterItem | null; unit: PartsUnit | null }> => {
     const value = rawValue.trim().toUpperCase();
     if (!value || !site) return { part: null, unit: null };
+    // Smart-scan gate: aux barcodes (lot codes like 2602+H0X, text like
+    // CHINA MAINLAND) never resolve, and part numbers never resolve as
+    // serials in Stock Out — drop the burst quietly instead of mis-filing.
+    const kind = classifyScanValue(value);
+    if (kind === 'aux' || (kind === 'part-number' && tab === 'out')) {
+      // Drop the burst and reset the box for the next pull: Stock Out
+      // keeps no lock, so its card goes too. Focus is returned so the
+      // next scan lands in this box even on scanners with a Tab suffix.
+      setScan(''); setSerial(''); setUnitSerial('');
+      if (tab === 'out') { setPart(null); setPartNumber(''); }
+      setScanHint(kind === 'aux' ? 'Ignored — not a serial.' : 'Part barcode — scan the serial.');
+      scanRef.current?.focus();
+      return { part: null, unit: null };
+    }
+    setScanHint('');
     const seq = ++resolveSeq.current;
     setResolving(true); setError(''); setMessage(''); setPart(null);
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
@@ -699,7 +720,13 @@ export default function PartsPage() {
       <>
         <div className="relative mt-4" key={variant}>
           <label className="block text-[11px] font-semibold text-[#3c3c43]">
-            {label}
+            <span className="flex items-center justify-between gap-2">
+              <span>{label}</span>
+              <button type="button" onClick={() => setCameraOpen(true)} aria-label="Scan serial with camera"
+                className="rounded-full bg-[#1d1d1f] px-2.5 py-1 text-[10px] font-semibold text-white">
+                Scan
+              </button>
+            </span>
             <input ref={scanRef} value={scan} autoFocus={Boolean(site)}
               onChange={(e) => {
                 const value = e.target.value.toUpperCase().replace(/[\r\n]+/g, '');
@@ -715,6 +742,11 @@ export default function PartsPage() {
                   if (variant === 'out') { setPart(null); setPartNumber(''); }
                   return;
                 }
+                // NOTE: no shape-filtering here on purpose — a scanner burst
+                // arrives keystroke by keystroke and any prefix looks like
+                // aux. Classification runs only on the completed burst
+                // (Enter / idle auto-resolve inside doResolve).
+                setScanHint('');
                 if (manualPartRef.current && (part || partNumber.trim())) {
                   // Serial for the manually chosen/typed part — attach it,
                   // never wipe or re-query the part.
@@ -779,8 +811,8 @@ export default function PartsPage() {
             <p className="mt-1.5 text-[11px] text-[#6e6e73]">Suggestions hidden. <button type="button" onClick={() => setFrequentHidden(false)} className="cursor-pointer font-semibold underline underline-offset-2 hover:text-[#1d1d1f]">Show</button></p>
           )}
         </div>
-        {fieldErrors.scan && !(masterMissing && !part && tab === 'in') && (
-          <p role="alert" className="mt-1.5 text-[11px] leading-4 text-[#b91c1c]">
+        {scanHint && <p className="mt-1.5 text-[11px] text-[#6e6e73]">{scanHint}</p>}
+        {fieldErrors.scan && !(masterMissing && !part && tab === 'in') && (          <p role="alert" className="mt-1.5 text-[11px] leading-4 text-[#b91c1c]">
             {masterMissing && !part && tab === 'out'
               ? (<>“{masterMissing}” {masterMissingPartial ? 'looks like a partial scan — scan the full barcode' : `is not yet on ${site ? `${site.name || site.code} stock` : 'this site’s stock'}`} <button type="button" onClick={goAddHere} className="cursor-pointer font-semibold underline underline-offset-2 hover:opacity-70">Add here</button></>)
               : fieldErrors.scan}
@@ -1237,7 +1269,7 @@ export default function PartsPage() {
               <div className="flex gap-5" role="tablist" aria-label="Parts operations">
                 {([['in', 'Stock In'], ['out', 'Stock Out']] as const).map(([key, label]) => (
                   <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => {
-                    setTab(key); setError(''); setMessage(''); setFieldErrors({}); setOutMissingSerial(null); setMismatchList([]); manualPartRef.current = false;
+                    setTab(key); setError(''); setMessage(''); setFieldErrors({}); setOutMissingSerial(null); setMismatchList([]); setScanHint(''); manualPartRef.current = false;
                     if (key !== 'in') { setMasterMissing(null); setQuickDescription(''); }
                     // A part locked by Stock IN (empty search bar) must not
                     // leak into Stock OUT as an orphan card.
@@ -1253,6 +1285,12 @@ export default function PartsPage() {
 
             {tab === 'in' && renderSerialBox('in')}
             {tab === 'out' && renderSerialBox('out')}
+            <CameraScanSheet open={cameraOpen} tab={tab} onClose={() => setCameraOpen(false)} onAccept={(value) => {
+              setCameraOpen(false);
+              setScan(value); setSerial(value); setUnitSerial(value);
+              setScanHint(''); setMasterMissing(null);
+              void doResolve(value, 'scan');
+            }} />
 
             {tab === 'in' && (
             <div className="mt-4 rounded-2xl bg-[#f7f7f8] p-4">
@@ -1261,7 +1299,7 @@ export default function PartsPage() {
                 View Stock In history ({tabMovements.length})
               </button>
               <div className="mt-4 space-y-3">
-                {part ? <PartResultCard part={part} nonSerialized={Boolean(nonSerialized)} /> : masterMissing ? (
+                {part && (scan.trim() || serial.trim() || unitSerial.trim() || lineSerials.length > 0) ? <PartResultCard part={part} nonSerialized={Boolean(nonSerialized)} /> : masterMissing ? (
                   <div role="alert" className="rounded-xl border border-dashed border-[#d2d2d7] bg-white px-3 py-3">
                     <p className="text-[12px] font-semibold text-[#1d1d1f]">“{masterMissing}” {masterMissingPartial ? 'looks like a partial scan' : `is not yet on ${site ? `${site.name || site.code} stock` : 'this site’s stock'}`}.</p>
                     <p className="mt-0.5 text-[11px] leading-4 text-[#6e6e73]">{masterMissingPartial ? 'Scan the full serial barcode — the part is identified from the EEE code inside it. Or enter the part number below:' : 'Enter the part number below — the description fills automatically when it’s known.'}</p>
