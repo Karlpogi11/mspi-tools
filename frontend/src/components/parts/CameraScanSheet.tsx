@@ -46,6 +46,10 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
   const [engine, setEngine] = useState('');
   const [formatsInfo, setFormatsInfo] = useState('');
   const [frames, setFrames] = useState(0);
+  // Heartbeat proving the effect loop is alive even when an engine
+  // produces no callbacks (ZXing only calls back on success).
+  const [ticks, setTicks] = useState(0);
+  const beatRef = useRef<number | null>(null);
   const [seen, setSeen] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState(true);
   const [torchOn, setTorchOn] = useState(false);
@@ -88,6 +92,7 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
 
   const stopAll = useCallback(() => {
     if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    if (beatRef.current !== null) { window.clearInterval(beatRef.current); beatRef.current = null; }
     try { controlsRef.current?.stop(); } catch { /* Already stopped. */ }
     controlsRef.current = null;
     for (const track of streamRef.current?.getTracks() || []) {
@@ -102,6 +107,8 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
     recentRef.current = [];
     setSerials([]); setCameraError(null); setErrorDetail('');
     setEngine(''); setFormatsInfo(''); setFrames(0); setSeen([]); setShowDebug(true);
+    setTicks(0);
+    beatRef.current = window.setInterval(() => setTicks((n) => n + 1), 1000);
     setTorchOn(false); setTorchReady(false);
     let cancelled = false;
     const handleRef = { current: handleValue };
@@ -135,7 +142,13 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
       const video = videoRef.current;
       if (video) {
         video.srcObject = stream;
-        try { await video.play(); } catch { /* Autoplay with gesture is enough. */ }
+        try { await video.play(); } catch { /* Gesture-gated — tap retries. */ }
+        // Phones often block programmatic play until a user gesture: one
+        // delayed retry, then tapping the video always plays + refocuses.
+        window.setTimeout(() => {
+          const v = videoRef.current;
+          if (v && v.paused && !cancelled) v.play().catch(() => undefined);
+        }, 1200);
       }
       // Torch when the hardware offers it (dim podium lighting), and lock
       // continuous focus/exposure for close-up labels (best-effort).
@@ -202,7 +215,15 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
         controlsRef.current = await reader.decodeFromStream(
           stream,
           video || undefined,
-          (result) => { if (result) handleRef.current(result.getText()); },
+          (result, error) => {
+            if (result) { handleRef.current(result.getText()); return; }
+            // NotFound per frame is normal silence — anything else means
+            // the decoder itself is broken, so surface it in diagnostics.
+            if (error && !/notfound/i.test(String((error as Error)?.name || error))) {
+              const name = String((error as Error)?.name || error).slice(0, 40);
+              setSeen((current) => (current[0] === `zxing: ${name}` ? current : [`zxing: ${name}`, ...current].slice(0, 5)));
+            }
+          },
         );
       } catch {
         if (!cancelled && !acceptedRef.current) setCameraError('failed');
@@ -224,8 +245,13 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
   };
 
   // Tap the viewfinder to kick autofocus — close-up labels often sit
-  // inside the blur zone until focus hunts again.
+  // inside the blur zone until focus hunts again. Also (re)starts
+  // playback: phones block programmatic play until a user gesture.
   const refocus = async () => {
+    const v = videoRef.current;
+    if (v && v.paused) {
+      try { await v.play(); } catch { /* Still blocked — user can retry. */ }
+    }
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
     try {
@@ -237,6 +263,11 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
   };
 
   if (!open) return null;
+
+  const vid = videoRef.current;
+  const vidInfo = !vid
+    ? 'no element'
+    : `rs:${vid.readyState} ${vid.videoWidth}x${vid.videoHeight}${vid.paused ? ' PAUSED — tap video' : ''}`;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#1d1d1f]/95" role="dialog" aria-modal="true" aria-label="Scan serial with camera">
@@ -296,7 +327,8 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
           </div>
           {showDebug && (
             <div className="mx-4 mb-2 rounded-xl bg-black/60 p-2 font-mono text-[10px] leading-4 text-white/70">
-              <p>engine: {engine || 'starting…'} · frames: {frames}{formatsInfo ? ` · fmts: ${formatsInfo}` : ''}</p>
+              <p>engine: {engine || 'starting…'} · alive: {ticks}s · polls: {frames}{formatsInfo ? ` · fmts: ${formatsInfo}` : ''}</p>
+              <p>video: {vidInfo}</p>
               {seen.length ? seen.map((entry) => <p key={entry}>{entry}</p>) : <p>no detections yet</p>}
             </div>
           )}
