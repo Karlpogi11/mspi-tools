@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyScanValue } from '../../lib/parts';
 
 // Stamp shown in diagnostics — confirms the phone runs the current build.
-const SHEET_VERSION = 'v8';
+const SHEET_VERSION = 'v9';
 
 interface CameraScanSheetProps {
   open: boolean;
@@ -10,12 +10,12 @@ interface CameraScanSheetProps {
   onClose: () => void;
 }
 
-// Auto-fill once the same serial has been seen this many times inside the
+// Accept once the same serial has been seen this many times inside the
 // recent window — detections alternate when several barcodes share the
 // frame, so consecutive agreement can never happen with a serial sitting
 // between other codes.
-const HITS_TO_ACCEPT = 3;
-const WINDOW_SIZE = 6;
+const HITS_TO_ACCEPT = 2;
+const WINDOW_SIZE = 8;
 const NATIVE_POLL_MS = 250;
 
 // 1D formats actually printed on part-box labels. The native detector is
@@ -39,9 +39,10 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const acceptedRef = useRef(false);
   const recentRef = useRef<string[]>([]);
-  // Counts any decoder output — the watchdog falls back to ZXing when the
-  // native engine stays silent.
-  const detectCountRef = useRef(0);
+  // Serial-only counter driving the ZXing watchdog: aux/part reads must
+  // never satisfy it, or a half-blind native engine looks "productive".
+  const serialCountRef = useRef(0);
+  const zxingStartedRef = useRef(false);
   const onAcceptRef = useRef(onAccept);
   onAcceptRef.current = onAccept;
   const [serials, setSerials] = useState<string[]>([]);
@@ -60,6 +61,15 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
   const [showDebug, setShowDebug] = useState(true);
   const [torchOn, setTorchOn] = useState(false);
   const [torchReady, setTorchReady] = useState(false);
+  // Detection boxes as % of the displayed video (object-cover aware).
+  // Colored by classification: serial green, part amber, aux dim.
+  const [boxes, setBoxes] = useState<Array<{ x: number; y: number; w: number; h: number; kind: string }>>([]);
+  // Last non-serial read, shown under the status line so a working-but-
+  // filtered scanner never looks identical to a dead one.
+  const [lastRejected, setLastRejected] = useState('');
+  // Zoom range probed from the hardware (null = unsupported).
+  const [zoomCap, setZoomCap] = useState<{ min: number; max: number; step: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
   // Brief "Focusing…" badge so every tap is visibly acknowledged.
   const [focusing, setFocusing] = useState(false);
 
@@ -83,20 +93,24 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
     const value = String(raw ?? '').trim().toUpperCase();
     if (!value || acceptedRef.current) return;
     const kind = classifyScanValue(value);
-    detectCountRef.current += 1;
     setSeen((current) => {
       const entry = `${value} → ${kind}`;
       if (current[0] === entry) return current;
       return [entry, ...current].slice(0, 5);
     });
     if (kind === 'serial') {
+      serialCountRef.current += 1;
       setSerials((current) => pushUnique(current, value, 4));
       const recent = [...recentRef.current, value].slice(-WINDOW_SIZE);
       recentRef.current = recent;
       if (recent.filter((v) => v === value).length >= HITS_TO_ACCEPT) accept(value);
+    } else {
+      // Surface rejections in plain UI — a working-but-filtered scanner
+      // must never look identical to a dead one.
+      const short = value.length > 24 ? `${value.slice(0, 24)}…` : value;
+      setLastRejected(`${short} — not a serial`);
     }
-    // Part numbers and aux codes never surface — the sheet is serial-only.
-    // aux: ignored entirely — keeps the rhythm while sweeping a label.
+    // Part numbers and aux codes never fill the box — serial-only.
   }, [accept, pushUnique]);
 
   const stopAll = useCallback(() => {
@@ -114,12 +128,14 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
     if (!open) return;
     acceptedRef.current = false;
     recentRef.current = [];
-    detectCountRef.current = 0;
+    serialCountRef.current = 0;
+    zxingStartedRef.current = false;
+    setLastRejected(''); setZoomCap(null); setZoom(1);
     setSerials([]); setCameraError(null); setErrorDetail('');
     setEngine(''); setFormatsInfo(''); setFrames(0); setSeen([]); setShowDebug(true);
     setTicks(0);
     beatRef.current = window.setInterval(() => setTicks((n) => n + 1), 1000);
-    setTorchOn(false); setTorchReady(false); setFocusing(false);
+    setTorchOn(false); setTorchReady(false); setFocusing(false); setBoxes([]);
     let cancelled = false;
     const handleRef = { current: handleValue };
     handleRef.current = handleValue;
@@ -130,10 +146,17 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
       // there is no permission prompt by design, so explain it directly.
       if (!window.isSecureContext) { setCameraError('insecure'); return; }
       if (!navigator.mediaDevices?.getUserMedia) { setCameraError('missing'); return; }
+      // HD request: dense Code 128 serial labels need ≥720p to decode,
+      // and many phones default to ~480p without explicit ideals. The
+      // debug panel's video WxH confirms the real resolution on-device.
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
           audio: false,
         });
       } catch (err) {
@@ -162,26 +185,41 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
           if (v && v.paused && !cancelled) v.play().catch(() => undefined);
         }, 1200);
       }
-      // Torch probe + focus lock, fire-and-forget: applyConstraints can
+      // Torch/focus/zoom probes, fire-and-forget: applyConstraints can
       // hang on some hardware and must never stall detection startup.
+      // Focus is requested in both plain and advanced forms — browsers
+      // honor only one of the two depending on vendor.
       try {
         const track = stream.getVideoTracks()[0];
-        const caps = (track?.getCapabilities?.() || {}) as { torch?: boolean };
+        const caps = (track?.getCapabilities?.() || {}) as { torch?: boolean; zoom?: { min: number; max: number; step: number } };
         if (track && caps.torch) setTorchReady(true);
+        if (caps.zoom && caps.zoom.max > 1) {
+          setZoomCap({ min: caps.zoom.min ?? 1, max: caps.zoom.max, step: caps.zoom.step || 0.1 });
+        }
         if (track) {
           void track.applyConstraints({
+            focusMode: 'continuous',
             advanced: [{ focusMode: 'continuous', exposureMode: 'continuous' }],
           } as unknown as MediaTrackConstraints).catch(() => undefined);
         }
-      } catch { /* Focus/torch probes are optional. */ }
+      } catch { /* Focus/torch/zoom probes are optional. */ }
       if (cancelled) return;
 
       // Fallback decoder. Limited to label-plausible formats and a short
       // inter-scan delay so close-up 1D sweeps stay fast. Reuses the
       // already-open stream (a second getUserMedia often fails silently).
       const startZxing = async () => {
+        // One retry: a stale-precached first chunk can fail once after a
+        // deploy, then succeed (service worker refreshes underneath).
+        const loadZxing = async () => {
+          try { return await import('@zxing/browser'); }
+          catch {
+            await new Promise((r) => window.setTimeout(r, 600));
+            return await import('@zxing/browser');
+          }
+        };
         try {
-          const { BrowserMultiFormatReader, BarcodeFormat } = await import('@zxing/browser');
+          const { BrowserMultiFormatReader, BarcodeFormat } = await loadZxing();
           if (cancelled || acceptedRef.current) return;
           const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 120 });
           reader.possibleFormats = [
@@ -210,7 +248,8 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
       };
 
       let nativeStarted = false;
-      const NativeDetector = (window as unknown as { BarcodeDetector?: new (opts?: { formats?: string[] }) => { detect(v: HTMLVideoElement): Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
+      type DetectedCode = { rawValue?: string; boundingBox?: { x: number; y: number; width: number; height: number } };
+      const NativeDetector = (window as unknown as { BarcodeDetector?: new (opts?: { formats?: string[] }) => { detect(v: HTMLVideoElement): Promise<DetectedCode[]> } }).BarcodeDetector;
       if (NativeDetector) {
         let detector = null;
         try {
@@ -233,28 +272,60 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
             if (videoRef.current.readyState < 2) return;
             setFrames((n) => n + 1);
             try {
-              const codes = await detector.detect(videoRef.current);
+              const v = videoRef.current;
+              const codes = await detector.detect(v);
+              // Map stream-space bounding boxes onto the displayed
+              // (object-cover cropped) video so boxes sit on the codes.
+              const dw = v.clientWidth || 1;
+              const dh = v.clientHeight || 1;
+              const vw = v.videoWidth || 1;
+              const vh = v.videoHeight || 1;
+              const scale = Math.max(dw / vw, dh / vh);
+              const visW = dw / scale;
+              const visH = dh / scale;
+              const ox = (vw - visW) / 2;
+              const oy = (vh - visH) / 2;
+              const clamp = (n: number) => Math.min(100, Math.max(0, n));
+              const nextBoxes: Array<{ x: number; y: number; w: number; h: number; kind: string }> = [];
               for (const code of codes) {
                 const text = code?.rawValue;
-                if (text) handleRef.current(text);
+                if (text) {
+                  handleRef.current(text);
+                  const b = code?.boundingBox;
+                  if (b) {
+                    nextBoxes.push({
+                      x: clamp(((b.x - ox) / visW) * 100),
+                      y: clamp(((b.y - oy) / visH) * 100),
+                      w: clamp((b.width / visW) * 100),
+                      h: clamp((b.height / visH) * 100),
+                      kind: classifyScanValue(text),
+                    });
+                  }
+                }
               }
+              setBoxes(nextBoxes.slice(0, 6));
             } catch { /* A bad frame is skipped — the next poll continues. */ }
           }, NATIVE_POLL_MS);
         }
       }
       if (!nativeStarted) {
         setEngine('zxing');
+        zxingStartedRef.current = true;
         await startZxing();
         return;
       }
-      // Watchdog: a silent native engine (supported but blind on this
-      // hardware) falls over to ZXing instead of sitting at zero forever.
+      // Watchdog: if no serial has been seen a few seconds in, run ZXing
+      // alongside native — whichever engine decodes first wins
+      // (acceptedRef guards duplicates). The counter is serial-only, so a
+      // half-blind native engine reading just part/aux codes can't
+      // satisfy it and stall here.
       window.setTimeout(() => {
-        if (cancelled || acceptedRef.current || detectCountRef.current > 0) return;
-        if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
-        setEngine('zxing (fallback)');
+        if (cancelled || acceptedRef.current || zxingStartedRef.current) return;
+        if (serialCountRef.current > 0) return;
+        zxingStartedRef.current = true;
+        setEngine((current) => (current === 'native' ? 'native+zxing' : current));
         void startZxing();
-      }, 8000);
+      }, 3000);
     };
 
     void start();
@@ -269,6 +340,20 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
       await track.applyConstraints({ advanced: [{ torch: next }] } as unknown as MediaTrackConstraints);
       setTorchOn(next);
     } catch { /* Leave the toggle as-is when hardware refuses. */ }
+  };
+
+  // Hardware zoom for close-up labels that sit in the blur zone — shown
+  // only when the camera reports a zoom range.
+  const changeZoom = async (direction: 1 | -1) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track || !zoomCap) return;
+    const raw = zoom + direction * zoomCap.step;
+    const next = Math.min(zoomCap.max, Math.max(zoomCap.min, Math.round(raw / zoomCap.step) * zoomCap.step));
+    if (next === zoom) return;
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: next }] } as unknown as MediaTrackConstraints);
+      setZoom(next);
+    } catch { /* Leave zoom as-is when hardware refuses. */ }
   };
 
   // Tap the viewfinder to refocus — close-up labels often sit inside the
@@ -355,7 +440,16 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
                   'bottom-3 left-3 border-b-2 border-l-2 rounded-bl-lg',
                   'bottom-3 right-3 border-b-2 border-r-2 rounded-br-lg',
                 ].map((pos) => (
-                  <span key={pos} className={`absolute h-7 w-7 ${pos} ${serials.length ? 'border-emerald-400' : 'border-white/80'}`} />
+                  <span key={pos} className={`absolute h-7 w-7 ${pos} ${serials.length ? 'border-emerald-400' : 'border-red-400/90'}`} />
+                ))}
+                {/* Live detection boxes: green on serials, amber on part
+                    numbers, dim on aux — red brackets mean still searching. */}
+                {boxes.map((b, i) => (
+                  <span
+                    key={`${b.x.toFixed(1)}-${b.y.toFixed(1)}-${i}`}
+                    className={`absolute rounded-sm border-2 ${b.kind === 'serial' ? 'border-emerald-400' : b.kind === 'part-number' ? 'border-amber-400/80' : 'border-white/40'}`}
+                    style={{ left: `${b.x}%`, top: `${b.y}%`, width: `${b.w}%`, height: `${b.h}%` }}
+                  />
                 ))}
                 <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90" />
                 {focusing && (
@@ -379,6 +473,11 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
                 ? 'Serial found — hold steady…'
                 : 'Point at the serial barcode — tap the video to refocus.'}
             </p>
+            {serials.length === 0 && lastRejected && (
+              <p className="mt-1 text-center font-mono text-[10px] text-white/50">
+                Read {lastRejected}
+              </p>
+            )}
           </div>
           <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
             {serials.map((s) => (
@@ -396,6 +495,15 @@ export default function CameraScanSheet({ open, onAccept, onClose }: CameraScanS
             </div>
           )}
           <div className="flex gap-2 px-4 pb-5">
+            {zoomCap && (
+              <span className="flex items-center gap-1 rounded-xl bg-white/10 px-1 py-1">
+                <button type="button" onClick={() => void changeZoom(-1)} aria-label="Zoom out"
+                  className="rounded-lg px-2.5 py-1 text-[14px] font-semibold text-white">−</button>
+                <span className="w-9 text-center text-[10px] tabular-nums text-white/70">{zoom.toFixed(1)}×</span>
+                <button type="button" onClick={() => void changeZoom(1)} aria-label="Zoom in"
+                  className="rounded-lg px-2.5 py-1 text-[14px] font-semibold text-white">+</button>
+              </span>
+            )}
             {torchReady && (
               <button type="button" onClick={() => void toggleTorch()}
                 className="flex-1 rounded-xl bg-white/10 py-2.5 text-[12px] font-semibold text-white">

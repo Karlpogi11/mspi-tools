@@ -1,7 +1,10 @@
 /// <reference lib="webworker" />
-import { precacheAndRoute } from 'workbox-precaching';
+import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: string; revision: string | null }> };
+// Drop precaches from older deploys first — a stale lazy chunk (e.g. the
+// ZXing decoder) after an update fails exactly like a broken feature.
+cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
 interface ServiceWorkerRegistrationWithBadge extends ServiceWorkerRegistration { setAppBadge?: (count?: number) => Promise<void>; clearAppBadge?: () => Promise<void>; }
