@@ -562,8 +562,12 @@ export default function PartsPage() {
     if (result && !result.skipped) setSheetDrifted(false);
   };
 
+  // Every signed-in role auto-syncs on open: drift check runs on mount
+  // (quiet replay only when the sheet actually changed) plus a 5-min
+  // visible-tab poll. Public viewers and the ALL overview never sync.
+  const canSheetSync = Boolean(user && site && site.code !== 'ALL');
   useEffect(() => {
-    if (!isAdmin || !site || site.code === 'ALL') { if (!isAdmin) setSheetSyncAt(null); return; }
+    if (!canSheetSync || !site) { if (!canSheetSync) setSheetSyncAt(null); return; }
     void api.parts.sheetStatus().then((status) => setSheetSyncAt(status.lastSheetSyncAt)).catch(() => undefined);
     void checkDriftAndSync().catch(() => undefined);
     const timer = window.setInterval(() => {
@@ -572,7 +576,7 @@ export default function PartsPage() {
     }, 300_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, site]);
+  }, [canSheetSync, site]);
 
   const loadPartUnits = async (partNumber: string, silent = false) => {
     if (!site) return;
@@ -1487,16 +1491,16 @@ export default function PartsPage() {
                   )}
                 </div>
                 <p className="mt-0.5 text-[11px] text-[#6e6e73]">
-                  {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}{isAdmin && sheetSyncAt && formatSheetTime(sheetSyncAt) ? ` · sheet ${formatSheetTime(sheetSyncAt)}` : ''}
+                  {distinctParts.toLocaleString()} part{distinctParts === 1 ? '' : 's'} · {totalUnits.toLocaleString()} unit{totalUnits === 1 ? '' : 's'}{outParts > 0 ? ` · ${outParts.toLocaleString()} out` : ''}{sheetSyncAt && formatSheetTime(sheetSyncAt) ? ` · sheet ${formatSheetTime(sheetSyncAt)}` : ''}
                 </p>
               </div>
-              {isAdmin && site && site.code !== 'ALL' && (
+              {canSheetSync && (
                 <button type="button" onClick={() => void manualSheetSync()} disabled={syncingSheet} aria-label="Sync stock from Google Sheet" title="Sync stock from Google Sheet" className="flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-full sm:h-8 bg-[#1d1d1f] px-3 text-[11px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40">
                   <svg className={`h-3.5 w-3.5 ${syncingSheet ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
                   {syncingSheet ? 'Syncing…' : 'Sheet sync'}
                 </button>
               )}
-              {isAdmin && site && site.code !== 'ALL' && sheetDrifted && !syncingSheet && (
+              {canSheetSync && sheetDrifted && !syncingSheet && (
                 <button type="button" onClick={() => void manualSheetSync()} title="The Google Sheet changed since the last sync" className="flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-full sm:h-8 bg-[#fef3c7] px-3 text-[11px] font-semibold text-[#92400e] hover:bg-[#fde68a]">
                   <span className="h-2 w-2 rounded-full bg-[#d97706]" aria-hidden="true" />
                   Sheet changed

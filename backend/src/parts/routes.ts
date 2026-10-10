@@ -919,7 +919,7 @@ router.post('/sheets/retry', requireAdmin, async (req, res) => {
 
 // ---------- Two-way sync (Sheet → Web) ----------
 
-router.get('/sheets/drift', requireAdmin, async (req, res) => {
+router.get('/sheets/drift', async (req, res) => {
   await ensurePartsTables();
   const cfg = await sheetConfig().catch(() => null);
   if (!cfg?.spreadsheet_id) { res.json({ changed: false, sheetModifiedAt: null, lastSyncAt: null, scopeMissing: false, connected: false }); return; }
@@ -938,13 +938,23 @@ router.get('/sheets/drift', requireAdmin, async (req, res) => {
   }
 });
 
-router.post('/sheets/sync', requireAdmin, async (req, res) => {
+router.post('/sheets/sync', async (req, res) => {
   await ensurePartsTables();
-  const siteCode = upper(req.body?.siteCode);
+  const requested = upper(req.body?.siteCode);
   const quiet = req.body?.quiet === true;
-  if (!siteCode || siteCode === 'ALL') { bad(res, 'Choose a site to sync from the sheet.'); return; }
-  const site = await getSite(siteCode);
-  if (!site) { bad(res, 'Site code not found.', 404); return; }
+  // Any role with tool access may sync; non-admin callers stay pinned to
+  // their verified site so one podium can never rebuild another site.
+  const scope = await resolveScope(req, res);
+  if (!scope) return;
+  let site: Site | null = null;
+  if (scope.all) {
+    if (!requested || requested === 'ALL') { bad(res, 'Choose a site to sync from the sheet.'); return; }
+    site = await getSite(requested);
+    if (!site) { bad(res, 'Site code not found.', 404); return; }
+  } else {
+    if (requested && requested !== 'ALL' && requested !== scope.site!.code) { bad(res, `This session is locked to site ${scope.site!.code}.`, 403); return; }
+    site = scope.site!;
+  }
   if (Date.now() - lastSheetReplayAt < 60_000) { res.json({ message: 'Sheet sync ran moments ago.', imported: 0, ins: 0, outs: 0, duplicates: 0, duplicateSerials: [], parts: 0, skipped: true }); return; }
   lastSheetReplayAt = Date.now();
   try {

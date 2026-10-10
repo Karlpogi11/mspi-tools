@@ -655,8 +655,8 @@ export const api = {
     saveSheetConfig: (spreadsheetId: string, spreadsheetName: string, stockInSheetName: string, stockOutSheetName: string) => request<{ message: string }>('/parts/sheets/config', { method: 'POST', body: JSON.stringify({ spreadsheetId, spreadsheetName, stockInSheetName, stockOutSheetName }) }),
     sheetList: (spreadsheetId: string) => request<{ title: string; sheets: string[] }>(`/parts/sheets/list?spreadsheetId=${encodeURIComponent(spreadsheetId)}`),
     retrySheet: () => request<{ synced: number; remaining: number }>('/parts/sheets/retry', { method: 'POST' }),
-    syncFromSheet: (siteCode: string, quiet = false) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[]; parts: number; skipped?: boolean }>('/parts/sheets/sync', { method: 'POST', body: JSON.stringify({ siteCode, quiet }) }),
-    sheetDrift: () => request<PartsSheetDrift>('/parts/sheets/drift'),
+    syncFromSheet: (siteCode: string, quiet = false) => request<{ message: string; imported: number; ins: number; outs: number; duplicates: number; duplicateSerials: string[]; parts: number; skipped?: boolean }>('/parts/sheets/sync', { method: 'POST', headers: siteHeaders(), body: JSON.stringify({ siteCode, quiet }) }),
+    sheetDrift: () => request<PartsSheetDrift>('/parts/sheets/drift', { headers: siteHeaders() }),
   },
 
   partsPublic: {
