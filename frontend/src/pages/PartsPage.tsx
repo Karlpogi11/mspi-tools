@@ -85,7 +85,7 @@ function serialsOutsideEee(part: { eee_code: string | null } | null, serials: st
 
 export default function PartsPage() {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const isAdmin = user?.roleName === 'Admin';
   const publicMode = !user;
   const routedSite = (location.state as { site?: PartsSite; siteToken?: string } | null)?.site ?? null;
@@ -204,8 +204,25 @@ export default function PartsPage() {
   // wipe or re-query the chosen part.
   const manualPartRef = useRef(false);
 
+  // Authed site tokens carry {userId, siteId, code}; public (logged-out)
+  // tokens carry only {siteId, code}. The two are not interchangeable — the
+  // authed stock endpoints reject a public token with "Verify the site code
+  // first." So the stored token must always match the current auth mode.
+  const isPublicSiteToken = (token: string): boolean => {
+    try {
+      const payload = token.split('.')[0];
+      if (!payload) return true;
+      const data = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { userId?: number };
+      return data.userId === undefined;
+    } catch {
+      return true;
+    }
+  };
+
   // Module-level token must be current before any data fetch fires.
-  setPartsSiteToken(siteToken);
+  useEffect(() => {
+    setPartsSiteToken(siteToken);
+  }, [siteToken]);
 
   useEffect(() => {
     try {
@@ -247,12 +264,20 @@ export default function PartsPage() {
 
   // Device memory: on a fresh open, re-verify the saved site code so the tool
   // lands straight in the site — only the code is stored; a fresh 24h token is
-  // issued here. Mount-only on purpose: changeSite() shows the gate again and
-  // must not auto-restore the old site out from under it.
+  // issued here. Waits for auth to settle first: verifying while the session
+  // is still loading mints the wrong token kind (public vs signed-in) and
+  // every later stock call fails with "Verify the site code first."
+  // changeSite() shows the gate again and must not auto-restore the old site
+  // out from under it — hence the restore-attempt guard.
+  const restoreAttemptedRef = useRef(false);
   useEffect(() => {
-    if (site) return;
+    if (authLoading) return;
+    // A routed or already-restored site counts as handled — later auth flips
+    // must heal the token (below), never resurrect a dismissed gate.
+    if (site || restoreAttemptedRef.current) { restoreAttemptedRef.current = true; return; }
     const saved = recalledPartsSiteCode();
     if (!saved) return;
+    restoreAttemptedRef.current = true;
     setRestoring(true);
     setStockBusy(true);
     void (async () => {
@@ -270,7 +295,40 @@ export default function PartsPage() {
       finally { setRestoring(false); if (!restored) setStockBusy(false); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, publicMode]);
+
+  // Heal a token/mode mismatch (e.g. a public token restored moments before
+  // the login session finished loading, or a login/logout while the page is
+  // open): re-verify the remembered code with the correct endpoint so stock
+  // calls stop failing.
+  const healAttemptedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (authLoading || !site || site.code === 'ALL' || !siteToken) return;
+    if (isPublicSiteToken(siteToken) === publicMode) return;
+    const key = `${siteToken}|${publicMode ? 'public' : 'authed'}`;
+    if (healAttemptedForRef.current === key) return;
+    healAttemptedForRef.current = key;
+    const saved = recalledPartsSiteCode() || site.code;
+    setError('');
+    setStockBusy(true);
+    void (async () => {
+      try {
+        const result = publicMode
+          ? await api.partsPublic.verifySite(saved)
+          : await api.parts.verifySite(saved);
+        setSite(result.site); setSiteCode(result.site.code); setSiteToken(result.siteToken);
+        setPartsSiteToken(result.siteToken);
+        setStock([]);
+      } catch (err) {
+        // Remembered code no longer verifies — drop the stale session and
+        // show the normal gate instead of a failing table.
+        setSite(null); setSiteCode(''); setSiteToken(''); setPartsSiteToken('');
+        setStock([]); setStockBusy(false);
+        setError((err as Error).message);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, publicMode, site, siteToken]);
 
   const openSwitchModal = () => {
     setError(''); setCodeInput(''); setGateDismissed(false); setSwitchingSite(true);
@@ -300,7 +358,8 @@ export default function PartsPage() {
     if (!site) return;
     void loadStock(site.code);
     void loadMovementHistory(site.code);
-  }, [site]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [site, siteToken, publicMode]);
   // Another device may stock in/out while this tab sits open — refresh on
   // return instead of polling, so idle tabs cost the server nothing.
   useEffect(() => {
@@ -310,7 +369,7 @@ export default function PartsPage() {
     window.addEventListener('focus', onReturn);
     return () => { document.removeEventListener('visibilitychange', onReturn); window.removeEventListener('focus', onReturn); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [site, selectedPart]);
+  }, [site, selectedPart, siteToken, publicMode]);
   useEffect(() => {
     if (site) scanRef.current?.focus();
   }, [site, tab]);
@@ -628,7 +687,10 @@ export default function PartsPage() {
     const searchFiltered = tableTerms.length
       ? units.filter((u) => tableTerms.every((t) => (u.serial || '').toLowerCase().includes(t)))
       : units;
-    const shownUnits = onlyAvailable ? searchFiltered.filter((u) => u.status === 'in') : searchFiltered;
+    // Typed search always wins over the Available pill: an OUT serial of this
+    // same part would otherwise filter down to "No matches" even though its
+    // row is right here (e.g. 0 available · 17 out).
+    const shownUnits = onlyAvailable && !tableTerms.length ? searchFiltered.filter((u) => u.status === 'in') : searchFiltered;
     const description = selectedPartDescription || units.find((u) => u.description)?.description || '';
     // Same family prefix inside the Set-box editor when opening it empty.
     const familyPrefix = locationPrefixForPart({ description }) || '';
@@ -1173,6 +1235,43 @@ export default function PartsPage() {
     if (browsingAll) setSelectedSite(hit.site_code);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableSearch, stock, site, browsingAll, selectedPart, selectedSite]);
+  // Serial-view cross-part jump (server fallback): inside one part's serial
+  // list the box only filters that part, so a pasted serial from another part
+  // shows "No matches". When the scoped filter finds nothing and the text
+  // looks like a serial, ask the server who owns it and jump straight to its
+  // table — no need to back out to the stock list first.
+  const jumpSeq = useRef(0);
+  useEffect(() => {
+    if (!selectedPart || !site) return;
+    const q = tableSearch.trim().toUpperCase().replace(/\s+/g, '');
+    if (q.length < 6) return;
+    // The instant local exact-jump above owns cache hits — only fall back
+    // when the serial isn't in the local stock list at all.
+    if (stock.some((u) => (u.serial || '').toUpperCase() === q)) return;
+    // Still matching inside this part's list? Then don't yank the user away.
+    const scopedTerms = tableSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (scopedTerms.length && partUnits.some((u) => scopedTerms.every((t) => (u.serial || '').toLowerCase().includes(t)))) return;
+    const seq = ++jumpSeq.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const result = publicMode && siteToken
+            ? await api.partsPublic.resolve(siteToken, { serial: q })
+            : await api.parts.resolve({ serial: q, siteCode: site.code });
+          if (seq !== jumpSeq.current) return; // stale — a newer search won
+          const ownerPart = result.unit?.part_number || result.part?.part_number;
+          if (!ownerPart || !result.unit?.serial) return; // unknown serial — keep "No matches"
+          suppressSearchReset.current = true;
+          // An OUT serial would stay hidden behind the Available filter — force All.
+          setOnlyAvailable(false);
+          openPartWorkbench(ownerPart, result.unit.serial);
+          if (browsingAll && result.unit.site_code) setSelectedSite(result.unit.site_code);
+        } catch { /* Unknown/offline — leave the scoped "No matches" as-is. */ }
+      })();
+    }, 600);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableSearch, selectedPart, site, stock, partUnits, publicMode, siteToken, browsingAll]);
   // Scroll an exact-hit serial row into view once per highlight.
   useEffect(() => {
     if (!highlightSerial || highlightSeenRef.current === highlightSerial) return;

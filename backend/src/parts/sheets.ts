@@ -484,6 +484,15 @@ export async function syncFromSheet(
           u.location = null;
           u.reference = row.reference || null;
           u.stockedOutDate = row.date;
+        } else if (row.partNumber) {
+          // OUT without a prior IN (e.g. the Stocked-In row was removed or
+          // never logged): still record a visible 'out' unit from the
+          // sheet's own part number + reference, so the serial shows as Out
+          // instead of silently vanishing from the workbench.
+          units.set(row.serial, {
+            partNumber: row.partNumber, serial: row.serial, quantity: 1, status: 'out',
+            location: null, reference: row.reference || null, occurredDate: row.date, stockedOutDate: row.date,
+          });
         }
       } else if (row.partNumber) {
         // Deduct from the in-stock bucket holding the most of this part
