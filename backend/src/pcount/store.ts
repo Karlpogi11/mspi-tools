@@ -201,6 +201,21 @@ function memNow() {
   return new Date().toISOString();
 }
 
+// Bump the session's updated_at whenever its products change, so "Recently
+// modified" ordering reflects real counting activity, not just session metadata.
+async function touchSession(sessionId: number): Promise<void> {
+  if (dbAvailable) {
+    try {
+      await getDb().update(pcountSessions).set({ updated_at: new Date() }).where(eq(pcountSessions.id, sessionId));
+    } catch {
+      // Non-fatal: ordering is a convenience; never fail a count write over it.
+    }
+    return;
+  }
+  const s = memSessions.get(sessionId);
+  if (s) memSessions.set(sessionId, { ...s, updated_at: memNow() });
+}
+
 function memListProducts(sessionId: number, opts?: { status?: string; sort?: string }): ProductWithExtra[] {
   let prods = Array.from(memProducts.values()).filter(p => p.session_id === sessionId);
   if (opts?.status && opts.status !== 'all') prods = prods.filter(p => p.status === opts.status);
@@ -745,12 +760,14 @@ export async function updateProduct(sessionId: number, code: string, data: Parti
       .limit(1);
     if (!row) return null;
     await db.update(pcountProducts).set(payload).where(eq(pcountProducts.id, row.id));
+    await touchSession(sessionId);
     return dbGetProduct(sessionId, row.product_code);
   }
   const p = Array.from(memProducts.values()).find(x => x.session_id === sessionId && x.product_code.trim().toUpperCase() === normalized);
   if (!p) return null;
   const updated = { ...p, ...payload };
   memProducts.set(updated.id, updated);
+  await touchSession(sessionId);
   return { ...updated, extra: memProductExtras.get(updated.id) || {} };
 }
 
@@ -798,6 +815,8 @@ export async function bulkUpdateProducts(
       }
     }
 
+    if (matchedCodes.length > 0) await touchSession(sessionId);
+
     const updatedCodeSet = new Set(matchedCodes);
     return {
       products: matchedCodes.length > 0
@@ -836,6 +855,8 @@ export async function bulkUpdateProducts(
     memProducts.set(product.id, product);
     updatedProducts.push({ ...product, extra: memProductExtras.get(product.id) || {} });
   }
+
+  if (updatedProducts.length > 0) await touchSession(sessionId);
 
   return {
     products: updatedProducts,
@@ -963,6 +984,7 @@ export async function createProducts(sessionId: number, products: { product_code
     }
   }
 
+  await touchSession(sessionId);
   return products.length;
 }
 
@@ -980,6 +1002,8 @@ export async function importCount(sessionId: number, products: { product_code: s
     const updates: { code: string; counted_qty: number; status: string }[] = [];
 
     for (const ep of existing) {
+      // Excluded rows stay Excluded — a count sheet never pulls them back in.
+      if (ep.status === 'excluded') continue;
       const upperCode = ep.product_code.toUpperCase();
       let countedQty = codeMap.get(upperCode);
       if (countedQty === undefined) {
@@ -1019,9 +1043,12 @@ export async function importCount(sessionId: number, products: { product_code: s
         `UPDATE pcount_products SET notes = NULL WHERE session_id = ? AND status <> 'missing'`,
         [sessionId]
       );
+      await touchSession(sessionId);
     }
   } else {
     for (const ep of existing) {
+      // Excluded rows stay Excluded — a count sheet never pulls them back in.
+      if (ep.status === 'excluded') continue;
       const upperCode = ep.product_code.toUpperCase();
       let countedQty = codeMap.get(upperCode);
       if (countedQty === undefined) {
@@ -1060,11 +1087,11 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
        END,
        status = CASE
          WHEN status IN ('pending', 'missing', 'matched') AND COALESCE(counted_qty, 0) + 1 >= system_qty THEN 'matched'
-         WHEN status IN ('pending', 'missing', 'matched') THEN 'missing'
+         WHEN status IN ('pending', 'missing', 'matched') THEN 'pending'
          ELSE status
        END,
        notes = CASE
-         WHEN status IN ('pending', 'missing', 'matched') AND COALESCE(counted_qty, 0) + 1 >= system_qty THEN NULL
+         WHEN status IN ('pending', 'missing', 'matched') THEN NULL
          ELSE notes
        END
        WHERE session_id = ? AND product_code = ?`,
@@ -1073,6 +1100,7 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
 
     const product = await dbGetProduct(sessionId, product_code);
     if (!product) return null;
+    await touchSession(sessionId);
     return { product, match: product.counted_qty === product.system_qty };
   }
 
@@ -1084,13 +1112,14 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
 
   if (['pending', 'missing', 'matched'].includes(product.status)) {
     newCounted = product.counted_qty + 1;
-    newStatus = newCounted >= product.system_qty ? 'matched' : 'missing';
+    // A live scan in progress stays Pending until the count reaches system qty.
+    newStatus = newCounted >= product.system_qty ? 'matched' : 'pending';
   }
 
   const isMatch = newCounted === product.system_qty;
 
   if (newCounted !== product.counted_qty || newStatus !== product.status) {
-    const updated = await updateProduct(sessionId, product_code, { counted_qty: newCounted, status: newStatus });
+    const updated = await updateProduct(sessionId, product_code, { counted_qty: newCounted, status: newStatus, notes: null });
     if (updated) return { product: updated, match: isMatch };
   }
 

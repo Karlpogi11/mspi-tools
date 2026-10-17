@@ -3,9 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { api, type Session } from '../../lib/api';
 import ToolHelp from '../../components/ToolHelp';
 
+function timeValue(value: string | null | undefined): number {
+  if (!value) return 0;
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? 0 : t;
+}
+
 export default function PcountIndexPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -17,9 +23,16 @@ export default function PcountIndexPage() {
   const [ownedSessionId, setOwnedSessionId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState(() => {
     try {
-      return localStorage.getItem('pcount.sessionSort') || 'newest';
+      return localStorage.getItem('pcount.sessionSort.v2') || 'modified';
     } catch {
-      return 'newest';
+      return 'modified';
+    }
+  });
+  const [filterKey, setFilterKey] = useState(() => {
+    try {
+      return localStorage.getItem('pcount.sessionFilter') || 'all';
+    } catch {
+      return 'all';
     }
   });
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -28,13 +41,13 @@ export default function PcountIndexPage() {
   async function load() {
     try {
       setError('');
-      const list = await api.sessions.list();
+      const list = await api.sessions.list(true);
       setSessions(list);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load sessions';
       setError(message);
     } finally {
-      setLoading(false);
+      setLoaded(true);
     }
   }
 
@@ -107,7 +120,7 @@ export default function PcountIndexPage() {
     return (
       <div
         onClick={() => openSession(s)}
-        className="bg-white border border-[#d2d2d7] px-5 py-4 hover:border-[#2563eb] transition-all cursor-pointer"
+        className="bg-white border border-[#e5e7eb] rounded-xl px-5 py-4 hover:border-[#2563eb] transition-colors cursor-pointer"
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-5 min-w-0">
@@ -127,7 +140,7 @@ export default function PcountIndexPage() {
             <div className="min-w-0">
               <h3 className="text-[14px] font-medium text-[#1d1d1f] truncate">{s.name}</h3>
               <p className="text-[12px] text-[#6e6e73] mt-0.5">
-                {s.status} &middot; {new Date(s.created_at).toLocaleDateString()} &middot; {s.checked}/{s.total} checked
+                {s.status} &middot; Created {new Date(s.created_at).toLocaleDateString()} &middot; Modified {new Date(s.updated_at).toLocaleDateString()} &middot; {s.checked}/{s.total} checked
                 {s.owner_email && (
                   <span className="ml-1.5">&middot; Owner: {s.is_owner ? 'You' : s.owner_email}</span>
                 )}
@@ -159,7 +172,7 @@ export default function PcountIndexPage() {
                 </span>
               ) : null}
               {!!s.active_scanner_count && (
-                <span className="text-[#a16207] text-[12px]">
+                <span className="text-[#b45309] text-[12px]">
                   {s.active_scanner_count} scanning
                 </span>
               )}
@@ -189,33 +202,55 @@ export default function PcountIndexPage() {
     }
   }
 
-  if (loading) {
+  if (!loaded) {
     return <div className="text-center py-20 text-[14px] text-[#6e6e73]">Loading...</div>;
   }
 
-  const allSessions = [...sessions].sort((a, b) => {
-    switch (sortKey) {
-      case 'oldest':
-        return String(a.created_at).localeCompare(String(b.created_at)) || a.id - b.id;
-      case 'name-asc':
-        return a.name.localeCompare(b.name) || b.id - a.id;
-      case 'name-desc':
-        return b.name.localeCompare(a.name) || b.id - a.id;
-      case 'progress':
-        return b.progress - a.progress || b.id - a.id;
-      case 'finished':
-        return Number(b.progress >= 100) - Number(a.progress >= 100)
-          || String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id;
-      case 'newest':
-      default:
-        return String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id;
-    }
-  });
+  const allSessions = [...sessions]
+    .filter((s) => {
+      switch (filterKey) {
+        case 'mine':
+          return Boolean(s.is_owner);
+        case 'active':
+          return !s.submitted_at;
+        case 'submitted':
+          return Boolean(s.submitted_at);
+        default:
+          return true;
+      }
+    })
+    .sort((a, b) => {
+      switch (sortKey) {
+        case 'oldest':
+          return timeValue(a.created_at) - timeValue(b.created_at) || a.id - b.id;
+        case 'created':
+          return timeValue(b.created_at) - timeValue(a.created_at) || b.id - a.id;
+        case 'name-asc':
+          return a.name.localeCompare(b.name) || b.id - a.id;
+        case 'name-desc':
+          return b.name.localeCompare(a.name) || b.id - a.id;
+        case 'progress':
+          return b.progress - a.progress || b.id - a.id;
+        case 'finished':
+          return Number(b.progress >= 100) - Number(a.progress >= 100)
+            || timeValue(b.created_at) - timeValue(a.created_at) || b.id - a.id;
+        case 'modified':
+        default:
+          return timeValue(b.updated_at) - timeValue(a.updated_at) || b.id - a.id;
+      }
+    });
 
   function changeSort(next: string) {
     setSortKey(next);
     try {
-      localStorage.setItem('pcount.sessionSort', next);
+      localStorage.setItem('pcount.sessionSort.v2', next);
+    } catch {}
+  }
+
+  function changeFilter(next: string) {
+    setFilterKey(next);
+    try {
+      localStorage.setItem('pcount.sessionFilter', next);
     } catch {}
   }
 
@@ -262,6 +297,24 @@ export default function PcountIndexPage() {
         />
         <label className="flex items-center gap-2 text-[12px] text-[#6e6e73]">
           <svg className="w-4 h-4 text-[#6e6e73]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 5h18" />
+            <path d="M6 12h12" />
+            <path d="M10 19h4" />
+          </svg>
+          Filter
+          <select
+            value={filterKey}
+            onChange={(e) => changeFilter(e.target.value)}
+            className="pcount-select"
+          >
+            <option value="all">All sessions</option>
+            <option value="mine">My sessions</option>
+            <option value="active">Active</option>
+            <option value="submitted">Submitted</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-[12px] text-[#6e6e73]">
+          <svg className="w-4 h-4 text-[#6e6e73]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M11 5h10" />
             <path d="M11 9h7" />
             <path d="M11 13h4" />
@@ -272,10 +325,11 @@ export default function PcountIndexPage() {
           <select
             value={sortKey}
             onChange={(e) => changeSort(e.target.value)}
-            className="px-3 py-2.5 border border-[#d2d2d7] rounded-lg text-[13px] bg-white text-[#1d1d1f] focus:outline-none focus:border-[#2563eb] cursor-pointer"
+            className="pcount-select"
           >
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
+            <option value="modified">Recently modified</option>
+            <option value="created">Date created — newest</option>
+            <option value="oldest">Date created — oldest</option>
             <option value="finished">Finished 100% first, latest on top</option>
             <option value="name-asc">Name A–Z</option>
             <option value="name-desc">Name Z–A</option>
@@ -285,7 +339,7 @@ export default function PcountIndexPage() {
       </div>
 
       {error && (
-        <div className="mb-5 flex items-center justify-between gap-4 border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-[13px] text-[#b91c1c]">
+        <div className="mb-5 flex items-center justify-between gap-4 border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-[13px] text-[#dc2626]">
           <span>{error}</span>
           <button onClick={() => { setError(''); load(); }} className="font-medium underline cursor-pointer">Retry</button>
         </div>
@@ -323,14 +377,16 @@ export default function PcountIndexPage() {
           {allSessions.length === 0 ? (
             <div className="bg-white border border-[#d2d2d7] p-12 text-center">
               <p className="text-[14px] text-[#6e6e73] mb-2">
-                No sessions yet. Create one to get started.
+                {sessions.length === 0 ? 'No sessions yet. Create one to get started.' : 'No sessions match this filter.'}
               </p>
-              <button
-                onClick={createSession}
-                className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] disabled:opacity-50 transition-colors cursor-pointer"
-              >
-                New session
-              </button>
+              {sessions.length === 0 && (
+                <button
+                  onClick={createSession}
+                  className="px-4 py-2 bg-[#2563eb] text-white text-[13px] font-medium rounded-lg hover:bg-[#1d4ed8] disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  New session
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid gap-2">

@@ -22,6 +22,7 @@ interface Props {
   onToggleStatus?: (code: string) => void;
   onToggleAllStatus?: () => void;
   onExcludeSelectedStatus?: () => void;
+  onSetStatus?: (codes: string[], status: Product['status']) => void;
   selectionAction?: 'exclude' | 'restore';
   excludingPending?: boolean;
   showProductSelection?: boolean;
@@ -57,11 +58,11 @@ export const ALL_COLUMNS = [
 const CORE_KEYS = ALL_COLUMNS.filter(c => c.core).map(c => c.key);
 const STORAGE_KEY = 'pcount.tableColumns.v2';
 
-const statusStyles: Record<string, { bg: string; dot: string; label: string }> = {
-  pending:  { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#6e6e73]', label: 'Pending' },
-  excluded: { bg: 'bg-[#f5f5f7]',        dot: 'bg-[#9a9aa0]', label: 'Excluded' },
-  matched:  { bg: 'bg-[#f0fdf4]',        dot: 'bg-[#16a34a]', label: 'Matched' },
-  missing:  { bg: 'bg-[#fffbeb]',        dot: 'bg-[#d97706]', label: 'Missing' },
+const statusStyles: Record<string, { label: string }> = {
+  pending:  { label: 'Pending' },
+  excluded: { label: 'Excluded' },
+  matched:  { label: 'Matched' },
+  missing:  { label: 'Missing' },
 };
 
 function loadSaved(): string[] {
@@ -112,14 +113,16 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   </div>;
 }
 
-export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, selectionAction = 'exclude', excludingPending = false, showProductSelection = false, selectedProductCodes = [], onToggleProduct, onToggleAllProducts, productSelectionDisabled = false, suggestionByCode, onQuickStolen, quickStolenCode = null, groupSuggested = false }: Props) {
+export default function ProductTable({ products, defaultColumns = [], sortDesc, onToggleSort, onUpdate, onSelect, selectedCode, readOnly, scrollToCode, scanSequence = 0, editMode = false, onCountChange, visibleColumns, onVisibleColumnsChange, showStatusSelection = false, selectableStatus = 'pending', selectedStatusCodes = [], onToggleStatus, onToggleAllStatus, onExcludeSelectedStatus, onSetStatus, selectionAction = 'exclude', excludingPending = false, showProductSelection = false, selectedProductCodes = [], onToggleProduct, onToggleAllProducts, productSelectionDisabled = false, suggestionByCode, onQuickStolen, quickStolenCode = null, groupSuggested = false }: Props) {
   const [visible, setVisible] = useState<string[]>(() => resolveColumns(defaultColumns));
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [savingCode, setSavingCode] = useState<string | null>(null);
+  const [bulkStatus, setBulkStatus] = useState('');
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const countInputRefs = useRef(new Map<string, HTMLInputElement>());
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const headerCheckboxRef = useRef<HTMLInputElement | null>(null);
   const lastDefaultRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -190,15 +193,30 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
     : sorted;
 
   const shown = ALL_COLUMNS.filter(c => (visibleColumns ?? visible).includes(c.key) || (editMode && c.key === 'Is Match'));
+  const showSelection = showProductSelection || showStatusSelection;
   const selectableProducts = showProductSelection
     ? products.filter(product => product.status !== 'excluded')
     : products.filter(product => product.status === selectableStatus && !(selectableStatus === 'missing' && String(product.notes || '').trim().toLowerCase() === 'stolen'));
   const selectedStatusSet = new Set(selectedStatusCodes);
-  const allStatusSelected = selectableProducts.length > 0 && selectableProducts.every(product => selectedStatusSet.has(product.product_code));
+  const selectedProductSet = new Set(selectedProductCodes);
+  const activeSelectionSet = showProductSelection ? selectedProductSet : selectedStatusSet;
+  const selectedCodes = showProductSelection ? selectedProductCodes : selectedStatusCodes;
+  const selectedCount = selectedCodes.length;
+  const allSelected = selectableProducts.length > 0 && selectableProducts.every(product => activeSelectionSet.has(product.product_code));
   const selectableLabel = selectableStatus === 'missing' ? 'missing' : selectableStatus === 'excluded' ? 'excluded' : 'pending';
   const actionLabel = selectionAction === 'restore' ? 'Re-include selected' : 'Exclude selected';
-  const selectedProductSet = new Set(selectedProductCodes);
-  const allProductsSelected = selectableProducts.length > 0 && selectableProducts.every(product => selectedProductSet.has(product.product_code));
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = selectedCount > 0 && !allSelected;
+    }
+  }, [selectedCount, allSelected]);
+
+  const rowSelectable = (product: Product) => showProductSelection
+    ? product.status !== 'excluded'
+    : product.status === selectableStatus && !(selectableStatus === 'missing' && String(product.notes || '').trim().toLowerCase() === 'stolen');
+  const handleToggleRow = showProductSelection ? onToggleProduct : onToggleStatus;
+  const handleToggleAll = showProductSelection ? onToggleAllProducts : onToggleAllStatus;
 
   function beginEdit(product: Product) {
     if (!editMode || readOnly || savingCode) return;
@@ -244,21 +262,63 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
           30%, 70% { transform: translateX(4px); }
         }
       `}</style>
-      {showStatusSelection && selectableProducts.length > 0 && (
-        <div className="flex items-center justify-between gap-3 border-b border-[#d2d2d7]/60 bg-[#fbfbfd] px-4 py-3">
+      {showSelection && selectableProducts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#e5e7eb] bg-[#f5f5f7] px-3 py-2.5">
           <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] font-medium text-[#1d1d1f]">
-            <input type="checkbox" checked={allStatusSelected} onChange={onToggleAllStatus} disabled={excludingPending} className="h-4 w-4 accent-[#2563eb]" />
-            Select all {selectableLabel}
+            <input type="checkbox" checked={allSelected} onChange={handleToggleAll} disabled={excludingPending || productSelectionDisabled} className="h-4 w-4 accent-[#2563eb]" />
+            Select all {showProductSelection ? 'visible' : selectableLabel}
           </label>
-          <button type="button" onClick={onExcludeSelectedStatus} disabled={selectedStatusCodes.length === 0 || excludingPending} className="rounded-lg border border-[#d2d2d7] bg-white px-3 py-1.5 text-[12px] font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] disabled:cursor-not-allowed disabled:opacity-50">
-            {excludingPending ? (selectionAction === 'restore' ? 'Re-including…' : 'Excluding…') : `${actionLabel}${selectedStatusCodes.length ? ` (${selectedStatusCodes.length})` : ''}`}
-          </button>
+          {selectedCount > 0 && <span className="pcount-chip pcount-chip--pending">{selectedCount} selected</span>}
+          <div className="pcount-toolbar-spacer" />
+          {onSetStatus && (
+            <div className="flex items-center gap-2">
+              <select
+                value={bulkStatus}
+                onChange={e => setBulkStatus(e.target.value)}
+                disabled={selectedCount === 0 || excludingPending}
+                title="Set the status of all selected rows"
+                className="pcount-select"
+              >
+                <option value="">Set status…</option>
+                <option value="matched">Matched</option>
+                <option value="missing">Missing</option>
+                <option value="pending">Pending</option>
+                <option value="excluded">Excluded</option>
+              </select>
+              <button
+                type="button"
+                disabled={selectedCount === 0 || !bulkStatus || excludingPending}
+                onClick={() => { onSetStatus(selectedCodes, bulkStatus as Product['status']); setBulkStatus(''); }}
+                className="pcount-secondary-button disabled:cursor-not-allowed"
+              >
+                Apply{selectedCount ? ` (${selectedCount})` : ''}
+              </button>
+            </div>
+          )}
+          {onExcludeSelectedStatus && !showProductSelection && (
+            <button type="button" onClick={onExcludeSelectedStatus} disabled={selectedCount === 0 || excludingPending} className="pcount-secondary-button disabled:cursor-not-allowed">
+              {excludingPending ? (selectionAction === 'restore' ? 'Re-including…' : 'Excluding…') : `${actionLabel}${selectedCount ? ` (${selectedCount})` : ''}`}
+            </button>
+          )}
         </div>
       )}
       <div ref={tableScrollRef} className="pcount-product-table-scroll min-h-0 flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="pcount-table-head sticky top-0 z-10">
+              {showSelection && (
+                <th className="w-10 px-3 py-3 text-center">
+                  <input
+                    ref={headerCheckboxRef}
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={handleToggleAll}
+                    disabled={excludingPending || productSelectionDisabled}
+                    className="h-4 w-4 align-middle accent-[#2563eb]"
+                    aria-label={showProductSelection ? 'Select all products' : `Select all ${selectableLabel}`}
+                  />
+                </th>
+              )}
                   {shown.map(col => (
                 <th
                   key={col.key}
@@ -270,9 +330,6 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                       : col.key === 'Is Match' ? 'text-center' : 'text-left'
                   }`}
                 >
-                  {col.key === 'Product Code' && showProductSelection && (
-                    <input type="checkbox" checked={allProductsSelected} onChange={onToggleAllProducts} disabled={productSelectionDisabled} onClick={e => e.stopPropagation()} className="mr-2 h-4 w-4 align-middle accent-[#2563eb]" aria-label="Select all products" />
-                  )}
                   {editMode && col.key === 'System Qty' ? 'System Quantity' :
                     editMode && col.key === 'Qty' ? 'Actual Quantity' : col.label}
                   {col.key === 'Product Code' ? ` ${sortDesc ? '\u2193' : '\u2191'}` : ''}
@@ -288,16 +345,12 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
               const isOver = p.counted_qty > p.system_qty;
               const flagged = doGroup && hasHistory(p.product_code);
               const showGroupHeader = doGroup && (rowIndex === 0 || hasHistory(displayed[rowIndex - 1].product_code) !== flagged);
-              // Clean rows: no history words anywhere ("excluded ×N"/"missing ×N" removed).
-              // Only the Missing pill + Stolen badge + shortfall show under the code.
-              // Exclude uses the checkbox + bulk bar. Missing rows keep the Stolen action.
-              const showStolenAction = Boolean(onQuickStolen) && p.status === 'missing';
 
               return (
                 <Fragment key={p.id}>
                   {showGroupHeader && (
-                    <tr className="bg-[#f7f7f8]">
-                      <td colSpan={shown.length} className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#6e6e73]">
+                    <tr className="bg-[#f5f5f7]">
+                      <td colSpan={shown.length + (showSelection ? 1 : 0)} className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#6e6e73]">
                         {flagged ? 'Flagged from previous sessions — consider excluding' : 'Needs attention — find these'}
                       </td>
                     </tr>
@@ -309,48 +362,35 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                     else rowRefs.current.delete(p.product_code);
                   }}
                   onClick={() => onSelect?.(p)}
-                  className={`border-b border-[#d2d2d7]/60 hover:bg-[#fafafa] cursor-pointer ${
+                  className={`border-b border-[#e5e7eb] hover:bg-[#f5f5f7] cursor-pointer ${
                     isSelected ? 'bg-[#eff6ff] ring-2 ring-inset ring-[#2563eb]' : ''
                   } ${
-                    p.status === 'excluded' ? 'opacity-50 bg-[#fafafa]' : ''
+                    p.status === 'excluded' ? 'opacity-50' : ''
                   }`}
                 >
+                  {showSelection && (
+                    <td className="w-10 px-3 py-3 text-center">
+                      {rowSelectable(p) && (
+                        <input
+                          type="checkbox"
+                          checked={activeSelectionSet.has(p.product_code)}
+                          onChange={() => handleToggleRow?.(p.product_code)}
+                          onClick={e => e.stopPropagation()}
+                          disabled={showProductSelection ? productSelectionDisabled : excludingPending}
+                          className="h-4 w-4 accent-[#2563eb]"
+                          aria-label={`Select ${p.product_code}`}
+                        />
+                      )}
+                    </td>
+                  )}
                   {shown.map(col => {
                     if (col.key === 'Product Code') {
                       return (
                         <td key={col.key} className="px-4 py-3">
                           <div className="flex items-center gap-2 min-w-0">
-                            {showProductSelection && p.status !== 'excluded' && <input type="checkbox" checked={selectedProductSet.has(p.product_code)} onChange={() => onToggleProduct?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={productSelectionDisabled} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} to complete`} />}
-                            {showStatusSelection && p.status === selectableStatus && String(p.notes || '').trim().toLowerCase() !== 'stolen' && <input type="checkbox" checked={selectedStatusSet.has(p.product_code)} onChange={() => onToggleStatus?.(p.product_code)} onClick={e => e.stopPropagation()} disabled={excludingPending} className="h-4 w-4 flex-shrink-0 accent-[#2563eb]" aria-label={`Select ${p.product_code} for exclusion`} />}
-                            <span className={`w-2 h-2 rounded-full ${st.dot} flex-shrink-0`} />
-                            <span className="font-mono text-[12px] text-[#1d1d1f] font-medium">{p.product_code}</span>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${st.bg} ${
-                              p.status === 'matched' ? 'text-[#16a34a]' :
-                              p.status === 'missing' ? 'text-[#d97706]' :
-                              'text-[#6e6e73]'
-                            }`}>
-                              {st.label}
-                            </span>
+                            <span className="font-mono text-[12px] font-medium text-[#1d1d1f]">{p.product_code}</span>
+                            <span className={`pcount-chip pcount-chip--${p.status}`}>{st.label}</span>
                           </div>
-                          {showStolenAction && (
-                            <div className="mt-1 flex items-center gap-2 pl-4 text-[10px] text-[#6e6e73]">
-                              {String(p.notes || '').trim().toLowerCase() === 'stolen' ? (
-                                <span title="Marked stolen — stays in Missing with shortfall qty for the report" className="rounded-full bg-[#fef2f2] px-2 py-0.5 font-semibold text-[#b91c1c]">
-                                  Stolen ✓
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={quickStolenCode === p.product_code}
-                                  onClick={(e) => { e.stopPropagation(); onQuickStolen!(p.product_code); }}
-                                  title="Mark this missing row as stolen (stays in Missing, remark flows to report)"
-                                  className="cursor-pointer rounded-full border border-[#fecaca] bg-[#fef2f2] px-2 py-0.5 font-semibold text-[#b91c1c] hover:bg-[#fee2e2] disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {quickStolenCode === p.product_code ? 'Marking…' : 'Stolen'}
-                                </button>
-                              )}
-                            </div>
-                          )}
                         </td>
                       );
                     }
@@ -422,8 +462,8 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                               </button>
                             )}
                             {shortfall > 0 && !isEditing && (
-                              <span title={`${shortfall} pcs short (system ${p.system_qty} − actual ${p.counted_qty})`} className="rounded-full bg-[#fef3c7] px-1.5 py-px text-[10px] font-semibold text-[#b45309]">
-                                −{shortfall}
+                              <span title={`${shortfall} pcs short (system ${p.system_qty}, actual ${p.counted_qty})`} className="rounded-full bg-[#fef3c7] px-1.5 py-px text-[10px] font-semibold text-[#b45309]">
+                                {shortfall} short
                               </span>
                             )}
                             {!readOnly && !isEditing && (
@@ -447,8 +487,8 @@ export default function ProductTable({ products, defaultColumns = [], sortDesc, 
                         <td key={col.key} className="px-4 py-3 text-center">
                           <span className={`inline-flex min-w-12 justify-center rounded-md px-2 py-1 text-[11px] font-semibold ${
                             matchesExport
-                              ? 'bg-[#f0fdf4] text-[#15803d]'
-                              : 'bg-[#fef2f2] text-[#b91c1c]'
+                              ? 'bg-[#f0fdf4] text-[#16a34a]'
+                              : 'bg-[#fef2f2] text-[#dc2626]'
                           }`}>
                             {matchesExport ? 'TRUE' : 'FALSE'}
                           </span>

@@ -30,14 +30,14 @@ function normalizeProductStatus(product: Product): Product {
   const countedQty = Number(product.counted_qty) || 0;
   const systemQty = Number(product.system_qty) || 0;
   const status = String(product.status || '').trim().toLowerCase();
-  // Reconcile stale statuses with qty so Is Match and the pill never disagree
-  // (e.g. a Missing row whose actual now equals system becomes Matched).
-  // Explicit-zero Missing (count-sheet zero) stays Missing; untouched rows stay Pending.
-  if (countedQty > 0) {
-    return { ...product, status: countedQty >= systemQty ? 'matched' : 'missing' };
+  // Matched once at least the system qty is counted (0/0 counts as matched).
+  if (countedQty >= systemQty && (countedQty > 0 || systemQty === 0)) {
+    return { ...product, status: 'matched' };
   }
-  if (status === 'missing' || status === 'matched' || status === 'pending') {
-    return { ...product, status };
+  // Under system qty: a scan still in progress stays Pending. Only an explicitly
+  // confirmed shortage (count import / default seeds / manual) stays Missing.
+  if (countedQty > 0 || status === 'missing') {
+    return { ...product, status: status === 'missing' ? 'missing' : 'pending' };
   }
   return { ...product, status: 'pending' };
 }
@@ -211,7 +211,9 @@ export default function PcountSessionPage() {
 
     if (['pending', 'missing', 'matched'].includes(product.status)) {
       countedQty += 1;
-      status = countedQty >= product.system_qty ? 'matched' : 'missing';
+      // Mid-scan stays Pending until it reaches system qty.
+      status = countedQty >= product.system_qty ? 'matched' : 'pending';
+      return { ...product, counted_qty: countedQty, status, notes: null, match: countedQty === product.system_qty };
     }
 
     return { ...product, counted_qty: countedQty, status, match: countedQty === product.system_qty };
@@ -291,9 +293,11 @@ export default function PcountSessionPage() {
     // Stolen missing rows are not selectable for exclude — they stay in Missing.
     const selectableCodes = products
       .filter(product => product.status === statusFilter && !(statusFilter === 'missing' && isStolenRow(product)))
+      .filter(product => categoryFilter === 'all' || (product.category || '') === categoryFilter)
+      .filter(product => !searchQuery || product.product_code.toLowerCase().includes(searchQuery.toLowerCase()) || product.description.toLowerCase().includes(searchQuery.toLowerCase()))
       .map(product => product.product_code);
     setSelectedStatusCodes(previous => previous.length === selectableCodes.length ? [] : selectableCodes);
-  }, [products, statusFilter]);
+  }, [products, statusFilter, categoryFilter, searchQuery]);
 
   const toggleProductSelection = useCallback((code: string) => {
     setSelectedProductCodes(previous => previous.includes(code)
@@ -351,7 +355,7 @@ export default function PcountSessionPage() {
     const skippedStolen = eligible.filter(product => statusFilter === 'missing' && isStolenRow(product)).length;
     const targets = eligible.filter(product => !(statusFilter === 'missing' && isStolenRow(product)));
     if (targets.length === 0) {
-      if (skippedStolen > 0) setPendingExclusionError(`${skippedStolen} stolen item${skippedStolen === 1 ? '' : 's'} stay${skippedStolen === 1 ? 's' : ''} in Missing and cannot be excluded.`);
+      if (skippedStolen > 0) setPendingExclusionError(`${skippedStolen} flagged item${skippedStolen === 1 ? '' : 's'} stay${skippedStolen === 1 ? 's' : ''} in Missing and cannot be excluded.`);
       return;
     }
     const nextStatus = statusFilter === 'excluded' ? 'pending' : 'excluded';
@@ -388,10 +392,55 @@ export default function PcountSessionPage() {
     if (succeeded.size < targets.length) {
       setPendingExclusionError(`${targets.length - succeeded.size} item${targets.length - succeeded.size === 1 ? '' : 's'} could not be excluded. Please try again.`);
     } else if (skippedStolen > 0) {
-      setPendingExclusionError(`${skippedStolen} stolen item${skippedStolen === 1 ? '' : 's'} kept in Missing (not excluded).`);
+      setPendingExclusionError(`${skippedStolen} flagged item${skippedStolen === 1 ? '' : 's'} kept in Missing (not excluded).`);
     }
     setExcludingPending(false);
   }, [products, selectedStatusCodes, sessionId, statusFilter]);
+
+  const applyBulkStatus = useCallback(async (codes: string[], status: Product['status']) => {
+    const targets = Array.from(new Set(codes));
+    if (targets.length === 0 || excludingPending) return;
+    const resetsQty = status === 'pending' || status === 'excluded';
+    setExcludingPending(true);
+    setPendingExclusionError('');
+    setBulkMessage('');
+    const results = await Promise.allSettled(targets.map(code => fetch(
+      `/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status, ...(resetsQty ? { counted_qty: 0 } : {}) }),
+      },
+    )));
+    const succeeded = new Set(targets.filter((_, index) => {
+      const result = results[index];
+      return result.status === 'fulfilled' && result.value.ok;
+    }));
+
+    if (succeeded.size > 0) {
+      setProducts(previous => {
+        const updated = previous.map(product => succeeded.has(product.product_code)
+          ? { ...product, status, ...(resetsQty ? { counted_qty: 0 } : {}) }
+          : product);
+        productsRef.current = updated;
+        const countable = updated.filter(product => product.status !== 'excluded');
+        const checked = countable.filter(product => product.status !== 'pending').length;
+        setSession(current => current ? { ...current, checked, total: countable.length, progress: countable.length > 0 ? Math.floor((checked / countable.length) * 100) : 0 } : current);
+        return updated;
+      });
+      setSelectedStatusCodes(previous => previous.filter(code => !succeeded.has(code)));
+      setSelectedProductCodes(previous => previous.filter(code => !succeeded.has(code)));
+    }
+
+    const failed = targets.length - succeeded.size;
+    if (failed > 0) {
+      setPendingExclusionError(`${failed} item${failed === 1 ? '' : 's'} could not be updated. Please try again.`);
+    } else {
+      setBulkMessage(`${targets.length} product${targets.length === 1 ? '' : 's'} set to ${status}.`);
+    }
+    setExcludingPending(false);
+  }, [excludingPending, sessionId]);
 
   const handleCompleteCount = useCallback(async (code: string) => {
     const product = productsRef.current.find((item) => item.product_code === code);
@@ -419,7 +468,7 @@ export default function PcountSessionPage() {
   const handleCountChange = useCallback(async (code: string, count: number): Promise<boolean> => {
     const product = productsRef.current.find((item) => item.product_code === code);
     if (!product) return false;
-    const status = count === 0 ? 'pending' : count >= product.system_qty ? 'matched' : 'missing';
+    const status = count >= product.system_qty ? 'matched' : 'pending';
     try {
       const res = await fetch(`/api/pcount/sessions/${sessionId}/products/${encodeURIComponent(code)}`, {
         method: 'PUT',
@@ -799,15 +848,15 @@ export default function PcountSessionPage() {
               <span>Created {new Date(session.created_at).toLocaleDateString()}</span>
               {stage === 'verify' && products.length > 0 && scannerCount > 0 && (
                 <span className="pcount-live-status">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#86efac] animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] animate-pulse" />
                   {scannerCount} active {scannerCount === 1 ? 'scanner' : 'scanners'}
                 </span>
               )}
             </div>
             {session.is_owner && session.join_code && (
-              <div className="mt-2 inline-flex items-center gap-2">
-                <span className="text-[12px] text-white/90">Join code</span>
-                <span className="text-[16px] font-bold tracking-[0.35em] text-white">{session.join_code}</span>
+              <div className="pcount-join-code">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-[#6e6e73]">Join code</span>
+                <span className="text-[15px] font-bold tracking-[0.3em] text-[#1d1d1f]">{session.join_code}</span>
                 <button
                   onClick={async () => {
                     await navigator.clipboard.writeText(session.join_code!);
@@ -815,14 +864,14 @@ export default function PcountSessionPage() {
                     setTimeout(() => setCopied(false), 1500);
                   }}
                   title="Copy code"
-                  className="inline-flex items-center gap-1 text-[12px] font-medium text-white/90 hover:text-white hover:underline cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-[#2563eb] hover:text-[#1d4ed8] hover:underline cursor-pointer"
                 >
                   {copied ? (
                     <>
-                      <svg className="w-3.5 h-3.5 text-[#4ade80]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M20 6L9 17l-5-5" />
                       </svg>
-                      <span className="text-[#4ade80]">Copied</span>
+                      <span>Copied</span>
                     </>
                   ) : (
                     'Copy'
@@ -863,7 +912,7 @@ export default function PcountSessionPage() {
           </div>
         </div>
 
-        {exportError && <p className="mt-3 text-[12px] text-[#fca5a5]">{exportError}</p>}
+        {exportError && <p className="mt-3 text-[12px] text-[#dc2626]">{exportError}</p>}
 
         <nav className="pcount-stage-nav" aria-label="PCount workflow">
           {[
@@ -928,9 +977,9 @@ export default function PcountSessionPage() {
           <div className="mt-3 text-center">
             <button
               onClick={handleSkipToScan}
-              className="px-4 py-2 bg-[#15803d] text-white text-[13px] font-medium rounded-lg hover:bg-[#166534] transition-colors cursor-pointer"
+              className="pcount-primary-button"
             >
-              Skip &mdash; start live scanning instead <span className="opacity-75">(recommended)</span>
+              Skip &mdash; start live scanning instead <span className="opacity-75 font-normal">(recommended)</span>
             </button>
           </div>
         </div>
@@ -940,16 +989,19 @@ export default function PcountSessionPage() {
         <>
           <div className="pcount-toolbar">
             <div className="pcount-toolbar-row">
-              <div className="pcount-filter-group" aria-label="Filter by status">
+              <div className="pcount-segmented" role="tablist" aria-label="Filter by status">
                 {([
                   { key: 'all', label: 'All', count: statusCounts.all },
                   { key: 'pending', label: 'Pending', count: statusCounts.pending },
                   { key: 'matched', label: 'Matched', count: statusCounts.matched },
                   { key: 'missing', label: 'Missing', count: statusCounts.missing },
                   { key: 'excluded', label: 'Excluded', count: statusCounts.excluded },
-                ]).map(tab => (
+                ] as const).map(tab => (
                   <button
                     key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={statusFilter === tab.key}
                     onClick={() => setStatusFilter(tab.key)}
                     title={tab.key === 'missing'
                       ? `${tab.count} rows · ${missingShortfallUnits} pcs short (under-counted only, excludes Excluded)`
@@ -958,41 +1010,28 @@ export default function PcountSessionPage() {
                         : tab.key === 'all'
                           ? `${countableTotal} countable + ${statusCounts.excluded} excluded`
                           : undefined}
-                    className={`pcount-filter-button ${
-                      statusFilter === tab.key
-                        ? 'bg-[#2563eb] text-white'
-                        : 'bg-white text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]'
-                    }`}
+                    className={`pcount-segment ${statusFilter === tab.key ? 'is-active' : ''}`}
                   >
                     {tab.label}
-                    <span className={`text-[10px] font-semibold rounded-full px-1.5 py-px ${
-                      statusFilter === tab.key ? 'bg-white/25 text-white' : 'bg-[#e8e8ed] text-[#6e6e73]'
-                    }`}>
-                      {tab.key === 'missing' && missingShortfallUnits > 0 ? `${tab.count} · ${missingShortfallUnits} pcs` : tab.count}
+                    <span className="pcount-segment-count">
+                      {tab.key === 'missing' && missingShortfallUnits > 0 ? `${tab.count} · ${missingShortfallUnits}` : tab.count}
                     </span>
                   </button>
                 ))}
               </div>
-              <div className="pcount-filter-group" aria-label="Filter by category">
+              <select
+                value={categoryFilter}
+                onChange={e => setCategoryFilter(e.target.value)}
+                title="Filter by category"
+                aria-label="Filter by category"
+                className="pcount-select"
+              >
                 {Object.entries(categoryCounts).map(([key, count]) => (
-                  <button
-                    key={key}
-                    onClick={() => setCategoryFilter(categoryFilter === key ? 'all' : key)}
-                    className={`pcount-filter-button ${
-                      categoryFilter === key
-                        ? 'bg-[#2563eb] text-white'
-                        : 'bg-white text-[#6e6e73] hover:bg-[#f5f5f7] hover:text-[#1d1d1f]'
-                    }`}
-                  >
-                    {key === 'all' ? 'All categories' : key === '3pp' ? '3PP' : 'Apple'}
-                    <span className={`text-[10px] font-semibold rounded-full px-1.5 py-px ${
-                      categoryFilter === key ? 'bg-white/25 text-white' : 'bg-[#e8e8ed] text-[#6e6e73]'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
+                  <option key={key} value={key}>
+                    {key === 'all' ? `All categories (${count})` : `${key === '3pp' ? '3PP' : 'Apple'} (${count})`}
+                  </option>
                 ))}
-              </div>
+              </select>
               <div className="pcount-toolbar-spacer" />
               <ColumnPicker
                 columns={tableColumns}
@@ -1071,31 +1110,9 @@ export default function PcountSessionPage() {
                 {suggestibleMissingCodes.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => void markSuggestedMissingStolen()}
-                    disabled={markingStolen || excludingPending || suggestionsLoading}
-                    title="Mark only the flagged missing rows as stolen (they stay in Missing with remark for the report)"
-                    className="pcount-secondary-button shrink-0 disabled:cursor-not-allowed"
-                  >
-                    {markingStolen ? 'Marking…' : `Mark suggested stolen (${suggestibleMissingCodes.length})`}
-                  </button>
-                )}
-                {excludableMissingCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void markAllMissingStolen()}
-                    disabled={markingStolen}
-                    title="Mark every still-unmarked row in this Missing tab as stolen (stays in Missing with remark + shortfall qty for the report)"
-                    className="pcount-secondary-button shrink-0 disabled:cursor-not-allowed"
-                  >
-                    {markingStolen ? 'Marking…' : `Mark all missing stolen (${excludableMissingCount})`}
-                  </button>
-                )}
-                {suggestibleMissingCodes.length > 0 && (
-                  <button
-                    type="button"
                     onClick={() => void excludeSuggestedMissing()}
                     disabled={excludingPending || suggestionsLoading}
-                    title="Exclude only the flagged missing rows in this tab (stolen rows are never excluded)"
+                    title="Exclude only the flagged missing rows in this tab"
                     className="pcount-secondary-button shrink-0 disabled:cursor-not-allowed"
                   >
                     {excludingPending ? 'Excluding…' : `Exclude suggested missing (${suggestibleMissingCodes.length})`}
@@ -1106,16 +1123,11 @@ export default function PcountSessionPage() {
                     type="button"
                     onClick={() => void excludeAllMissing()}
                     disabled={excludingPending}
-                    title={stolenMissingCount > 0 ? `Exclude excludable missing rows (${stolenMissingCount} stolen stay in Missing)` : 'Exclude everything currently in this Missing tab (they leave Missing and go to Excluded)'}
+                    title="Exclude everything currently in this Missing tab (they leave Missing and go to Excluded)"
                     className="pcount-secondary-button shrink-0 disabled:cursor-not-allowed"
                   >
                     {excludingPending ? 'Excluding…' : `Exclude all missing (${excludableMissingCount})`}
                   </button>
-                )}
-                {stolenMissingCount > 0 && (
-                  <span className="text-[11px] text-[#6e6e73] self-center" title="Stolen rows stay in Missing and cannot be excluded, so they show no checkbox">
-                    {stolenMissingCount} stolen stays in Missing · no box to check
-                  </span>
                 )}
               </div>
             </div>
@@ -1155,15 +1167,15 @@ export default function PcountSessionPage() {
                 <span className="text-[11px] text-[#6e6e73]">Super Admin tools</span>
               </div>
               <div className="flex min-w-0 flex-1 flex-col gap-2 lg:max-w-xl">
-                <label htmlFor="pcount-exclude-codes" className="text-[12px] font-medium text-[#3c3c43]">Exclude product codes</label>
+                <label htmlFor="pcount-exclude-codes" className="text-[12px] font-medium text-[#6e6e73]">Exclude product codes</label>
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <textarea id="pcount-exclude-codes" value={excludeCodes} onChange={event => setExcludeCodes(event.target.value)} rows={2} placeholder="One product code per line" className="min-h-16 min-w-0 flex-1 rounded-lg border border-[#d8dee8] bg-white px-3 py-2 text-[12px] text-[#1d1d1f] outline-none focus:border-[#5274a8] focus:ring-2 focus:ring-[#5274a8]/15" />
+                  <textarea id="pcount-exclude-codes" value={excludeCodes} onChange={event => setExcludeCodes(event.target.value)} rows={2} placeholder="One product code per line" className="min-h-16 min-w-0 flex-1 rounded-lg border border-[#d2d2d7] bg-white px-3 py-2 text-[12px] text-[#1d1d1f] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/15" />
                   <button type="button" onClick={() => void excludeListedProducts()} disabled={!excludeCodes.trim() || bulkPending} className="pcount-secondary-button self-end disabled:cursor-not-allowed">Exclude listed</button>
                 </div>
               </div>
             </div>
           )}
-          {bulkMessage && <p className="mt-2 text-[12px] text-[#3c3c43]" role="status">{bulkMessage}</p>}
+          {bulkMessage && <p className="mt-2 text-[12px] text-[#6e6e73]" role="status">{bulkMessage}</p>}
           {pendingExclusionError && <p className="mt-2 text-[12px] text-[#b45309]">{pendingExclusionError}</p>}
 
           <ScanBar
@@ -1199,6 +1211,7 @@ export default function PcountSessionPage() {
                 onToggleStatus={toggleStatusSelection}
                 onToggleAllStatus={toggleAllStatusSelection}
                 onExcludeSelectedStatus={() => void excludeSelectedStatus()}
+                onSetStatus={(codes, status) => void applyBulkStatus(codes, status)}
                 selectionAction={statusFilter === 'excluded' ? 'restore' : 'exclude'}
                 excludingPending={excludingPending}
                 showProductSelection={isSuperAdmin && statusFilter === 'all'}

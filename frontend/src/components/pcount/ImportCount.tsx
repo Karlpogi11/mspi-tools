@@ -180,6 +180,8 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
   const alignedProducts = useMemo<AlignedProduct[]>(() => {
     const countMap = new Map(pivotedProducts.map(product => [productKey(product.product_code), product.counted_qty]));
     return [...systemProducts]
+      // Excluded products are kept separate and never aligned/counted here.
+      .filter(product => String(product.status || '').trim().toLowerCase() !== 'excluded')
       .sort((a, b) => b.product_code.localeCompare(a.product_code))
       .map(product => ({
         product_code: product.product_code,
@@ -245,7 +247,7 @@ export default function ImportCount({ sessionId, onComplete, systemProducts = []
 
       {!file ? (
         <div className="space-y-3">
-          <div className={`flex items-center gap-3 rounded-xl border-2 border-dashed p-5 transition-colors ${dragging ? 'border-[#2563eb] bg-[#f5faff]' : 'border-[#d2d2d7]'}`}>
+          <div className={`flex items-center gap-3 rounded-xl border-2 border-dashed p-5 transition-colors ${dragging ? 'border-[#2563eb] bg-[#eff6ff]' : 'border-[#d2d2d7]'}`}>
             <button
               onClick={() => inputRef.current?.click()}
               className="pcount-secondary-button"

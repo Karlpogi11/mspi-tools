@@ -211,7 +211,7 @@ const ScanBar = forwardRef<HTMLInputElement, Props>(function ScanBar({ sessionId
           />
         </div>
         <div className="flex items-center gap-2 text-[12px] text-[#6e6e73] whitespace-nowrap">
-          {syncing && pendingCount > 0 && <span className="text-[#a16207]">{pendingCount} queued</span>}
+          {syncing && pendingCount > 0 && <span className="text-[#b45309]">{pendingCount} queued</span>}
           {syncing && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-[#2563eb] rounded-full animate-pulse" />saving</span>}
         </div>
         <button

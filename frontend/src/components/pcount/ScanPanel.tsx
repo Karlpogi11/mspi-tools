@@ -50,7 +50,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[13px]">
             <div><span className="font-semibold text-[#1d1d1f]">{stats.checked}</span> <span className="text-[#6e6e73]">/ {stats.total} checked</span></div>
             <div><span className="font-semibold text-[#16a34a]">{stats.matched}</span> <span className="text-[#6e6e73]">matched</span></div>
-            <div><span className="font-semibold text-[#d97706]">{stats.missing}</span> <span className="text-[#6e6e73]">missing{(stats.shortfall || 0) > 0 ? ` · ${stats.shortfall} pcs short` : ''}</span></div>
+            <div><span className="font-semibold text-[#b45309]">{stats.missing}</span> <span className="text-[#6e6e73]">missing{(stats.shortfall || 0) > 0 ? ` · ${stats.shortfall} pcs short` : ''}</span></div>
             <div><span className="font-semibold text-[#6e6e73]">{stats.pending}</span> <span className="text-[#6e6e73]">pending</span></div>
           </div>
           {(stats.excluded || 0) > 0 && (
@@ -66,7 +66,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
               {detailSource === 'selection' ? 'Selected Product' : 'Last Scanned'}
             </h3>
             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-              lastScan.match ? 'bg-[#f0fdf4] text-[#16a34a]' : 'bg-[#fffbeb] text-[#d97706]'
+              lastScan.match ? 'bg-[#f0fdf4] text-[#16a34a]' : 'bg-[#fef3c7] text-[#b45309]'
             }`}>
               {lastScan.match ? '\u2713 Matched' : '\u26a0 Mismatch'}
             </span>
@@ -87,7 +87,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
                 <p className="text-[22px] font-bold text-[#1d1d1f]">{lastScan.system_qty}</p>
               </div>
               <div className={`flex-1 rounded-lg p-3 text-center ${
-                lastScan.match ? 'bg-[#f0fdf4] ring-1 ring-[#86efac]' : 'bg-[#fffbeb] ring-1 ring-[#fde68a]'
+                lastScan.match ? 'bg-[#f0fdf4] ring-1 ring-[#16a34a]/25' : 'bg-[#fef3c7] ring-1 ring-[#d97706]/25'
               }`}>
                 <div className="flex items-center justify-center gap-1.5 mb-1">
                   <p className="text-[11px] text-[#6e6e73] uppercase tracking-wider">Actual Qty</p>
@@ -111,7 +111,7 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
                   />
                 ) : (
                   <p className={`text-[22px] font-bold ${
-                    lastScan.match ? 'text-[#16a34a]' : 'text-[#d97706]'
+                    lastScan.match ? 'text-[#16a34a]' : 'text-[#b45309]'
                   }`}>{lastScan.counted_qty}</p>
                 )}
               </div>
@@ -157,11 +157,11 @@ export default function ScanPanel({ lastScan, detailSource = 'scan', onRecount, 
                   defaultValue={lastScan.notes || ''}
                   key={`${lastScan.product_code}:${lastScan.notes || ''}`}
                   onBlur={e => onNotesChange(lastScan.product_code, e.target.value)}
-                  placeholder="e.g. stolen, damaged"
+                  placeholder="e.g. damaged, mislabeled"
                   rows={2}
                   className="w-full resize-y rounded-lg border border-[#d2d2d7] bg-white px-3 py-2 text-[13px] text-[#1d1d1f] outline-none focus:border-[#2563eb]"
                 />
-                <p className="mt-1 text-[11px] text-[#6e6e73]">Provide a remark for missing items (e.g. "stolen").</p>
+                <p className="mt-1 text-[11px] text-[#6e6e73]">Provide a remark for missing items.</p>
               </div>
             )}
           </div>

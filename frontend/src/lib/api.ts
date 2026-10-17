@@ -689,7 +689,7 @@ export const api = {
   },
 
   sessions: {
-    list: () => request<Session[]>('/pcount/sessions'),
+    list: (fresh = false) => fresh ? requestFresh<Session[]>('/pcount/sessions') : request<Session[]>('/pcount/sessions'),
     get: (id: number) => request<Session>(`/pcount/sessions/${id}`),
     create: () => request<Session>('/pcount/sessions', { method: 'POST' }),
     search: (q: string) =>

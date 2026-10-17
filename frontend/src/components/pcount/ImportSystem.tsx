@@ -192,8 +192,10 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
         return obj;
       });
       // Import-time excludes arrive as visible Excluded rows (never silently dropped),
-      // so All includes them and the Excluded tab shows the default list.
-      const excludedCodes = parseExcludeCodes(excludedPartNumbers);
+      // so All includes them and the Excluded tab shows the default list. Anything
+      // already Excluded in this session stays Excluded on re-import, so it never
+      // comes back as Pending.
+      const excludedCodes = parseExcludeCodes([...parseExcludeCodes(excludedPartNumbers), ...sessionExcludedCodes].join('\n'));
       const products = json.map(row => {
         const extra: Record<string, string> = {};
         for (const [k, v] of Object.entries(row)) {
@@ -285,13 +287,13 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
         <div className="flex items-center justify-between gap-4 mb-4">
           <h2 className="text-[16px] font-semibold text-[#1d1d1f]">System Export Imported</h2>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[11px] text-[#6e6e73]">
-            <span className={`h-1.5 w-1.5 rounded-full ${onlineCount > 0 ? 'bg-[#16a34a]' : 'bg-[#9ca3af]'}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${onlineCount > 0 ? 'bg-[#16a34a]' : 'bg-[#9a9aa0]'}`} />
             {onlineCount} online
           </span>
         </div>
           <p className="text-[13px] text-[#6e6e73] mb-4">
             {productCount} products imported. Configure which extra columns to display below.
-            {loadDefaultMissing().length > 0 && ' Default stolen missing counts were auto-applied at import (Missing tab).'}
+            {loadDefaultMissing().length > 0 && ' Default missing counts were auto-applied at import (Missing tab).'}
           </p>
 
         <div className="mb-4">
@@ -310,7 +312,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
                       className="accent-[#2563eb]"
                     />
                     {col}
-                    {col === 'Description' && <span className="text-[11px] text-[#9ca3af]">always shown</span>}
+                    {col === 'Description' && <span className="text-[11px] text-[#9a9aa0]">always shown</span>}
                 </label>
               ))
             )}
@@ -428,7 +430,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
               disabled
                 ? 'border-[#d2d2d7] opacity-50 cursor-not-allowed'
                 : dragging
-                  ? 'border-[#2563eb] bg-[#f5faff] cursor-copy'
+                  ? 'border-[#2563eb] bg-[#eff6ff] cursor-copy'
                   : 'border-[#d2d2d7] hover:border-[#2563eb] cursor-pointer'
             }`}>
             <p className="text-[14px] text-[#6e6e73]">{dragging ? 'Drop Excel file to upload' : 'Click or drag an Excel file here (.xlsx or .xls)'}</p>
@@ -533,7 +535,7 @@ export default function ImportSystem({ sessionId, onComplete, hasProducts, curre
                       </button>
                     )}
                     <span className="text-[11px] text-[#6e6e73]">
-                      {parseExcludeCodes(excludedPartNumbers).length} codes in box · {loadDefaultMissing().length} default missing counts auto-applied as stolen
+                      {parseExcludeCodes(excludedPartNumbers).length} codes in box · {loadDefaultMissing().length} default missing counts auto-applied
                     </span>
                   </div>
                 </div>
