@@ -317,7 +317,7 @@ async function dbSessionWithProgress(s: typeof pcountSessions.$inferSelect): Pro
     const [owner] = await db.select({ email: users.email }).from(users).where(eq(users.id, s.created_by)).limit(1);
     owner_email = owner?.email ?? null;
   }
-  return { ...castSession(s), progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: cols.map(c => c.column_name), owner_email };
+  return { ...castSession(s), progress: total > 0 ? Math.floor((checked / total) * 100) : 0, total, checked, display_columns: cols.map(c => c.column_name), owner_email };
 }
 
 export async function listSessions(userId: number): Promise<SessionWithProgress[]> {
@@ -335,7 +335,7 @@ export async function listSessions(userId: number): Promise<SessionWithProgress[
     const prods = Array.from(memProducts.values()).filter(p => p.session_id === s.id);
     const total = prods.filter(p => p.status !== 'excluded').length;
     const checked = prods.filter(p => p.status === 'matched' || p.status === 'missing').length;
-    return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: s.created_by === userId || memMembers.get(s.id)?.has(userId) || false };
+    return { ...s, progress: total > 0 ? Math.floor((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: s.created_by === userId || memMembers.get(s.id)?.has(userId) || false };
   });
 }
 
@@ -377,7 +377,7 @@ export async function searchSessions(q: string, userId: number): Promise<Session
     const prods = Array.from(memProducts.values()).filter(p => p.session_id === s.id);
     const total = prods.filter(p => p.status !== 'excluded').length;
     const checked = prods.filter(p => p.status === 'matched' || p.status === 'missing').length;
-    return { ...s, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: memMembers.get(s.id)?.has(userId) || s.created_by === userId };
+    return { ...s, progress: total > 0 ? Math.floor((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(s.id) || [], is_owner: s.created_by === userId, joined: memMembers.get(s.id)?.has(userId) || s.created_by === userId };
   });
 }
 
@@ -553,7 +553,7 @@ export async function getSession(id: number, userId?: number): Promise<SessionWi
   const prods = Array.from(memProducts.values()).filter(p => p.session_id === id);
   const total = prods.filter(p => p.status !== 'excluded').length;
   const checked = prods.filter(p => p.status === 'matched' || p.status === 'missing').length;
-  return { ...row, progress: total > 0 ? Math.round((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(id) || [], is_owner: userId !== undefined && row.created_by === userId, joined: userId !== undefined && (row.created_by === userId || memMembers.get(id)?.has(userId)) };
+  return { ...row, progress: total > 0 ? Math.floor((checked / total) * 100) : 0, total, checked, display_columns: memDisplayColumns.get(id) || [], is_owner: userId !== undefined && row.created_by === userId, joined: userId !== undefined && (row.created_by === userId || memMembers.get(id)?.has(userId)) };
 }
 
 export async function submitSession(id: number, userId: number): Promise<SessionRow | null> {
@@ -730,6 +730,12 @@ export async function getProduct(sessionId: number, code: string): Promise<Produ
 
 export async function updateProduct(sessionId: number, code: string, data: Partial<ProductRow>): Promise<ProductWithExtra | null> {
   const normalized = code.trim().toUpperCase();
+  // The 'stolen' remark only applies while a row is Missing. Whenever a status
+  // change moves a row off Missing, drop the stale remark unless the caller is
+  // explicitly setting one (mark-stolen sends notes only, status untouched).
+  const payload: Partial<ProductRow> = data.status !== undefined && data.status !== 'missing' && data.notes === undefined
+    ? { ...data, notes: null }
+    : data;
   if (dbAvailable) {
     const db = getDb();
     const [row] = await db
@@ -738,12 +744,12 @@ export async function updateProduct(sessionId: number, code: string, data: Parti
       .where(and(eq(pcountProducts.session_id, sessionId), sql`UPPER(TRIM(${pcountProducts.product_code})) = ${normalized}`))
       .limit(1);
     if (!row) return null;
-    await db.update(pcountProducts).set(data).where(eq(pcountProducts.id, row.id));
+    await db.update(pcountProducts).set(payload).where(eq(pcountProducts.id, row.id));
     return dbGetProduct(sessionId, row.product_code);
   }
   const p = Array.from(memProducts.values()).find(x => x.session_id === sessionId && x.product_code.trim().toUpperCase() === normalized);
   if (!p) return null;
-  const updated = { ...p, ...data };
+  const updated = { ...p, ...payload };
   memProducts.set(updated.id, updated);
   return { ...updated, extra: memProductExtras.get(updated.id) || {} };
 }
@@ -778,13 +784,14 @@ export async function bulkUpdateProducts(
         await db.update(pcountProducts).set({
           counted_qty: sql`${pcountProducts.system_qty}`,
           status: 'matched',
+          notes: null,
         }).where(and(
           eq(pcountProducts.session_id, sessionId),
           inArray(pcountProducts.product_code, matchedCodes),
           sql`${pcountProducts.status} NOT IN ('excluded', 'missing')`,
         ));
       } else {
-        await db.update(pcountProducts).set({ status: 'excluded' }).where(and(
+        await db.update(pcountProducts).set({ status: 'excluded', notes: null }).where(and(
           eq(pcountProducts.session_id, sessionId),
           inArray(pcountProducts.product_code, matchedCodes),
         ));
@@ -821,8 +828,10 @@ export async function bulkUpdateProducts(
       }
       product.counted_qty = product.system_qty;
       product.status = 'matched';
+      product.notes = null;
     } else if (action === 'exclude') {
       product.status = 'excluded';
+      product.notes = null;
     }
     memProducts.set(product.id, product);
     updatedProducts.push({ ...product, extra: memProductExtras.get(product.id) || {} });
@@ -1005,6 +1014,11 @@ export async function importCount(sessionId: number, products: { product_code: s
         `UPDATE pcount_products SET counted_qty = CASE product_code ${qtyWhens} END, status = CASE product_code ${statusWhens} END WHERE session_id = ?`,
         params
       );
+      // A row that lands on Matched no longer holds the 'stolen' remark.
+      await pool.execute(
+        `UPDATE pcount_products SET notes = NULL WHERE session_id = ? AND status <> 'missing'`,
+        [sessionId]
+      );
     }
   } else {
     for (const ep of existing) {
@@ -1048,6 +1062,10 @@ export async function scanProduct(sessionId: number, product_code: string): Prom
          WHEN status IN ('pending', 'missing', 'matched') AND COALESCE(counted_qty, 0) + 1 >= system_qty THEN 'matched'
          WHEN status IN ('pending', 'missing', 'matched') THEN 'missing'
          ELSE status
+       END,
+       notes = CASE
+         WHEN status IN ('pending', 'missing', 'matched') AND COALESCE(counted_qty, 0) + 1 >= system_qty THEN NULL
+         ELSE notes
        END
        WHERE session_id = ? AND product_code = ?`,
       [sessionId, product_code]

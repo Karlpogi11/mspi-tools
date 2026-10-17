@@ -263,7 +263,7 @@ export default function PcountSessionPage() {
       const total = countable.length;
       setSession(s => s ? {
         ...s,
-        progress: total > 0 ? Math.round((checked / total) * 100) : 0,
+        progress: total > 0 ? Math.floor((checked / total) * 100) : 0,
         checked,
         total,
       } : s);
@@ -380,7 +380,7 @@ export default function PcountSessionPage() {
         productsRef.current = updated;
         const countable = updated.filter(product => product.status !== 'excluded');
         const checked = countable.filter(product => product.status !== 'pending').length;
-        setSession(current => current ? { ...current, checked, total: countable.length, progress: countable.length > 0 ? Math.round((checked / countable.length) * 100) : 0 } : current);
+        setSession(current => current ? { ...current, checked, total: countable.length, progress: countable.length > 0 ? Math.floor((checked / countable.length) * 100) : 0 } : current);
         return updated;
       });
       setSelectedStatusCodes(previous => previous.filter(code => !succeeded.has(code)));
@@ -569,7 +569,7 @@ export default function PcountSessionPage() {
     ? (() => {
         const countable = products.filter(p => p.status !== 'excluded');
         if (countable.length === 0) return 0;
-        return Math.round((countable.filter(p => p.status !== 'pending').length / countable.length) * 100);
+        return Math.floor((countable.filter(p => p.status !== 'pending').length / countable.length) * 100);
       })()
     : 0;
 
@@ -634,7 +634,7 @@ export default function PcountSessionPage() {
         productsRef.current = updated;
         const countable = updated.filter(product => product.status !== 'excluded');
         const checked = countable.filter(product => product.status !== 'pending').length;
-        setSession(current => current ? { ...current, checked, total: countable.length, progress: countable.length > 0 ? Math.round((checked / countable.length) * 100) : 0 } : current);
+        setSession(current => current ? { ...current, checked, total: countable.length, progress: countable.length > 0 ? Math.floor((checked / countable.length) * 100) : 0 } : current);
         return updated;
       });
       setBulkMessage(`${succeeded.size} suggested product${succeeded.size === 1 ? '' : 's'} excluded based on previous sessions.`);
@@ -674,7 +674,7 @@ export default function PcountSessionPage() {
         productsRef.current = updated;
         const countable = updated.filter(product => product.status !== 'excluded');
         const checked = countable.filter(product => product.status !== 'pending').length;
-        setSession(current => current ? { ...current, checked, total: countable.length, progress: countable.length > 0 ? Math.round((checked / countable.length) * 100) : 0 } : current);
+        setSession(current => current ? { ...current, checked, total: countable.length, progress: countable.length > 0 ? Math.floor((checked / countable.length) * 100) : 0 } : current);
         return updated;
       });
       setBulkMessage(`${succeeded.size} missing product${succeeded.size === 1 ? '' : 's'} excluded.`);
