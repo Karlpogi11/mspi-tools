@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, recalledPartsSiteCode, setPartsSiteToken, type PartsMasterItem, type PartsSite, type PartsUnit } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { todayIso } from '../../lib/parts';
+import { classifyScanValue, todayIso } from '../../lib/parts';
 
 type StatusKind = 'in' | 'out' | 'missing' | 'mismatch' | 'noserial' | 'unknown';
 
@@ -28,6 +28,14 @@ const STATUS_STYLES: Record<StatusKind, { label: string; className: string }> = 
 function StatusChip({ kind }: { kind: StatusKind }) {
   const style = STATUS_STYLES[kind];
   return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${style.className}`}>{style.label}</span>;
+}
+
+function writeEntries(code: string, entries: ReconcileEntry[]) {
+  try {
+    window.localStorage.setItem(storageKey(code), JSON.stringify(entries));
+  } catch {
+    // Keep scanning even when browser storage is unavailable.
+  }
 }
 
 function readEntries(code: string): ReconcileEntry[] {
@@ -105,12 +113,16 @@ export default function PartsReconcilePage() {
   const [partNumber, setPartNumber] = useState('');
   const [serial, setSerial] = useState('');
   const [scanError, setScanError] = useState('');
+  const [resolvingSerial, setResolvingSerial] = useState('');
   const [search, setSearch] = useState('');
   const partInputRef = useRef<HTMLInputElement>(null);
   const serialInputRef = useRef<HTMLInputElement>(null);
   const restoreAttemptedRef = useRef(false);
   const hydratedSiteRef = useRef<string | null>(null);
   const loadIdRef = useRef(0);
+  const resolveGenerationRef = useRef(0);
+  const scannedSerialsRef = useRef<Set<string>>(new Set());
+  const autoFilledPartRef = useRef<string | null>(null);
 
   const loadSiteData = useCallback(async (target: PartsSite, token: string) => {
     const loadId = ++loadIdRef.current;
@@ -159,11 +171,20 @@ export default function PartsReconcilePage() {
     try {
       const result = publicMode ? await api.partsPublic.verifySite(code) : await api.parts.verifySite(code);
       const storedEntries = readEntries(result.site.code);
+      autoFilledPartRef.current = null;
+      const knownSerials = new Set<string>();
+      for (const entry of storedEntries) {
+        const serialNumber = entry.serial.toUpperCase();
+        if (serialNumber) knownSerials.add(serialNumber);
+      }
+      scannedSerialsRef.current = knownSerials;
       hydratedSiteRef.current = result.site.code;
       setSite(result.site);
       setSiteTokenState(result.siteToken);
       setPartsSiteToken(result.siteToken);
       setEntries(storedEntries);
+      resolveGenerationRef.current += 1;
+      setResolvingSerial('');
       setMasterByPart(new Map());
       setUnitBySerial(new Map());
       setStockLoaded(false);
@@ -201,11 +222,7 @@ export default function PartsReconcilePage() {
 
   useEffect(() => {
     if (!site || hydratedSiteRef.current !== site.code) return;
-    try {
-      window.localStorage.setItem(storageKey(site.code), JSON.stringify(entries));
-    } catch {
-      // Ignore storage failures so scanning keeps working.
-    }
+    writeEntries(site.code, entries);
   }, [entries, site]);
 
   const currentPart = useMemo(() => {
@@ -275,11 +292,13 @@ export default function PartsReconcilePage() {
       serialInputRef.current?.focus();
       return;
     }
-    if (serialNumber && entries.some((entry) => entry.serial.toUpperCase() === serialNumber)) {
-      setScanError(`Serial ${serialNumber} is already in this count.`);
-      serialInputRef.current?.select();
+    if (serialNumber && scannedSerialsRef.current.has(serialNumber)) {
+      setScanError(`Duplicate serial: ${serialNumber} is already in this count.`);
+      setSerial('');
+      serialInputRef.current?.focus();
       return;
     }
+    if (serialNumber) scannedSerialsRef.current.add(serialNumber);
     const entry: ReconcileEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       partNumber: part,
@@ -287,12 +306,165 @@ export default function PartsReconcilePage() {
       description: master?.description ?? '',
       scannedAt: new Date().toISOString(),
     };
-    setEntries((current) => [entry, ...current]);
+    setEntries((current) => {
+      const next = [entry, ...current];
+      writeEntries(site.code, next);
+      return next;
+    });
     setPartNumber('');
     setSerial('');
+    autoFilledPartRef.current = null;
     setScanError('');
     setNotice('');
     window.requestAnimationFrame(() => partInputRef.current?.focus());
+  };
+
+  const addSerialOnly = async (rawSerial: string, fillFields = true) => {
+    if (!site) return;
+    const serialNumber = rawSerial.replace(/\s+/g, '').toUpperCase();
+    if (!serialNumber) {
+      setScanError('Scan or enter a serial number.');
+      serialInputRef.current?.focus();
+      return;
+    }
+    if (scannedSerialsRef.current.has(serialNumber)) {
+      setScanError(`Duplicate serial: ${serialNumber} is already in this count.`);
+      setSerial('');
+      serialInputRef.current?.focus();
+      return;
+    }
+    scannedSerialsRef.current.add(serialNumber);
+    const generation = resolveGenerationRef.current;
+    const scannedAt = new Date().toISOString();
+    setResolvingSerial(serialNumber);
+    setScanError('');
+    setNotice('');
+    let partItem: PartsMasterItem | null = null;
+    const knownUnit = unitBySerial.get(serialNumber);
+    if (knownUnit?.part_number) {
+      partItem = masterByPart.get(knownUnit.part_number.trim().toUpperCase()) ?? null;
+    }
+    if (!partItem) {
+      try {
+        const result = publicMode
+          ? await api.partsPublic.resolve(siteToken, { serial: serialNumber })
+          : await api.parts.resolve({ serial: serialNumber, siteCode: site.code });
+        if (generation !== resolveGenerationRef.current) return;
+        partItem = result.part;
+        if (result.unit) {
+          const resolvedUnit = result.unit;
+          setUnitBySerial((current) => {
+            const next = new Map(current);
+            next.set(serialNumber, resolvedUnit);
+            return next;
+          });
+        }
+      } catch {
+        if (generation !== resolveGenerationRef.current) return;
+        partItem = null;
+      }
+    }
+    if (generation !== resolveGenerationRef.current) return;
+    if (!partItem) {
+      scannedSerialsRef.current.delete(serialNumber);
+      setResolvingSerial((current) => (current === serialNumber ? '' : current));
+      autoFilledPartRef.current = null;
+      setPartNumber('');
+      setSerial(fillFields ? serialNumber : '');
+      setNotice('Serial not recognized. Scan the part number to continue.');
+      window.requestAnimationFrame(() => partInputRef.current?.focus());
+      return;
+    }
+    const entry: ReconcileEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      partNumber: partItem.part_number,
+      serial: serialNumber,
+      description: partItem.description,
+      scannedAt,
+    };
+    setEntries((current) => {
+      if (current.some((row) => row.serial.toUpperCase() === serialNumber)) return current;
+      const next = [entry, ...current];
+      writeEntries(site.code, next);
+      return next;
+    });
+    const resolvedPartNumber = partItem.part_number.trim();
+    setMasterByPart((current) => {
+      const key = resolvedPartNumber.toUpperCase();
+      if (current.has(key)) return current;
+      const next = new Map(current);
+      next.set(key, partItem);
+      return next;
+    });
+    if (fillFields) {
+      setPartNumber(resolvedPartNumber);
+      setSerial('');
+      autoFilledPartRef.current = resolvedPartNumber.toUpperCase();
+    }
+    setResolvingSerial((current) => (current === serialNumber ? '' : current));
+    setScanError('');
+    setNotice(`Added ${partItem.part_number} · ${partItem.description || 'No description'}`);
+    if (fillFields) {
+      window.requestAnimationFrame(() => serialInputRef.current?.focus());
+    }
+  };
+
+  const isSerialFirstValue = useCallback((raw: string) => {
+    const normalized = raw.replace(/\s+/g, '').toUpperCase();
+    if (!normalized || masterByPart.has(normalized)) return false;
+    return unitBySerial.has(normalized) || classifyScanValue(raw) === 'serial';
+  }, [masterByPart, unitBySerial]);
+
+  const submitSerialFirst = (raw: string, fillFields = true) => {
+    const serialNumber = raw.replace(/\s+/g, '').toUpperCase();
+    const captured = serial.trim().toUpperCase();
+    if (captured && captured !== serialNumber) {
+      setScanError('A serial is already captured. Add it or clear the serial box first.');
+      return;
+    }
+    autoFilledPartRef.current = null;
+    setPartNumber('');
+    setSerial('');
+    void addSerialOnly(raw, fillFields);
+  };
+
+  const submitScan = (fromButton = false) => {
+    const rawPart = partNumber.trim();
+    const rawSerial = serial.trim();
+    const partIsAutoFilled = Boolean(rawPart) && autoFilledPartRef.current === rawPart.toUpperCase();
+    if (partIsAutoFilled && !rawSerial) {
+      autoFilledPartRef.current = null;
+      setPartNumber('');
+      setScanError('');
+      setNotice('Part number cleared. Scan the next serial.');
+      window.requestAnimationFrame(() => serialInputRef.current?.focus());
+      return;
+    }
+    if (rawSerial && (!rawPart || partIsAutoFilled)) {
+      const normalized = rawSerial.replace(/\s+/g, '').toUpperCase();
+      if (masterByPart.has(normalized) || classifyScanValue(rawSerial) === 'part-number') {
+        if (fromButton) {
+          setScanError('Scan the part number in the part field, then its serial.');
+          return;
+        }
+        autoFilledPartRef.current = null;
+        setPartNumber(normalized);
+        setSerial('');
+        setScanError('');
+        setNotice('Part number detected. Scan the serial next.');
+        window.requestAnimationFrame(() => serialInputRef.current?.focus());
+        return;
+      }
+      autoFilledPartRef.current = null;
+      setSerial('');
+      void addSerialOnly(rawSerial, !fromButton);
+      return;
+    }
+    if (isSerialFirstValue(rawPart)) {
+      submitSerialFirst(rawPart, !fromButton);
+      return;
+    }
+    addEntry();
   };
 
   const refreshStock = async () => {
@@ -304,13 +476,27 @@ export default function PartsReconcilePage() {
   };
 
   const removeEntry = (id: string) => {
-    setEntries((current) => current.filter((entry) => entry.id !== id));
+    if (!site) return;
+    const target = entries.find((entry) => entry.id === id);
+    const serialNumber = target?.serial.toUpperCase() ?? '';
+    const stillScanned = serialNumber && entries.some((entry) => entry.id !== id && entry.serial.toUpperCase() === serialNumber);
+    if (serialNumber && !stillScanned) scannedSerialsRef.current.delete(serialNumber);
+    setEntries((current) => {
+      const next = current.filter((entry) => entry.id !== id);
+      writeEntries(site.code, next);
+      return next;
+    });
   };
 
   const clearEntries = () => {
     if (!site || !entries.length) return;
     if (!window.confirm(`Clear all ${entries.length} scanned entries for ${site.code}?`)) return;
+    scannedSerialsRef.current.clear();
+    resolveGenerationRef.current += 1;
+    autoFilledPartRef.current = null;
+    setResolvingSerial('');
     setEntries([]);
+    writeEntries(site.code, []);
   };
 
   const exportCsv = () => {
@@ -423,11 +609,26 @@ export default function PartsReconcilePage() {
             <input
               ref={partInputRef}
               value={partNumber}
-              onChange={(event) => { setPartNumber(event.target.value); setScanError(''); }}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => { autoFilledPartRef.current = null; setPartNumber(event.target.value); setScanError(''); }}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return;
                 event.preventDefault();
-                if (partNumber.trim()) serialInputRef.current?.focus();
+                const scanned = partNumber.trim();
+                if (isSerialFirstValue(scanned)) {
+                  submitSerialFirst(scanned);
+                  return;
+                }
+                if (serial.trim()) {
+                  addEntry();
+                  return;
+                }
+                if (scanned) serialInputRef.current?.focus();
+              }}
+              onBlur={(event) => {
+                if (event.relatedTarget !== serialInputRef.current) return;
+                const scanned = partNumber.trim();
+                if (isSerialFirstValue(scanned)) submitSerialFirst(scanned);
               }}
               placeholder="Scan or type part number"
               autoComplete="off"
@@ -440,11 +641,25 @@ export default function PartsReconcilePage() {
             <input
               ref={serialInputRef}
               value={serial}
-              onChange={(event) => { setSerial(event.target.value.toUpperCase()); setScanError(''); }}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => {
+                const value = event.target.value.toUpperCase();
+                setSerial(value);
+                if (value.trim() && autoFilledPartRef.current) {
+                  autoFilledPartRef.current = null;
+                  setPartNumber('');
+                }
+                const normalized = value.replace(/\s+/g, '').toUpperCase();
+                setScanError(normalized && scannedSerialsRef.current.has(normalized) ? `Duplicate serial: ${normalized} is already in this count.` : '');
+              }}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return;
                 event.preventDefault();
-                addEntry();
+                if (!partNumber.trim() && !serial.trim()) {
+                  setScanError('Scan or enter a serial number.');
+                  return;
+                }
+                submitScan();
               }}
               placeholder="Scan or type serial number"
               autoComplete="off"
@@ -458,7 +673,13 @@ export default function PartsReconcilePage() {
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[#86868b]">Description</p>
             <p className="mt-0.5 truncate text-[13px] font-medium text-[#1d1d1f]">
-              {currentPart?.description || (partNumber.trim() ? 'Not found in the parts master' : 'Fills automatically after the part number')}
+              {resolvingSerial
+                ? `Resolving ${resolvingSerial}…`
+                : currentPart
+                  ? currentPart.description || 'No description'
+                  : partNumber.trim()
+                    ? 'Not found in the parts master'
+                    : 'Fills automatically from the part number, or scan a serial alone'}
             </p>
             {currentPart && (
               <p className="mt-0.5 text-[11px] text-[#6e6e73]">
@@ -467,10 +688,24 @@ export default function PartsReconcilePage() {
               </p>
             )}
           </div>
-          <button type="button" onClick={addEntry} className="rounded-xl bg-[#1d1d1f] px-5 py-2.5 text-[12px] font-semibold text-white">Add scan</button>
+          <button
+            type="button"
+            onClick={() => {
+              const serialOnly = Boolean(autoFilledPartRef.current) || (Boolean(serial.trim()) && !partNumber.trim());
+              submitScan(true);
+              autoFilledPartRef.current = null;
+              setPartNumber('');
+              setSerial('');
+              window.requestAnimationFrame(() => {
+                (serialOnly ? serialInputRef.current : partInputRef.current)?.focus();
+              });
+            }}
+            disabled={Boolean(resolvingSerial)}
+            className="rounded-xl bg-[#1d1d1f] px-5 py-2.5 text-[12px] font-semibold text-white disabled:opacity-40"
+          >Add scan</button>
         </div>
         {scanError && <p role="alert" className="mt-2 text-[11px] text-[#b91c1c]">{scanError}</p>}
-        <p className="mt-2 text-[11px] text-[#86868b]">Enter moves from part number to serial; Enter on serial adds the scan.</p>
+        <p className="mt-2 text-[11px] text-[#86868b]">Serial-only works: scan a serial and the part number and description fill automatically. Duplicate serials are checked and blocked automatically.</p>
       </section>
 
       <section className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
