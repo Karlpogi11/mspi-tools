@@ -3,6 +3,7 @@
   "private": true,
   "main": "backend/dist/index.js",
   "scripts": {
+    "predev": "npm install --prefer-offline --no-audit --no-fund",
     "dev": "node scripts/prepare-dev.mjs && cd backend && npm install --no-audit --no-fund && cd ../frontend && npm install --no-audit --no-fund && cd .. && concurrently \"cd frontend && npm run dev\" \"cd backend && npm run dev\"",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",

@@ -34,6 +34,7 @@ const loadAdminStorageLocatorPage = () => import('./pages/admin/AdminStorageLoca
 const loadEngineerEndorsementsPage = () => import('./pages/EngineerEndorsementsBoardPage');
 const loadStorageLocatorPage = () => import('./pages/StorageLocatorPage');
 const loadPartsPage = () => import('./pages/PartsPage');
+const loadPartsReconcilePage = () => import('./pages/parts/ReconcilePage');
 const loadAdminPartsPage = () => import('./pages/admin/AdminPartsPage');
 
 const AdminPcountPage = lazy(loadAdminPcountPage);
@@ -55,6 +56,7 @@ const AdminStorageLocatorPage = lazy(loadAdminStorageLocatorPage);
 const EngineerEndorsementsPage = lazy(loadEngineerEndorsementsPage);
 const StorageLocatorPage = lazy(loadStorageLocatorPage);
 const PartsPage = lazy(loadPartsPage);
+const PartsReconcilePage = lazy(loadPartsReconcilePage);
 const AdminPartsPage = lazy(loadAdminPartsPage);
 
 const TOOL_PATHS = ['/pcount', '/rfpu', '/label-merger', '/reformat', '/consumables', '/pdf-extractor', '/chrome-extension', '/applecare', '/frontline', '/endorsements', '/storage-locator'];
@@ -322,6 +324,10 @@ export default function App() {
               <Route
                 path="/parts"
                 element={<PartsPage />}
+              />
+              <Route
+                path="/parts/reconcile"
+                element={<PartsReconcilePage />}
               />
             </Route>
           </Routes>

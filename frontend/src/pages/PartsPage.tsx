@@ -1346,6 +1346,9 @@ export default function PartsPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <Link to="/parts/reconcile" className="shrink-0 rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[10px] font-semibold text-[#3c3c43]">
+                  Reconcile
+                </Link>
                 {publicMode && (
                   <Link to="/login?returnTo=/parts" className="shrink-0 rounded-full bg-[#1d1d1f] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#333] transition-colors">
                     Sign in
